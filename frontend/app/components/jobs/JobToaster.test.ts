@@ -1,9 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
-import { bundlePortfolioRefreshJobs, friendlyJobMessage, unavailableNotice } from './JobToaster';
+import { bundlePortfolioRefreshJobs, friendlyJobMessage, portfolioJobMessage, unavailableNotice } from './JobToaster';
 import { isAirsBusy } from '../../../lib/stores/jobs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+describe('simple portfolio progress', () => {
+  it('does not run stock-price recalculation after refreshing the AIRS overview', () => {
+    const source = readFileSync(join('app', 'components', 'PortfolioOverviewPanel.tsx'), 'utf8');
+    expect(source).not.toContain('/api/airs/model-portfolios/refresh/job');
+  });
+  it.each([
+    'stored: TOPS_DEF_BEH. composition dated 2026-06-08, scanned 2026-10-30T10:07:54',
+    'USD 2000-01-03 → 2026-11-02 extending forward…',
+    'US11135F1012 AVGO USD Broadcom Inc.',
+    'YTD +2.5123% (contributions sum to +2.5123pp — reconciles)',
+  ])('keeps old server diagnostics out of the user message: %s', (message) => {
+    expect(portfolioJobMessage({ status: 'running', message }, 'en')).toBe('Updating portfolio data…');
+  });
+
+  it('shows the portfolio name and a clear activity', () => {
+    const message = 'Bustelberg portfolios · Bustelberg Offensief — Reading from AIRS…';
+    expect(portfolioJobMessage({ status: 'running', message }, 'en')).toBe(message);
+    expect(portfolioJobMessage({ status: 'running', message: 'Updating stock prices…' }, 'en'))
+      .toBe('Updating stock prices…');
+  });
+
+  it('reports failure without exposing a traceback or claiming success', () => {
+    expect(portfolioJobMessage({ status: 'failed', message: 'RuntimeError: bad price' }, 'en'))
+      .toBe('Some data could not be updated. Please try again.');
+  });
+});
 
 describe('AIRS busy receipts', () => {
   it.each(['refresh', 'scan'])('recognizes a refused %s so it cannot advance the workflow', (action) => {

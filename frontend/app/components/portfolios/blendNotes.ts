@@ -11,6 +11,7 @@
  */
 
 export type BlendNote = {
+  min_reporting_companies?: number | null;
   kind: string;
   reporting: number;          // holdings that carry this metric
   reporting_pct: number;      // their share of blended weight
@@ -38,6 +39,7 @@ export function noteFor(notes: Record<string, BlendNote> | undefined, codes: str
  * cause because a list of four contributing factors is not something a reader acts on.
  */
 export function whyNoLine(n: BlendNote): string {
+  if (n.min_reporting_companies != null) return `fewer than ${n.min_reporting_companies} companies have usable data in a common period.`;
   const rebase = n.dropped?.non_positive_base ?? 0;
   const namesFloor = n.names_floor_pct ?? n.floor_pct;
   const missesWeight = n.best_covered_pct < n.floor_pct;

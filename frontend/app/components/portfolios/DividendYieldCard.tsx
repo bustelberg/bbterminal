@@ -1,5 +1,7 @@
 'use client';
 
+import { savedBenchmarkSeries } from './benchmarkSnapshot';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -108,9 +110,9 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   const yieldByYr = useMemo(() => dividendYieldByYear(data?.rows ?? []), [data]);
   const covByYr = useMemo(() => coverageByYear(data?.rows ?? []), [data]);
 
-  const [benchData, benchErr] = useBenchInputs<DividendYieldInputs>('dividend-yield-inputs', benchTarget);
+  const [benchData, benchErr] = useBenchInputs<DividendYieldInputs>('dividend-yield-inputs', benchTarget, undefined, true);
   const benchByYr = useMemo(
-    () => (benchData ? dividendYieldByYear(benchData.rows) : null), [benchData]);
+    () => (benchData ? savedBenchmarkSeries(benchData, 'default', () => dividendYieldByYear(benchData.rows)) : null), [benchData]);
 
   const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
 
@@ -141,10 +143,10 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
             + 'moves every trading day — a trailing yield. Off, it follows the tab’s cadence.'} />
       </div>
 
-      {data == null && !err ? (
+      {(data == null || (!!benchTarget && benchData == null)) && !(err || benchErr) ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
-      ) : err ? (
-        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : (err || benchErr) ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : yieldByYr.size === 0 ? (
           <MissingFundamentals message="No dividend / price figures ingested to compute a yield."
             target={holdingsTarget} name={holdingsName} />

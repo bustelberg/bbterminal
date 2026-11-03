@@ -1,0 +1,2158 @@
+{
+  "rows": [
+    {
+      "isin": "CO0",
+      "name": "Company 0",
+      "weight_pct": 50,
+      "currency": "EUR",
+      "ticker": "T0",
+      "exchange": "XAMS",
+      "status": "ok",
+      "revenue": {
+        "2023": 100,
+        "2024": 120,
+        "2025": 130
+      },
+      "fcf": {
+        "2023": 10,
+        "2024": -5,
+        "2025": 30
+      },
+      "sbc": {
+        "2023": 1,
+        "2024": 2,
+        "2025": 0
+      },
+      "total_assets": {
+        "2023": 200,
+        "2024": 250,
+        "2025": 260
+      },
+      "goodwill": {
+        "2023": 20,
+        "2024": null,
+        "2025": 30
+      },
+      "long_term_debt": {
+        "2023": 30,
+        "2024": 40,
+        "2025": 50
+      },
+      "noncurrent_liabilities": {
+        "2023": 50,
+        "2024": 60,
+        "2025": 70
+      },
+      "total_equity": {
+        "2023": 100,
+        "2024": 120,
+        "2025": 140
+      },
+      "roic": {
+        "2023": 10,
+        "2024": 12,
+        "2025": 14
+      },
+      "operating_income": {
+        "2023": 20,
+        "2024": 25,
+        "2025": 30
+      },
+      "interest_expense": {
+        "2023": -2,
+        "2024": 0,
+        "2025": 3
+      },
+      "ocf": {
+        "2023": 20,
+        "2024": 25,
+        "2025": 35
+      },
+      "capex": {
+        "2023": -10,
+        "2024": -12,
+        "2025": -15
+      },
+      "gross_profit": {
+        "2023": 60,
+        "2024": 70,
+        "2025": 90
+      },
+      "net_income": {
+        "2023": 8,
+        "2024": 15,
+        "2025": 20
+      },
+      "market_cap": {
+        "2023": 1000,
+        "2024": 1200,
+        "2025": 1400
+      },
+      "div_ps": {
+        "2023": 0,
+        "2024": 2,
+        "2025": 3
+      },
+      "price_ps": {
+        "2023": 50,
+        "2024": 60,
+        "2025": 70
+      }
+    },
+    {
+      "isin": "CO1",
+      "name": "Company 1",
+      "weight_pct": 30,
+      "currency": "EUR",
+      "ticker": "T1",
+      "exchange": "XAMS",
+      "status": "ok",
+      "revenue": {
+        "2023": 200,
+        "2025": 260
+      },
+      "fcf": {
+        "2023": 20,
+        "2025": 60
+      },
+      "sbc": {
+        "2023": 2,
+        "2024": 4,
+        "2025": 0
+      },
+      "total_assets": {
+        "2023": 400,
+        "2024": 500,
+        "2025": 520
+      },
+      "goodwill": {
+        "2023": 40,
+        "2024": null,
+        "2025": 60
+      },
+      "long_term_debt": {
+        "2023": 60,
+        "2024": 80,
+        "2025": 100
+      },
+      "noncurrent_liabilities": {
+        "2023": 100,
+        "2024": 120,
+        "2025": 140
+      },
+      "total_equity": {
+        "2023": 200,
+        "2024": 240,
+        "2025": 280
+      },
+      "roic": {
+        "2023": 20,
+        "2024": 24,
+        "2025": 28
+      },
+      "operating_income": {
+        "2023": 40,
+        "2024": 50,
+        "2025": 60
+      },
+      "interest_expense": {
+        "2023": -4,
+        "2024": 0,
+        "2025": 6
+      },
+      "ocf": {
+        "2023": 40,
+        "2024": 50,
+        "2025": 70
+      },
+      "capex": {
+        "2023": -20,
+        "2024": -24,
+        "2025": -30
+      },
+      "gross_profit": {
+        "2023": 120,
+        "2024": 140,
+        "2025": 180
+      },
+      "net_income": {
+        "2023": 16,
+        "2024": 30,
+        "2025": 40
+      },
+      "market_cap": {
+        "2023": 2000,
+        "2024": 2400,
+        "2025": 2800
+      },
+      "div_ps": {
+        "2023": 0,
+        "2024": 4,
+        "2025": 6
+      },
+      "price_ps": {
+        "2023": 100,
+        "2024": 120,
+        "2025": 140
+      }
+    },
+    {
+      "isin": "CO2",
+      "name": "Company 2",
+      "weight_pct": 15,
+      "currency": "EUR",
+      "ticker": "T2",
+      "exchange": "XAMS",
+      "status": "ok",
+      "revenue": {
+        "2023": 300,
+        "2024": 360,
+        "2025": 390
+      },
+      "fcf": {
+        "2023": 30,
+        "2024": -15,
+        "2025": 90
+      },
+      "sbc": {},
+      "total_assets": {
+        "2023": 600,
+        "2024": 750,
+        "2025": 780
+      },
+      "goodwill": {
+        "2023": 60,
+        "2024": null,
+        "2025": 90
+      },
+      "long_term_debt": {
+        "2023": 90,
+        "2024": 120,
+        "2025": 150
+      },
+      "noncurrent_liabilities": {
+        "2023": 150,
+        "2024": 180,
+        "2025": null
+      },
+      "total_equity": {
+        "2023": 300,
+        "2024": 360,
+        "2025": 420
+      },
+      "roic": {
+        "2023": 30,
+        "2024": 36,
+        "2025": 42
+      },
+      "operating_income": {
+        "2023": 60,
+        "2024": 75,
+        "2025": 90
+      },
+      "interest_expense": {
+        "2023": -6,
+        "2024": 0,
+        "2025": 9
+      },
+      "ocf": {
+        "2023": 60,
+        "2024": 75,
+        "2025": 105
+      },
+      "capex": {
+        "2023": -30,
+        "2024": -36,
+        "2025": -45
+      },
+      "gross_profit": {},
+      "net_income": {
+        "2023": 24,
+        "2024": 45,
+        "2025": 60
+      },
+      "market_cap": {
+        "2023": 3000,
+        "2024": 3600,
+        "2025": 4200
+      },
+      "div_ps": {
+        "2023": 0,
+        "2024": 6,
+        "2025": 9
+      },
+      "price_ps": {
+        "2023": 150,
+        "2024": 180,
+        "2025": 210
+      }
+    },
+    {
+      "isin": "CO3",
+      "name": "Company 3",
+      "weight_pct": 5,
+      "currency": "EUR",
+      "ticker": "T3",
+      "exchange": "XAMS",
+      "status": "ok",
+      "revenue": {
+        "2023": 400,
+        "2024": 480,
+        "2025": 520
+      },
+      "fcf": {
+        "2023": 40,
+        "2024": -20,
+        "2025": 120
+      },
+      "sbc": {
+        "2023": 4,
+        "2024": 8,
+        "2025": 0
+      },
+      "total_assets": {
+        "2023": 800,
+        "2024": 1000,
+        "2025": 1040
+      },
+      "goodwill": {
+        "2023": 80,
+        "2024": null,
+        "2025": 120
+      },
+      "long_term_debt": {
+        "2023": 120,
+        "2024": 160,
+        "2025": 200
+      },
+      "noncurrent_liabilities": {
+        "2023": 200,
+        "2024": 240,
+        "2025": 280
+      },
+      "total_equity": {
+        "2023": 400,
+        "2024": 480,
+        "2025": 560
+      },
+      "roic": {
+        "2023": 40,
+        "2024": 48,
+        "2025": 56
+      },
+      "operating_income": {
+        "2023": 80,
+        "2024": 100,
+        "2025": 120
+      },
+      "interest_expense": {
+        "2023": -8,
+        "2024": 0,
+        "2025": 12
+      },
+      "ocf": {
+        "2023": 80,
+        "2024": 0,
+        "2025": 140
+      },
+      "capex": {
+        "2023": -40,
+        "2024": -48,
+        "2025": -60
+      },
+      "gross_profit": {
+        "2023": 240,
+        "2024": 280,
+        "2025": 360
+      },
+      "net_income": {
+        "2023": 32,
+        "2024": 60,
+        "2025": -5
+      },
+      "market_cap": {
+        "2023": 4000,
+        "2024": 4800,
+        "2025": 5600
+      },
+      "div_ps": {
+        "2023": 0,
+        "2024": 8,
+        "2025": 12
+      },
+      "price_ps": {
+        "2023": 200,
+        "2024": 240,
+        "2025": 280
+      }
+    }
+  ],
+  "caps": {
+    "CO0": {
+      "2023": 500,
+      "2024": 600,
+      "2025": 700
+    },
+    "CO1": {
+      "2023": 300,
+      "2024": 360,
+      "2025": 420
+    },
+    "CO2": {
+      "2023": 150,
+      "2024": 180,
+      "2025": 210
+    },
+    "CO3": {
+      "2023": 50,
+      "2024": 60,
+      "2025": 70
+    }
+  },
+  "snapshot": {
+    "version": 2,
+    "label": "AEX",
+    "cadence": "annual",
+    "growth": {
+      "metrics": [],
+      "coverage": {
+        "covered_pct": 100
+      },
+      "chart_statistics": {
+        "price_ps": {
+          "points": [],
+          "windows": {},
+          "full": {
+            "fit": {
+              "r2": null,
+              "cagr": null,
+              "n": 0,
+              "dropped": 0,
+              "slope": null,
+              "intercept": null
+            },
+            "cagr": {
+              "pct": null,
+              "reason": "fewer than two reported periods"
+            },
+            "fromX": null,
+            "toX": null
+          }
+        },
+        "eps_nri": {
+          "points": [],
+          "windows": {},
+          "full": {
+            "fit": {
+              "r2": null,
+              "cagr": null,
+              "n": 0,
+              "dropped": 0,
+              "slope": null,
+              "intercept": null
+            },
+            "cagr": {
+              "pct": null,
+              "reason": "fewer than two reported periods"
+            },
+            "fromX": null,
+            "toX": null
+          }
+        },
+        "revenue": {
+          "points": [],
+          "windows": {},
+          "full": {
+            "fit": {
+              "r2": null,
+              "cagr": null,
+              "n": 0,
+              "dropped": 0,
+              "slope": null,
+              "intercept": null
+            },
+            "cagr": {
+              "pct": null,
+              "reason": "fewer than two reported periods"
+            },
+            "fromX": null,
+            "toX": null
+          }
+        },
+        "fcf_ps": {
+          "points": [],
+          "windows": {},
+          "full": {
+            "fit": {
+              "r2": null,
+              "cagr": null,
+              "n": 0,
+              "dropped": 0,
+              "slope": null,
+              "intercept": null
+            },
+            "cagr": {
+              "pct": null,
+              "reason": "fewer than two reported periods"
+            },
+            "fromX": null,
+            "toX": null
+          }
+        },
+        "shares": {
+          "points": [],
+          "windows": {},
+          "full": {
+            "fit": {
+              "r2": null,
+              "cagr": null,
+              "n": 0,
+              "dropped": 0,
+              "slope": null,
+              "intercept": null
+            },
+            "cagr": {
+              "pct": null,
+              "reason": "fewer than two reported periods"
+            },
+            "fromX": null,
+            "toX": null
+          }
+        }
+      }
+    },
+    "series": {
+      "margin-inputs": {
+        "reported": {
+          "points": [
+            [
+              2023.0,
+              10.0
+            ],
+            [
+              2024.0,
+              0.08333333333333331
+            ],
+            [
+              2025.0,
+              23.076923076923077
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        },
+        "corrected": {
+          "points": [
+            [
+              2023.0,
+              9.15
+            ],
+            [
+              2024.0,
+              -1.1333333333333333
+            ],
+            [
+              2025.0,
+              23.076923076923077
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        }
+      },
+      "debt-ratio-inputs": {
+        "default": {
+          "points": [
+            [
+              2023.0,
+              16.666666666666668
+            ],
+            [
+              2024.0,
+              16.0
+            ],
+            [
+              2025.0,
+              21.73913043478261
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        }
+      },
+      "cash-return-inputs": {
+        "croic_reported": {
+          "points": [
+            [
+              2023.0,
+              6.666666666666667
+            ],
+            [
+              2024.0,
+              0.05555555555555569
+            ],
+            [
+              2025.0,
+              11.726190476190474
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 85.0
+            }
+          ]
+        },
+        "croic_corrected": {
+          "points": [
+            [
+              2023.0,
+              6.1
+            ],
+            [
+              2024.0,
+              -0.7555555555555558
+            ],
+            [
+              2025.0,
+              11.726190476190474
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 85.0
+            }
+          ]
+        },
+        "roic": {
+          "points": [
+            [
+              2023.0,
+              17.5
+            ],
+            [
+              2024.0,
+              21.0
+            ],
+            [
+              2025.0,
+              24.5
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        },
+        "invested_capital": {
+          "points": [
+            [
+              2023.0,
+              100.0
+            ],
+            [
+              2024.0,
+              120.0
+            ],
+            [
+              2025.0,
+              137.0
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 85.0
+            }
+          ]
+        }
+      },
+      "interest-burden-inputs": {
+        "default": {
+          "points": [
+            [
+              2023.0,
+              10.0
+            ],
+            [
+              2024.0,
+              0.0
+            ],
+            [
+              2025.0,
+              10.0
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        }
+      },
+      "sbc-ocf-inputs": {
+        "default": {
+          "points": [
+            [
+              2023.0,
+              5.0
+            ],
+            [
+              2024.0,
+              7.823529411764706
+            ],
+            [
+              2025.0,
+              0.0
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 3,
+              "weight_pct": 85.0
+            },
+            {
+              "period": "2024",
+              "companies": 2,
+              "weight_pct": 80.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 85.0
+            }
+          ]
+        }
+      },
+      "capex-margin-inputs": {
+        "default": {
+          "points": [
+            [
+              2023.0,
+              10.0
+            ],
+            [
+              2024.0,
+              10.0
+            ],
+            [
+              2025.0,
+              11.538461538461538
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        }
+      },
+      "gross-margin-inputs": {
+        "default": {
+          "points": [
+            [
+              2023.0,
+              60.0
+            ],
+            [
+              2024.0,
+              58.92156862745098
+            ],
+            [
+              2025.0,
+              69.23076923076923
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 3,
+              "weight_pct": 85.0
+            },
+            {
+              "period": "2024",
+              "companies": 2,
+              "weight_pct": 55.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 85.0
+            }
+          ]
+        }
+      },
+      "cash-conversion-inputs": {
+        "reported": {
+          "points": [
+            [
+              2023.0,
+              125.0
+            ],
+            [
+              2024.0,
+              14.166666666666666
+            ],
+            [
+              2025.0,
+              140.83333333333331
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 95.0
+            }
+          ]
+        },
+        "corrected": {
+          "points": [
+            [
+              2023.0,
+              114.375
+            ],
+            [
+              2024.0,
+              3.0833333333333335
+            ],
+            [
+              2025.0,
+              140.16666666666669
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 3,
+              "weight_pct": 95.0
+            }
+          ]
+        }
+      },
+      "fcf-sbc-yield-inputs": {
+        "reported": {
+          "points": [
+            [
+              2023.0,
+              1.0
+            ],
+            [
+              2024.0,
+              0.008333333333333333
+            ],
+            [
+              2025.0,
+              2.142857142857143
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        },
+        "corrected": {
+          "points": [
+            [
+              2023.0,
+              0.915
+            ],
+            [
+              2024.0,
+              -0.11333333333333333
+            ],
+            [
+              2025.0,
+              2.142857142857143
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 3,
+              "weight_pct": 70.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        }
+      },
+      "dividend-yield-inputs": {
+        "default": {
+          "points": [
+            [
+              2023.0,
+              0.0
+            ],
+            [
+              2024.0,
+              3.3333333333333335
+            ],
+            [
+              2025.0,
+              4.285714285714286
+            ]
+          ],
+          "coverage": [
+            {
+              "period": "2023",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2024",
+              "companies": 4,
+              "weight_pct": 100.0
+            },
+            {
+              "period": "2025",
+              "companies": 4,
+              "weight_pct": 100.0
+            }
+          ]
+        }
+      }
+    },
+    "policy": {
+      "minimum_companies": null,
+      "minimum_percentage": 50
+    }
+  },
+  "quarterly": {
+    "rows": [
+      {
+        "isin": "CO0",
+        "name": "Company 0",
+        "weight_pct": 50,
+        "currency": "EUR",
+        "ticker": "T0",
+        "exchange": "XAMS",
+        "status": "ok",
+        "revenue": {
+          "2024-Q1": 100,
+          "2024-Q2": 120,
+          "2024-Q3": 130
+        },
+        "fcf": {
+          "2024-Q1": 10,
+          "2024-Q2": -5,
+          "2024-Q3": 30
+        },
+        "sbc": {
+          "2024-Q1": 1,
+          "2024-Q2": 2,
+          "2024-Q3": 0
+        },
+        "total_assets": {
+          "2024-Q1": 200,
+          "2024-Q2": 250,
+          "2024-Q3": 260
+        },
+        "goodwill": {
+          "2024-Q1": 20,
+          "2024-Q2": null,
+          "2024-Q3": 30
+        },
+        "long_term_debt": {
+          "2024-Q1": 30,
+          "2024-Q2": 40,
+          "2024-Q3": 50
+        },
+        "noncurrent_liabilities": {
+          "2024-Q1": 50,
+          "2024-Q2": 60,
+          "2024-Q3": 70
+        },
+        "total_equity": {
+          "2024-Q1": 100,
+          "2024-Q2": 120,
+          "2024-Q3": 140
+        },
+        "roic": {
+          "2024-Q1": 10,
+          "2024-Q2": 12,
+          "2024-Q3": 14
+        },
+        "operating_income": {
+          "2024-Q1": 20,
+          "2024-Q2": 25,
+          "2024-Q3": 30
+        },
+        "interest_expense": {
+          "2024-Q1": -2,
+          "2024-Q2": 0,
+          "2024-Q3": 3
+        },
+        "ocf": {
+          "2024-Q1": 20,
+          "2024-Q2": 25,
+          "2024-Q3": 35
+        },
+        "capex": {
+          "2024-Q1": -10,
+          "2024-Q2": -12,
+          "2024-Q3": -15
+        },
+        "gross_profit": {
+          "2024-Q1": 60,
+          "2024-Q2": 70,
+          "2024-Q3": 90
+        },
+        "net_income": {
+          "2024-Q1": 8,
+          "2024-Q2": 15,
+          "2024-Q3": 20
+        },
+        "market_cap": {
+          "2024-Q1": 1000,
+          "2024-Q2": 1200,
+          "2024-Q3": 1400
+        },
+        "div_ps": {
+          "2024-Q1": 0,
+          "2024-Q2": 2,
+          "2024-Q3": 3
+        },
+        "price_ps": {
+          "2024-Q1": 50,
+          "2024-Q2": 60,
+          "2024-Q3": 70
+        }
+      },
+      {
+        "isin": "CO1",
+        "name": "Company 1",
+        "weight_pct": 30,
+        "currency": "EUR",
+        "ticker": "T1",
+        "exchange": "XAMS",
+        "status": "ok",
+        "revenue": {
+          "2024-Q1": 200,
+          "2024-Q3": 260
+        },
+        "fcf": {
+          "2024-Q1": 20,
+          "2024-Q3": 60
+        },
+        "sbc": {
+          "2024-Q1": 2,
+          "2024-Q2": 4,
+          "2024-Q3": 0
+        },
+        "total_assets": {
+          "2024-Q1": 400,
+          "2024-Q2": 500,
+          "2024-Q3": 520
+        },
+        "goodwill": {
+          "2024-Q1": 40,
+          "2024-Q2": null,
+          "2024-Q3": 60
+        },
+        "long_term_debt": {
+          "2024-Q1": 60,
+          "2024-Q2": 80,
+          "2024-Q3": 100
+        },
+        "noncurrent_liabilities": {
+          "2024-Q1": 100,
+          "2024-Q2": 120,
+          "2024-Q3": 140
+        },
+        "total_equity": {
+          "2024-Q1": 200,
+          "2024-Q2": 240,
+          "2024-Q3": 280
+        },
+        "roic": {
+          "2024-Q1": 20,
+          "2024-Q2": 24,
+          "2024-Q3": 28
+        },
+        "operating_income": {
+          "2024-Q1": 40,
+          "2024-Q2": 50,
+          "2024-Q3": 60
+        },
+        "interest_expense": {
+          "2024-Q1": -4,
+          "2024-Q2": 0,
+          "2024-Q3": 6
+        },
+        "ocf": {
+          "2024-Q1": 40,
+          "2024-Q2": 50,
+          "2024-Q3": 70
+        },
+        "capex": {
+          "2024-Q1": -20,
+          "2024-Q2": -24,
+          "2024-Q3": -30
+        },
+        "gross_profit": {
+          "2024-Q1": 120,
+          "2024-Q2": 140,
+          "2024-Q3": 180
+        },
+        "net_income": {
+          "2024-Q1": 16,
+          "2024-Q2": 30,
+          "2024-Q3": 40
+        },
+        "market_cap": {
+          "2024-Q1": 2000,
+          "2024-Q2": 2400,
+          "2024-Q3": 2800
+        },
+        "div_ps": {
+          "2024-Q1": 0,
+          "2024-Q2": 4,
+          "2024-Q3": 6
+        },
+        "price_ps": {
+          "2024-Q1": 100,
+          "2024-Q2": 120,
+          "2024-Q3": 140
+        }
+      },
+      {
+        "isin": "CO2",
+        "name": "Company 2",
+        "weight_pct": 15,
+        "currency": "EUR",
+        "ticker": "T2",
+        "exchange": "XAMS",
+        "status": "ok",
+        "revenue": {
+          "2024-Q1": 300,
+          "2024-Q2": 360,
+          "2024-Q3": 390
+        },
+        "fcf": {
+          "2024-Q1": 30,
+          "2024-Q2": -15,
+          "2024-Q3": 90
+        },
+        "sbc": {},
+        "total_assets": {
+          "2024-Q1": 600,
+          "2024-Q2": 750,
+          "2024-Q3": 780
+        },
+        "goodwill": {
+          "2024-Q1": 60,
+          "2024-Q2": null,
+          "2024-Q3": 90
+        },
+        "long_term_debt": {
+          "2024-Q1": 90,
+          "2024-Q2": 120,
+          "2024-Q3": 150
+        },
+        "noncurrent_liabilities": {
+          "2024-Q1": 150,
+          "2024-Q2": 180,
+          "2024-Q3": null
+        },
+        "total_equity": {
+          "2024-Q1": 300,
+          "2024-Q2": 360,
+          "2024-Q3": 420
+        },
+        "roic": {
+          "2024-Q1": 30,
+          "2024-Q2": 36,
+          "2024-Q3": 42
+        },
+        "operating_income": {
+          "2024-Q1": 60,
+          "2024-Q2": 75,
+          "2024-Q3": 90
+        },
+        "interest_expense": {
+          "2024-Q1": -6,
+          "2024-Q2": 0,
+          "2024-Q3": 9
+        },
+        "ocf": {
+          "2024-Q1": 60,
+          "2024-Q2": 75,
+          "2024-Q3": 105
+        },
+        "capex": {
+          "2024-Q1": -30,
+          "2024-Q2": -36,
+          "2024-Q3": -45
+        },
+        "gross_profit": {},
+        "net_income": {
+          "2024-Q1": 24,
+          "2024-Q2": 45,
+          "2024-Q3": 60
+        },
+        "market_cap": {
+          "2024-Q1": 3000,
+          "2024-Q2": 3600,
+          "2024-Q3": 4200
+        },
+        "div_ps": {
+          "2024-Q1": 0,
+          "2024-Q2": 6,
+          "2024-Q3": 9
+        },
+        "price_ps": {
+          "2024-Q1": 150,
+          "2024-Q2": 180,
+          "2024-Q3": 210
+        }
+      },
+      {
+        "isin": "CO3",
+        "name": "Company 3",
+        "weight_pct": 5,
+        "currency": "EUR",
+        "ticker": "T3",
+        "exchange": "XAMS",
+        "status": "ok",
+        "revenue": {
+          "2024-Q1": 400,
+          "2024-Q2": 480,
+          "2024-Q3": 520
+        },
+        "fcf": {
+          "2024-Q1": 40,
+          "2024-Q2": -20,
+          "2024-Q3": 120
+        },
+        "sbc": {
+          "2024-Q1": 4,
+          "2024-Q2": 8,
+          "2024-Q3": 0
+        },
+        "total_assets": {
+          "2024-Q1": 800,
+          "2024-Q2": 1000,
+          "2024-Q3": 1040
+        },
+        "goodwill": {
+          "2024-Q1": 80,
+          "2024-Q2": null,
+          "2024-Q3": 120
+        },
+        "long_term_debt": {
+          "2024-Q1": 120,
+          "2024-Q2": 160,
+          "2024-Q3": 200
+        },
+        "noncurrent_liabilities": {
+          "2024-Q1": 200,
+          "2024-Q2": 240,
+          "2024-Q3": 280
+        },
+        "total_equity": {
+          "2024-Q1": 400,
+          "2024-Q2": 480,
+          "2024-Q3": 560
+        },
+        "roic": {
+          "2024-Q1": 40,
+          "2024-Q2": 48,
+          "2024-Q3": 56
+        },
+        "operating_income": {
+          "2024-Q1": 80,
+          "2024-Q2": 100,
+          "2024-Q3": 120
+        },
+        "interest_expense": {
+          "2024-Q1": -8,
+          "2024-Q2": 0,
+          "2024-Q3": 12
+        },
+        "ocf": {
+          "2024-Q1": 80,
+          "2024-Q2": 0,
+          "2024-Q3": 140
+        },
+        "capex": {
+          "2024-Q1": -40,
+          "2024-Q2": -48,
+          "2024-Q3": -60
+        },
+        "gross_profit": {
+          "2024-Q1": 240,
+          "2024-Q2": 280,
+          "2024-Q3": 360
+        },
+        "net_income": {
+          "2024-Q1": 32,
+          "2024-Q2": 60,
+          "2024-Q3": -5
+        },
+        "market_cap": {
+          "2024-Q1": 4000,
+          "2024-Q2": 4800,
+          "2024-Q3": 5600
+        },
+        "div_ps": {
+          "2024-Q1": 0,
+          "2024-Q2": 8,
+          "2024-Q3": 12
+        },
+        "price_ps": {
+          "2024-Q1": 200,
+          "2024-Q2": 240,
+          "2024-Q3": 280
+        }
+      }
+    ],
+    "caps": {
+      "CO0": {
+        "2024-Q1": 500,
+        "2024-Q2": 600,
+        "2024-Q3": 700
+      },
+      "CO1": {
+        "2024-Q1": 300,
+        "2024-Q2": 360,
+        "2024-Q3": 420
+      },
+      "CO2": {
+        "2024-Q1": 150,
+        "2024-Q2": 180,
+        "2024-Q3": 210
+      },
+      "CO3": {
+        "2024-Q1": 50,
+        "2024-Q2": 60,
+        "2024-Q3": 70
+      }
+    },
+    "snapshot": {
+      "version": 2,
+      "label": "AEX",
+      "cadence": "quarterly",
+      "growth": {
+        "metrics": [],
+        "coverage": {
+          "covered_pct": 100
+        },
+        "chart_statistics": {
+          "price_ps": {
+            "points": [],
+            "windows": {},
+            "full": {
+              "fit": {
+                "r2": null,
+                "cagr": null,
+                "n": 0,
+                "dropped": 0,
+                "slope": null,
+                "intercept": null
+              },
+              "cagr": {
+                "pct": null,
+                "reason": "fewer than two reported periods"
+              },
+              "fromX": null,
+              "toX": null
+            }
+          },
+          "eps_nri": {
+            "points": [],
+            "windows": {},
+            "full": {
+              "fit": {
+                "r2": null,
+                "cagr": null,
+                "n": 0,
+                "dropped": 0,
+                "slope": null,
+                "intercept": null
+              },
+              "cagr": {
+                "pct": null,
+                "reason": "fewer than two reported periods"
+              },
+              "fromX": null,
+              "toX": null
+            }
+          },
+          "revenue": {
+            "points": [],
+            "windows": {},
+            "full": {
+              "fit": {
+                "r2": null,
+                "cagr": null,
+                "n": 0,
+                "dropped": 0,
+                "slope": null,
+                "intercept": null
+              },
+              "cagr": {
+                "pct": null,
+                "reason": "fewer than two reported periods"
+              },
+              "fromX": null,
+              "toX": null
+            }
+          },
+          "fcf_ps": {
+            "points": [],
+            "windows": {},
+            "full": {
+              "fit": {
+                "r2": null,
+                "cagr": null,
+                "n": 0,
+                "dropped": 0,
+                "slope": null,
+                "intercept": null
+              },
+              "cagr": {
+                "pct": null,
+                "reason": "fewer than two reported periods"
+              },
+              "fromX": null,
+              "toX": null
+            }
+          },
+          "shares": {
+            "points": [],
+            "windows": {},
+            "full": {
+              "fit": {
+                "r2": null,
+                "cagr": null,
+                "n": 0,
+                "dropped": 0,
+                "slope": null,
+                "intercept": null
+              },
+              "cagr": {
+                "pct": null,
+                "reason": "fewer than two reported periods"
+              },
+              "fromX": null,
+              "toX": null
+            }
+          }
+        }
+      },
+      "series": {
+        "margin-inputs": {
+          "reported": {
+            "points": [
+              [
+                2024.0,
+                10.0
+              ],
+              [
+                2024.25,
+                0.08333333333333331
+              ],
+              [
+                2024.5,
+                23.076923076923077
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          },
+          "corrected": {
+            "points": [
+              [
+                2024.0,
+                9.15
+              ],
+              [
+                2024.25,
+                -1.1333333333333333
+              ],
+              [
+                2024.5,
+                23.076923076923077
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          }
+        },
+        "debt-ratio-inputs": {
+          "default": {
+            "points": [
+              [
+                2024.0,
+                16.666666666666668
+              ],
+              [
+                2024.25,
+                16.0
+              ],
+              [
+                2024.5,
+                21.73913043478261
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          }
+        },
+        "cash-return-inputs": {
+          "croic_reported": {
+            "points": [
+              [
+                2024.0,
+                6.666666666666667
+              ],
+              [
+                2024.25,
+                0.05555555555555569
+              ],
+              [
+                2024.5,
+                11.726190476190474
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 85.0
+              }
+            ]
+          },
+          "croic_corrected": {
+            "points": [
+              [
+                2024.0,
+                6.1
+              ],
+              [
+                2024.25,
+                -0.7555555555555558
+              ],
+              [
+                2024.5,
+                11.726190476190474
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 85.0
+              }
+            ]
+          },
+          "roic": {
+            "points": [
+              [
+                2024.0,
+                17.5
+              ],
+              [
+                2024.25,
+                21.0
+              ],
+              [
+                2024.5,
+                24.5
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          },
+          "invested_capital": {
+            "points": [
+              [
+                2024.0,
+                100.0
+              ],
+              [
+                2024.25,
+                120.0
+              ],
+              [
+                2024.5,
+                137.0
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 85.0
+              }
+            ]
+          }
+        },
+        "interest-burden-inputs": {
+          "default": {
+            "points": [
+              [
+                2024.0,
+                10.0
+              ],
+              [
+                2024.25,
+                0.0
+              ],
+              [
+                2024.5,
+                10.0
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          }
+        },
+        "sbc-ocf-inputs": {
+          "default": {
+            "points": [
+              [
+                2024.0,
+                5.0
+              ],
+              [
+                2024.25,
+                7.823529411764706
+              ],
+              [
+                2024.5,
+                0.0
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 3,
+                "weight_pct": 85.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 2,
+                "weight_pct": 80.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 85.0
+              }
+            ]
+          }
+        },
+        "capex-margin-inputs": {
+          "default": {
+            "points": [
+              [
+                2024.0,
+                10.0
+              ],
+              [
+                2024.25,
+                10.0
+              ],
+              [
+                2024.5,
+                11.538461538461538
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          }
+        },
+        "gross-margin-inputs": {
+          "default": {
+            "points": [
+              [
+                2024.0,
+                60.0
+              ],
+              [
+                2024.25,
+                58.92156862745098
+              ],
+              [
+                2024.5,
+                69.23076923076923
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 3,
+                "weight_pct": 85.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 2,
+                "weight_pct": 55.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 85.0
+              }
+            ]
+          }
+        },
+        "cash-conversion-inputs": {
+          "reported": {
+            "points": [
+              [
+                2024.0,
+                125.0
+              ],
+              [
+                2024.25,
+                14.166666666666666
+              ],
+              [
+                2024.5,
+                140.83333333333331
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 95.0
+              }
+            ]
+          },
+          "corrected": {
+            "points": [
+              [
+                2024.0,
+                114.375
+              ],
+              [
+                2024.25,
+                3.0833333333333335
+              ],
+              [
+                2024.5,
+                140.16666666666669
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 3,
+                "weight_pct": 95.0
+              }
+            ]
+          }
+        },
+        "fcf-sbc-yield-inputs": {
+          "reported": {
+            "points": [
+              [
+                2024.0,
+                1.0
+              ],
+              [
+                2024.25,
+                0.008333333333333333
+              ],
+              [
+                2024.5,
+                2.142857142857143
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          },
+          "corrected": {
+            "points": [
+              [
+                2024.0,
+                0.915
+              ],
+              [
+                2024.25,
+                -0.11333333333333333
+              ],
+              [
+                2024.5,
+                2.142857142857143
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 3,
+                "weight_pct": 70.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          }
+        },
+        "dividend-yield-inputs": {
+          "default": {
+            "points": [
+              [
+                2024.0,
+                0.0
+              ],
+              [
+                2024.25,
+                3.3333333333333335
+              ],
+              [
+                2024.5,
+                4.285714285714286
+              ]
+            ],
+            "coverage": [
+              {
+                "period": "2024-Q1",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q2",
+                "companies": 4,
+                "weight_pct": 100.0
+              },
+              {
+                "period": "2024-Q3",
+                "companies": 4,
+                "weight_pct": 100.0
+              }
+            ]
+          }
+        }
+      },
+      "policy": {
+        "minimum_companies": null,
+        "minimum_percentage": 50
+      }
+    }
+  }
+}

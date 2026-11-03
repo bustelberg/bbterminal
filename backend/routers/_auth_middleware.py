@@ -207,6 +207,7 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/fcf-sbc-yield-inputs",
     "/api/earnings/fundamental-blend",
     "/api/earnings/fundamental-blend-metrics",
+    "/api/earnings/chart-bundle",
     "/api/earnings/fundamental-blend-metrics/stream",
     "/api/earnings/fundamental-coverage",
     "/api/earnings/gross-margin-inputs",
@@ -284,12 +285,14 @@ _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Overview's stale Yahoo price checks run after the expanded row renders from its cache.
     re.compile(r"^/api/airs/accounts/[^/]+/isins/refresh-prices/job$"),
     re.compile(r"^/api/airs/accounts/[^/]+/isins/[^/]+/refresh-price/job$"),
+    re.compile(r"^/api/airs/sold-holdings/[^/]+/refresh-price/job$"),
     # Analyse modal → the fundamentals fill over a PAIRED model portfolio's holdings.
     re.compile(r"^/api/airs/model-portfolios/\d+/fundamentals/ingest/job$"),
     # Benchmarks → per-index Refresh and "Refresh all" (constituents, caps, prices).
     re.compile(r"^/api/benchmarks/index/[^/]+/refresh/job$"),
     # Benchmarks → the fundamentals half of the same button, and the grid's "All N" fill.
     re.compile(r"^/api/benchmarks/index/[^/]+/fundamentals/ingest/job$"),
+    re.compile(r"^/api/benchmarks/index/[^/]+/fundamentals/repair/job$"),
     # Benchmarks grid → one constituent's Fetch cell.
     re.compile(r"^/api/benchmarks/company/\d+/fundamentals/ingest/job$"),
     #  And the stop. Every path above starts work that runs for minutes and reports through the

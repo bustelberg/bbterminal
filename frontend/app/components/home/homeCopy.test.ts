@@ -87,7 +87,6 @@ describe('the two languages cannot drift', () => {
     for (const lang of LANGS) {
       const c = HOME_COPY[lang];
       expect(c.welcome.trim()).not.toBe('');
-      expect(c.intro.trim()).not.toBe('');
       for (const href of ORDER) {
         expect(c.tiles[href].label.trim(), `${lang} ${href} label`).not.toBe('');
         expect(c.tiles[href].description.trim(), `${lang} ${href} description`).not.toBe('');
@@ -105,7 +104,6 @@ describe('the two languages cannot drift', () => {
         .not.toBe(HOME_COPY.en.tiles[href].description);
     }
     expect(HOME_COPY.nl.welcome).not.toBe(HOME_COPY.en.welcome);
-    expect(HOME_COPY.nl.intro).not.toBe(HOME_COPY.en.intro);
   });
 
   it(' keeps product names untranslated — they are what the things are CALLED', () => {

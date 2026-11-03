@@ -1,0 +1,146 @@
+[
+  {
+    "name": "annual",
+    "points": [
+      {
+        "year": 2017,
+        "value": 100
+      },
+      {
+        "year": 2019,
+        "value": 144
+      },
+      {
+        "year": 2025,
+        "value": 500
+      }
+    ],
+    "statistics": {
+      "fit": {
+        "r2": 0.99938536382774,
+        "cagr": 0.22461972650207288,
+        "n": 3,
+        "dropped": 0,
+        "slope": 0.20263036845890156,
+        "intercept": -404.117690548472
+      },
+      "cagr": {
+        "pct": 22.284454499385188,
+        "from": "2017",
+        "to": "2025",
+        "years": 8,
+        "fromValue": 100,
+        "toValue": 500
+      },
+      "fromX": 2017,
+      "toX": 2025
+    }
+  },
+  {
+    "name": "quarterly",
+    "points": [
+      {
+        "year": 2024,
+        "value": 100
+      },
+      {
+        "year": 2024.25,
+        "value": 105
+      },
+      {
+        "year": 2024.5,
+        "value": 115
+      }
+    ],
+    "statistics": {
+      "fit": {
+        "r2": 0.970531573591425,
+        "cagr": 0.3224999999999992,
+        "n": 3,
+        "dropped": 0,
+        "slope": 0.27952388475031675,
+        "intercept": -561.1582028176591
+      },
+      "cagr": {
+        "pct": 32.24999999999998,
+        "from": "2024",
+        "to": "2024 Q3",
+        "years": 0.5,
+        "fromValue": 100,
+        "toValue": 115
+      },
+      "fromX": 2024,
+      "toX": 2024.5
+    }
+  },
+  {
+    "name": "flat",
+    "points": [
+      {
+        "year": 2017,
+        "value": 100
+      },
+      {
+        "year": 2018,
+        "value": 100
+      },
+      {
+        "year": 2020,
+        "value": 100
+      }
+    ],
+    "statistics": {
+      "fit": {
+        "r2": 1,
+        "cagr": 0.0,
+        "n": 3,
+        "dropped": 0,
+        "slope": 0.0,
+        "intercept": 4.605170185988092
+      },
+      "cagr": {
+        "pct": 0.0,
+        "from": "2017",
+        "to": "2020",
+        "years": 3,
+        "fromValue": 100,
+        "toValue": 100
+      },
+      "fromX": 2017,
+      "toX": 2020
+    }
+  },
+  {
+    "name": "loss",
+    "points": [
+      {
+        "year": 2021,
+        "value": -5
+      },
+      {
+        "year": 2022,
+        "value": 0
+      },
+      {
+        "year": 2023,
+        "value": 10
+      }
+    ],
+    "statistics": {
+      "fit": {
+        "r2": null,
+        "cagr": null,
+        "n": 1,
+        "dropped": 2,
+        "slope": null,
+        "intercept": null
+      },
+      "cagr": {
+        "pct": null,
+        "reason": "the series is not positive at both ends, so a compound growth rate is undefined"
+      },
+      "fromX": 2021,
+      "toX": 2023
+    }
+  }
+]

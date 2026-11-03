@@ -1,5 +1,7 @@
 'use client';
 
+import { savedBenchmarkSeries } from './benchmarkSnapshot';
+
 import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -84,11 +86,11 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     return { points: [...m].map(([year, value]) => ({ year, value })).sort((a, b) => a.year - b.year), currency: r?.currency ?? null, isIndex: false };
   }, [data, isAgg]);
 
-  const [benchData, benchErr] = useBenchInputs<CashReturnInputs>('cash-return-inputs', benchTarget);
+  const [benchData, benchErr] = useBenchInputs<CashReturnInputs>('cash-return-inputs', benchTarget, undefined, true);
   /** The index's own blended series, left RAW — `rebaseSeries` below indexes both lines together.
    *  It used to be pre-scaled onto ours via `rebaseOnto`; doing both would transform it twice. */
   const benchByYr = useMemo(
-    () => (benchData ? investedCapitalIndexByYear(benchData.rows) : null), [benchData]);
+    () => (benchData ? savedBenchmarkSeries(benchData, 'invested_capital', () => investedCapitalIndexByYear(benchData.rows)) : null), [benchData]);
 
   /**
    *  The window both tiles are measured over — see `sharedSpan`/`CardStats`. The R² and CAGR
@@ -197,10 +199,10 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <CardHeading chartKey="investedCapital" />
 
-      {data == null && !err ? (
+      {(data == null || (!!benchTarget && benchData == null)) && !(err || benchErr) ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
-      ) : err ? (
-        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : (err || benchErr) ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : points.length === 0 ? (
         <MissingFundamentals message={`No invested-capital figures ingested for this ${isAgg ? 'portfolio' : 'company'}.`}
           target={holdingsTarget} name={holdingsName} />

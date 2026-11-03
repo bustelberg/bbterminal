@@ -67,13 +67,15 @@ def test_noop_fleet_uses_visible_cached_price_checks_and_honours_cancel(monkeypa
 def test_refresh_downloads_only_selected_stale_accounts_and_counts_actual_work(monkeypatch, force):
     accounts = configured_accounts()
     discovered = [*accounts, *(f'OUTSIDE_{i}' for i in range(26))]
-    scans, checks, progress = [], [], []
+    scans, checks, progress, completed = [], [], [], []
+    saved = set()
     monkeypatch.setattr(V, '_discover_portfolios', lambda: discovered)
     monkeypatch.setattr(V, '_roster_verdicts', lambda: {accounts[0].lower(): {
         'reports_at': datetime.now(timezone.utc).isoformat(), 'reports_ok': list(V.REPORTS)}})
-    monkeypatch.setattr(V, '_record_reports', lambda *a: None)
+    monkeypatch.setattr(V, '_record_reports', lambda outcomes, stamp: saved.update(outcomes))
     monkeypatch.setattr('routers._airs_accounts._holding_counts', lambda: pytest.fail('configured portfolios must not be rejected by size'))
     def scan(name, *a, **kw):
+        assert completed == scans, 'publish the previous row before starting the next account'
         scans.append(name)
         kw['on_report'](name, 'Rendement', 'ok', 'stored')
         return dict(reports_ok=list(V.REPORTS), as_of='2026-10-31', holdings=1,
@@ -81,8 +83,13 @@ def test_refresh_downloads_only_selected_stale_accounts_and_counts_actual_work(m
     monkeypatch.setattr(V, 'scan_one', scan)
     monkeypatch.setattr('routers._airs_price_check.refresh_price_checks',
                         lambda names, **kw: checks.extend(names) or {'errors': {}})
+    def account_done(done, total, name):
+        assert name in saved, 'the row must not update before its report receipt is saved'
+        assert done == len(scans)
+        completed.append(name)
     result = V.run_airs_vermogen_refresh_sync(force=force, dashboard_only=True,
-                                           on_step=lambda done, total, message: progress.append((done, total, message)))
+        on_step=lambda done, total, message: progress.append((done, total, message)),
+        on_account_done=account_done)
     assert result['status'] == 'ok'
     assert result['portfolios_found'] == result['complete_accounts'] == 22
     assert result['portfolios_discovered'] == 48
@@ -90,6 +97,7 @@ def test_refresh_downloads_only_selected_stale_accounts_and_counts_actual_work(m
     assert len(scans) == (22 if force else 21)
     assert set(scans) <= set(accounts)
     assert scans == sorted(scans, key=scope.dashboard_refresh_key)
+    assert completed == scans
     assert scope.key(scans[0]) == 'bus20offdyn'
     assert set(checks) == set(accounts)
     starts = [step for step in result['log'] if step['kind'] == 'account_start']

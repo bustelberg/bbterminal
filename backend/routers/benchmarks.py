@@ -32,6 +32,24 @@ from ingest.constants import DATA_CUTOFF
 
 router = APIRouter(tags=["benchmarks"])
 
+
+@router.get('/api/benchmarks/index/{label}/chart-snapshot')
+async def benchmark_chart_snapshot(label: str, request: Request,
+                                   cadence: str = Query('annual', pattern='^(annual|quarterly)$')):
+    """One stored chart bundle; never query company inputs or calculate on a page read."""
+    if label not in {'ACWI', 'SP500', 'AEX'}:
+        raise HTTPException(404, 'Unknown benchmark')
+    from routers._benchmark_snapshots import read
+    payload = await asyncio.to_thread(read, label, cadence, compact=True)
+    if payload is None:
+        raise HTTPException(503, 'The saved benchmark charts are being prepared. Please try again shortly.')
+    blob = await asyncio.to_thread(_blend_cache._encode, payload)
+    headers = {'X-BB-Benchmark-Built-At': payload['built_at'], 'Cache-Control': 'private, no-cache'}
+    if 'gzip' in request.headers.get('accept-encoding', '').lower():
+        headers['Content-Encoding'] = 'gzip'
+        return Response(content=blob, media_type='application/json', headers=headers)
+    return Response(content=gzip.decompress(blob), media_type='application/json', headers=headers)
+
 @router.get("/api/benchmarks/etf-comparison", response_model=EtfComparisonResult)
 async def etf_comparison(
     start: date,
@@ -1155,6 +1173,17 @@ async def benchmark_refresh_job(label: str):
 
     job, reused = job_registry.start("benchmark.refresh", label, _work)
     return {"job_id": job.id, "label": label, "already_running": reused}
+
+
+@router.post("/api/benchmarks/index/{label}/fundamentals/repair/job", response_model=JobStarted)
+async def repair_benchmark_fundamentals_job(label: str, cadence: str = 'annual'):
+    import jobs as job_registry
+    from routers._benchmark_repair import repair
+    if label not in {'ACWI', 'SP500', 'AEX'} or cadence not in {'annual', 'quarterly'}:
+        raise HTTPException(422, 'Unknown benchmark or period setting')
+    job, reused = job_registry.start('fundamentals.benchmark-repair', f'{label}:{cadence}',
+                                    lambda ctx: repair(ctx, label, cadence))
+    return {'job_id': job.id, 'label': label, 'already_running': reused}
 
 
 @router.post("/api/benchmarks/index/{label}/fundamentals/ingest/job",

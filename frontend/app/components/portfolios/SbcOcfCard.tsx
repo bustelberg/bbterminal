@@ -1,5 +1,7 @@
 'use client';
 
+import { savedBenchmarkSeries } from './benchmarkSnapshot';
+
 import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -66,9 +68,9 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
 
   const ratioByYr = useMemo(() => sbcOcfByYear(data?.rows ?? []), [data]);
 
-  const [benchData, benchErr] = useBenchInputs<SbcOcfInputs>('sbc-ocf-inputs', benchTarget);
+  const [benchData, benchErr] = useBenchInputs<SbcOcfInputs>('sbc-ocf-inputs', benchTarget, undefined, true);
   const benchByYr = useMemo(
-    () => (benchData ? sbcOcfByYear(benchData.rows) : null), [benchData]);
+    () => (benchData ? savedBenchmarkSeries(benchData, 'default', () => sbcOcfByYear(benchData.rows)) : null), [benchData]);
 
   const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
 
@@ -89,10 +91,10 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <CardHeading chartKey="sbcOcf" />
 
-      {data == null && !err ? (
+      {(data == null || (!!benchTarget && benchData == null)) && !(err || benchErr) ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
-      ) : err ? (
-        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : (err || benchErr) ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : ratioByYr.size === 0 ? (
           <MissingFundamentals message="No SBC / operating-cash-flow figures ingested to compute a ratio."
             target={holdingsTarget} name={holdingsName} />

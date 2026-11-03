@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
-import { blendLoadingLabel, loadBlendMetrics, type BlendProgress } from './blendMetrics';
+import { blendLoadingLabel } from './blendMetrics';
 import MetricGrowthCard, { type MetricCfg } from './MetricGrowthCard';
 import MarginCard from './MarginCard';
 import CashReturnCard from './CashReturnCard';
@@ -18,11 +19,12 @@ import FcfSbcYieldCard from './FcfSbcYieldCard';
 import DividendYieldCard from './DividendYieldCard';
 import { type BlendNote } from './blendNotes';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
-import { countFor, coverageCount, memberCountLine, type MemberCount } from './memberCounts';
+import { type MemberCount } from './memberCounts';
 import { benchBody, type BenchTarget } from './benchSeries';
+import type { ChartStatistics } from './chartStatistics';
 import { type Basket } from './types';
-import { GraphCoverageProvider, type GraphCoverageValue } from './GraphCoverage';
-import { useLang } from '../../../lib/i18n';
+import { GraphCoverageProvider } from './GraphCoverage';
+import { useBenchmarkRepair } from './benchmarkRepair';
 
 /**
  * The "Long Equity" tab: a grid of growth cards (Revenue, FCF/share, …), each a
@@ -33,6 +35,7 @@ import { useLang } from '../../../lib/i18n';
 
 type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
 type MetricsResponse = {
+  chart_statistics?: Record<string, ChartStatistics>;
   currency?: string | null; company_name?: string | null; metrics: MetricRow[];
   // Portfolio only: per metric_code, why a code the holdings DO carry produced no blended line.
   // See `blendNotes` / the backend's `explain_empty`.
@@ -248,7 +251,7 @@ export const BLEND_CODES: Record<string, { codes: string[]; forecast: string[] }
     .map((c) => [c.benchmarkMetric, { codes: c.codes, forecast: c.forecastCodes ?? [] }]));
 
 export default function LongEquityTab({
-  isin, name, basket, portfolioId, sbcCorrection = true, compare = null, onBenchmarkChange,
+  isin, name, basket, portfolioId, sbcCorrection = true, compare = null, onBenchmarkChange, controlsHost,
 }: {
   isin?: string;
   name?: string | null;
@@ -272,6 +275,7 @@ export default function LongEquityTab({
    */
   compare?: { isin: string; name: string } | null;
   /** Reports the selector's actual target to the modal-level Refresh fundamentals control. */
+  controlsHost?: HTMLElement | null;
   onBenchmarkChange?: (target: BenchTarget | null) => void;
   /**  OWNED BY THE MODAL, NOT HERE — its checkbox lives in the tab row, which is in the fixed
    *  head and therefore always visible. Governs the four charts whose numerator is FCF. */
@@ -280,9 +284,8 @@ export default function LongEquityTab({
   // The period switch's own words. Its KEYS ('annual' | 'quarterly') are state and stay English —
   // they go into `ck`, which re-keys every card's fetch. See `fundamentalChromeCopy`.
   const chrome = useFundamentalChromeCopy();
-  const [lang] = useLang();
   const isAgg = !!basket || portfolioId != null;
-  const [data, setData] = useState<MetricsResponse | null>(null);
+  const [bundle, setBundle] = useState<{ own: MetricsResponse; benchmark: MetricsResponse | null; requestKey: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Bumped after an empty card ingests this company's financials — reloads the metrics (repopulates
   // every growth card) and re-keys the derived cards so they refetch their inputs too.
@@ -297,7 +300,7 @@ export default function LongEquityTab({
   // reloads twelve. This one refetches the metrics only; nothing else moves.
   const [metricsKey, setMetricsKey] = useState(0);
   /** Portfolio only: how many holdings the blend has read. Null on a single company. */
-  const [progress, setProgress] = useState<BlendProgress | null>(null);
+  const progress = null;
   /**
    * The cadence every chart on this tab is on.
    *
@@ -329,7 +332,11 @@ export default function LongEquityTab({
   // away used a 2,000-name global one. Two defaults for the same question, on one screen.
   //  The other two are still offered and the coverage note above still applies: SP500 is the
   // best-ingested, so a card drawn against ACWI states the coverage it actually reached.
-  const [benchmark, setBenchmark] = useState<string | null>(compare ? COMPARE_VALUE : 'ACWI');
+  const [benchmarkChoice, setBenchmarkChoice] = useState<{ company?: string; value: string | null }>(
+    { company: compare?.isin, value: compare ? COMPARE_VALUE : 'ACWI' });
+  const benchmark = benchmarkChoice.company === compare?.isin
+    ? benchmarkChoice.value : compare ? COMPARE_VALUE : 'ACWI';
+  const setBenchmark = (value: string | null) => setBenchmarkChoice({ company: compare?.isin, value });
 
   /**
    *  A company picked elsewhere wins, and the select follows it. On /research-dashboard the second
@@ -350,6 +357,7 @@ export default function LongEquityTab({
   }, [compare, selected, cadence]);
 
   useEffect(() => onBenchmarkChange?.(benchTarget), [benchTarget, onBenchmarkChange]);
+  const repairRevision = useBenchmarkRepair(benchTarget);
 
   //  Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   //  `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived
@@ -361,139 +369,37 @@ export default function LongEquityTab({
       : { portfolio_id: portfolioId, cadence })
     : { holdings: [{ isin: isin ?? '', weight: 1 }], cadence }), [isAgg, basket, portfolioId, isin, cadence]);
 
+  const requestKey = JSON.stringify({ isin, isAgg, holdingsTarget, benchTarget, cadence });
+  const currentBundle = bundle?.requestKey === requestKey ? bundle : null;
+  const data = currentBundle?.own ?? null;
+  const benchMetrics = currentBundle?.benchmark?.metrics ?? null;
+  const benchNotes = currentBundle?.benchmark?.blend_notes;
+  const benchCounts = currentBundle?.benchmark?.member_counts;
+  const benchErr = null;
   useEffect(() => {
     let alive = true;
-    /**
-     *  Aborted on the way out, not merely ignored. A book's blend is a read per holding and runs
-     * for a minute; the `alive` flag alone dropped the RESULT but left the work running, so
-     * flipping the cadence twice had two blends of forty companies in flight, competing for the
-     * same connections while the reader waited on the second. Switching now cancels the first.
-     *
-     *  The stream honours it properly — `runSSE` wires abort to `reader.cancel()`, so the server
-     * stops mid-book rather than finishing into a dropped connection.
-     */
     const ctrl = new AbortController();
+    setBundle(null);
+    setErr(null);
     void (async () => {
-      setErr(null); setData(null); setProgress(null);
       try {
-        // A single company is keyed by ISIN; a portfolio is the blended pseudo-company (each metric
-        // blends as a LEVEL → a growth index). Both return every metric code. The portfolio path
-        // streams per-company progress — it is a read per holding — via `blendMetrics`, which is
-        // the one definition of "load this book's metrics" (it had a second caller until the
-        // Old-charts tab was removed; the point of the module is the single definition).
-        if (isAgg) {
-          const out = await loadBlendMetrics<MetricsResponse>(
-            { basket, portfolioId, cadence, metrics: BLEND_METRICS },
-            (p) => { if (alive) setProgress(p); },
-            ctrl.signal,
-          );
-          if (!alive) return;
-          if (out.kind === 'none') { setData({ metrics: [] }); return; }
-          if (out.kind === 'error') { setErr(out.message); return; }
-          setData(out.data);
-          return;
-        }
-        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}`
-          + `/metrics?cadence=${cadence}&metric_keys=${encodeURIComponent(BLEND_METRICS.join(','))}`,
-        { signal: ctrl.signal });
-        if (r.status === 404) { if (alive) setData({ metrics: [] }); return; }
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as MetricsResponse);
-      } catch (e) {
-        //  An abort is not an error. It is this component cancelling its own request, and
-        // rendering "AbortError" where a chart was would turn a deliberate switch into a failure.
-        // `alive` is already false by then — this only guards a future caller that forgets.
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; ctrl.abort(); };
-  }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey, cadence]);
-
-  /**
-   * The benchmark's metrics for the three GROWTH cards — ONE blend for all three, exactly as the
-   * book's own metrics are fetched once above.
-   *
-   *  The nine derived cards do NOT come through here: each owns its `*-inputs` endpoint and
-   * fetches the index from it directly (`useBenchInputs`), because that is the only way each
-   * benchmark line is computed by the same helper as the portfolio line beside it. This fetch is
-   * the growth cards' equivalent, not a second source for anyone else.
-   *
-   * Silent on failure: the benchmark is an overlay on charts that already work.
-   */
-  const [benchMetrics, setBenchMetrics] = useState<MetricRow[] | null>(null);
-  /**
-   * The index's own `blend_notes` — why a code its constituents DO carry drew nothing.
-   *
-   *  It was thrown away, and that made a correct refusal look like a bug. Switching the
-   * benchmark from AEX to ACWI drops the analyst-expectation line, because 22 of 22 AEX names
-   * carry a consensus and only 351 of 1,715 ACWI names do — 20%, far under the blend's floor,
-   * so every forecast period is refused. That is the right answer and it vanished in silence:
-   * a striped line on the book, none on the index, and nothing on screen to say which of
-   * "the index has no expectations" and "too few of its members are covered" was true.
-   */
-  const [benchNotes, setBenchNotes] = useState<Record<string, BlendNote> | undefined>();
-  /** The index's own member counts — see `MetricsResponse.member_counts`.  ITS OWN STATE, beside
-   *  `benchNotes`, because the benchmark is a SEPARATE blend: on a positives-only metric the index
-   *  and the book drop different numbers of members and the card names both. */
-  const [benchCounts, setBenchCounts] =
-    useState<Record<string, MemberCount> | undefined>();
-  const [benchCoverage, setBenchCoverage] = useState<MetricsResponse['coverage']>();
-  const [benchErr, setBenchErr] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    // Same rule as the book's own load above: a switch cancels the index read it replaces. An
-    // index blend is the most expensive read on the tab (~1,500 constituents on ACWI).
-    const ctrl = new AbortController();
-    void (async () => {
-      setBenchMetrics(null); setBenchErr(null); setBenchNotes(undefined);
-      setBenchCounts(undefined); setBenchCoverage(undefined);
-      if (!benchTarget) return;
-      try {
-        const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
-          signal: ctrl.signal,
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          //  Name the three metrics. Unnamed, the blend reads every charted code per constituent —
-          // three paged requests each, i.e. ~1,500 round trips for the S&P. Named, it is one
-          // chunked query per metric. See the request model's `metrics` field.
-          //  The forecast metrics must be named here or the index silently has no forecast. The
-          // book's own line comes from the UNNARROWED read, which already pages `annual_%estimate`;
-          // a benchmark is a narrowed read and gets exactly what this list asks for. Omitting them
-          // draws a dotted consensus on the book and none on the index — which reads as "the index
-          // has no expectations" rather than "we did not ask for them".
-          //  The same body builder the cards use (`benchBody`), then the metric list merged in.
-          // Hand-writing `{universe: …}` here is what made this the ONE fetch that could not
-          // compare against a company: the ten cards went through `useBenchInputs` and switched,
-          // and the three growth cards silently kept drawing the index. One builder, one shape.
-          //  `BLEND_METRICS`, NOT AN INLINE LIST — `TablesTab` sends the same array so the two
-          //   tabs share one cache entry. See its declaration.
-          body: JSON.stringify({
-            ...JSON.parse(benchBody(benchTarget)),
-            metrics: BLEND_METRICS,
-          }),
+        const response = await apiFetch(`${API_URL}/api/earnings/chart-bundle`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+          body: JSON.stringify({ isin: isAgg ? undefined : isin,
+            own: isAgg ? holdingsTarget : undefined, cadence,
+            benchmark: benchTarget ? JSON.parse(benchBody(benchTarget)) : null }),
         });
-        const b = await r.json().catch(() => null);
+        const result = await response.json();
         if (!alive) return;
-        if (!r.ok) {
-          const detail = (b?.detail as string) ?? `HTTP ${r.status}`;
-          console.warn(`[bb:bench] blend ${benchTarget.label}: ${detail}`, b);
-          setBenchErr(detail);
-          return;
-        }
-        setBenchMetrics((b as MetricsResponse)?.metrics ?? []);
-        setBenchNotes((b as MetricsResponse)?.blend_notes);
-        setBenchCounts((b as MetricsResponse)?.member_counts);
-        setBenchCoverage((b as MetricsResponse)?.coverage);
-      } catch (e) {
-        if (!alive) return;                     // aborted by the switch — not a failure to report
-        const detail = e instanceof Error ? e.message : String(e);
-        console.warn(`[bb:bench] blend ${benchTarget.label}: ${detail}`, e);
-        setBenchErr(detail);
+        if (!response.ok) throw new Error(result?.detail ?? `HTTP ${response.status}`);
+        if (!result.ready) throw new Error('The complete chart is not ready yet.');
+        setBundle({ ...result, requestKey });
+      } catch (error) {
+        if (alive) setErr(error instanceof Error ? error.message : String(error));
       }
     })();
     return () => { alive = false; ctrl.abort(); };
-  }, [benchTarget, cadence]);
+  }, [isin, isAgg, holdingsTarget, benchTarget, cadence, reloadKey, metricsKey, repairRevision, requestKey]);
 
   /**
    *  Neither an error nor a load may take the control row with it — these used to be early
@@ -526,7 +432,10 @@ export default function LongEquityTab({
   const onReloadMetrics = () => setMetricsKey((k) => k + 1);
   const gName = name ?? data?.company_name;
   const growth = {
-    metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
+    metrics: data?.metrics ?? null,
+    chartStatistics: data?.chart_statistics,
+    benchStatistics: currentBundle?.benchmark?.chart_statistics,
+    isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, memberCounts: data?.member_counts,
     holdingsTarget, holdingsName: gName,
     // A slice is blended from its own holdings, not from every position in the parent portfolio.
@@ -541,58 +450,23 @@ export default function LongEquityTab({
   // the key a switch would leave twelve charts showing the previous basis until something else
   // re-keyed them — and the toggle would look broken on the cards that matter most.
   const ck = `${reloadKey}-${cadence}`;
-  const sharedCoverage = useMemo<GraphCoverageValue | null>(() => {
-    const line = memberCountLine({
-      // Revenue is the shared usable-fundamentals baseline: unlike EPS/FCF it has no
-      // positive-only survivorship rule, while its aggregate count still excludes a company that
-      // cannot participate because it has no market-cap history. On the current ACWI payload that
-      // is the meaningful 551, rather than the weaker 553 that merely have the sentinel row.
-      own: countFor(revenue.codes, data?.member_counts) ?? coverageCount(data?.coverage),
-      bench: countFor(revenue.codes, benchCounts)
-        ?? coverageCount(benchTarget ? benchCoverage : undefined),
-      isAgg,
-      ownLabel: basket?.label ?? gName ?? 'Portfolio',
-      benchLabel: benchTarget?.label ?? null,
-      lang,
-      always: true,
-    });
-    if (!line) return null;
-    return {
-      text: line.text,
-      what: lang === 'nl'
-        ? 'Hoeveel ondernemingen fundamentele data hebben voor deze grafiek.'
-        : 'How many companies have fundamental data available for this chart.',
-      where: lang === 'nl'
-        ? 'De individuele aandelen van de selectie en de leden van de gekozen benchmark.'
-        : 'The selection’s Individual stocks and the selected benchmark’s members.',
-      when: lang === 'nl' ? 'De laatst geladen fundamentele data.' : 'The latest loaded fundamentals.',
-      how: lang === 'nl'
-        ? 'Dezelfde dekkingsbasis staat eenmaal op iedere grafiek, zodat de grafiektitel nooit twee '
-          + 'verschillende dekkingsaantallen tegelijk toont.'
-        : 'The same coverage baseline appears once on every chart, so a chart heading never shows '
-          + 'two different coverage counts at the same time.',
-    };
-  }, [data?.coverage, data?.member_counts, benchCoverage, benchCounts, benchTarget, isAgg,
-      basket?.label, gName, lang, revenue.codes]);
-  return (
-    <>
-    <div className="flex items-center gap-2 mb-3 text-[11px]">
+  const controls = <div className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs">
       <span className="text-fg-faint">{chrome.periods}</span>
-      <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
+      <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
         {([
           ['annual', chrome.annual, chrome.annualNote],
           ['quarterly', chrome.quarterly, chrome.quarterlyNote],
         ] as const).map(([k, label, note]) => (
           <button key={k} type="button" onClick={() => setCadence(k)} title={note}
             aria-pressed={cadence === k}
-            className={`cursor-pointer px-2 py-1 transition-colors ${cadence === k
-              ? 'bg-accent-600 text-white'
-              : 'text-fg-subtle hover:bg-overlay/5'}`}>
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${cadence === k
+              ? 'bg-accent-600 text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}>
             {label}
           </button>
         ))}
       </div>
-      {cadence === 'quarterly' && (
+      {!controlsHost && cadence === 'quarterly' && (
         <span className="text-fg-faint">
           trailing 12 months — a Q4 point equals that fiscal year
         </span>
@@ -604,7 +478,7 @@ export default function LongEquityTab({
           hid which index it would draw until you ticked it, so the common case — measure the book
           against something — cost two interactions and a guess. A single select shows the answer
           while it states the question, and `None` is an option rather than a second widget. */}
-      <label className="flex items-center gap-1.5 ml-4 text-fg-faint">
+      <label className="flex items-center gap-1.5 ml-1 text-fg-faint">
         Benchmark
         <select value={selected ?? ''}
           onChange={(e) => setBenchmark(e.target.value || null)}
@@ -622,7 +496,10 @@ export default function LongEquityTab({
           {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
       </label>
-    </div>
+    </div>;
+  return (
+    <>
+    {controlsHost ? createPortal(controls, controlsHost) : <div className="mb-3">{controls}</div>}
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
     <GraphCoverageProvider value={null}>

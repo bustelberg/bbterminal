@@ -176,7 +176,8 @@ class JobCtx:
                 j.done = int(data["done"] or 0)
             if "total" in data:
                 j.total = int(data["total"] or 0)
-            j.events.append({"seq": seq, "kind": kind, "message": message, **data})
+            j.events.append({"seq": seq, "kind": kind, "message": message,
+                             "elapsed_ms": round((time.time() - j.created_at) * 1000, 2), **data})
             #  The heartbeat is every line, not a separate call a worker must remember to make.
             # Every job on this registry already narrates; asking for a second signal would mean
             # the ones that forgot it get reaped while running.

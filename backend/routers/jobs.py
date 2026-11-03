@@ -77,6 +77,17 @@ async def cancel_job(job_id: str):
     return job.public()
 
 
+@router.get("/api/jobs/{job_id}/details")
+async def job_details(job_id: str, after: int = 0):
+    job = job_registry.get(job_id)
+    if job is None:
+        raise HTTPException(404, 'This job is no longer retained')
+    events = job.since(max(0, after))
+    page = events[:500]
+    return {'job': job.public(), 'events': page, 'has_more': len(events) > len(page),
+            'next_cursor': page[-1]['seq'] if page else after}
+
+
 @router.get("/api/jobs/{job_id}/stream")
 async def stream_job(job_id: str, request: Request, after: int = 0):
     """SSE: every event after `after`, then the live tail, then close.
@@ -104,7 +115,11 @@ async def stream_job(job_id: str, request: Request, after: int = 0):
                 # header and a progress line are different shapes; letting the consumer infer
                 # which it got from whichever keys happen to be present is how a new field
                 # silently changes the branch taken.
-                yield sse_event({"type": "event", **e})
+                # Full audit payloads are available on demand through /details;
+                # the live toast only needs their short event message and timing.
+                event = ({k: value for k, value in e.items() if k not in {'details', 'profile'}}
+                         if e['kind'] == 'diagnostic' else e)
+                yield sse_event({"type": "event", **event})
             #  The reaper runs on this tick too. `_prune` fires on start and on list, and a tab
             # already watching a hung job does neither — so this is the only thing that lets an
             # OPEN card finish. See `jobs.STALE_SECONDS` for the production failure behind it.

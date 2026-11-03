@@ -24,6 +24,7 @@ describe('what may be cached', () => {
     for (const [method, url] of [
       ['GET', 'http://x/api/earnings/by-isin/US0378331005/metrics?cadence=annual'],
       ['GET', 'http://x/api/earnings/by-isin/US0378331005/growth-estimates'],
+      ['GET', 'http://x/api/benchmarks/index/ACWI/chart-snapshot?cadence=annual'],
       ['POST', 'http://x/api/earnings/margin-inputs'],
       ['POST', 'http://x/api/earnings/fcf-sbc-yield-inputs'],
       ['POST', 'http://x/api/earnings/fundamental-blend-metrics'],

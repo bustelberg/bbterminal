@@ -1186,21 +1186,10 @@ async def search_assets(
     q: str = Query(..., min_length=1, max_length=120),
     limit: int = Query(25, ge=1, le=100),
 ):
-    """Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.
+    """Search priced companies, one canonical execution per analysis instrument.
 
-     IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every
-    column — the right answer for a page whose whole job is that table, and an absurd one for a
-    two-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten
-    rows is the kind of thing that works on a laptop and not on a phone, and it would be paid on
-    every visit to `/research-dashboard`.
-
-     PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar
-    are offered: those are the ones a fundamentals view can actually render. Half the grid is
-    bonds, unresolved ISINs and zero-bar rows — offering them would let someone pick a company and
-    get an empty panel, which reads as a broken page rather than as an unpriceable instrument.
-
-     THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than
-    it is seeing, so a picker can say "keep typing" instead of implying the list is the answer.
+    The RPC searches identity tables before joining price metadata, avoiding the
+    full asset grid. Its extra row reports truncation after deduplication.
     """
     from deps import supabase  # noqa: PLC0415
 
@@ -1209,20 +1198,9 @@ async def search_assets(
         return {"rows": [], "truncated": False}
 
     def _q() -> dict:
-        rows = (
-            supabase.table("asset_grid")
-            .select("isin,analysis_id,name,yahoo_symbol,exchange,currency,sector,bars")
-            .eq("status", "ok")
-            .not_.is_("analysis_id", "null")
-            .gt("bars", 0)
-            .or_(f"isin.ilike.{pattern},name.ilike.{pattern},yahoo_symbol.ilike.{pattern}")
-            #  Ordered by bar count, not by name. Searching "apple" should offer the Nasdaq line
-            # before a thin foreign one, and history length is the same proxy the resolver already
-            # ranks listings by — a name sort would put an obscure venue first as often as not.
-            .order("bars", desc=True)
-            .limit(limit + 1)
-            .execute().data or []
-        )
+        rows = supabase.rpc("search_research_companies", {
+            "search_term": q.strip(), "result_limit": limit,
+        }).execute().data or []
         return {"rows": rows[:limit], "truncated": len(rows) > limit}
 
     return await asyncio.to_thread(_q)

@@ -415,16 +415,16 @@ async def airs_model_portfolios_refresh_job():
     its individual Refresh was pressed.
 
     Keep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already
-    uses that exact batch helper, which in turn calls ``refresh_many`` and therefore the same
-    model half as the per-row action.  This route only gives that shared operation a user-visible,
-    cancellable job handle.
+    uses that exact batch helper. Manual refreshes also re-read the compositions, because the
+    preceding repair-only scan can retain older ones. The scheduled pipeline instead reuses
+    the full composition scan it has just completed.
     """
     import jobs as job_registry  # noqa: PLC0415
     from jobs import JobCancelled  # noqa: PLC0415
     from scheduler import _body_airs_model_prices  # noqa: PLC0415
 
     def _work(ctx) -> str:
-        message, _summary = _body_airs_model_prices(ctx)
+        message, _summary = _body_airs_model_prices(ctx, stored_composition=False)
         # The shared batch function keeps every completed portfolio and stops at the next safe
         # portfolio boundary.  A returned string would mark the job `done`, causing the button to
         # claim the fleet was fully refreshed after a Cancel.
@@ -4052,11 +4052,24 @@ async def airs_vermogen_refresh_job(force: bool = False):
     from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
 
     def _work(ctx) -> str:
+        from management_portfolios import dashboard_progress_label
+
+        def progress(done, total, message):
+            # Keep scraper receipts in the server log; show one clear activity per portfolio.
+            if total and (match := re.match(r"^\d+/\d+: (.+)$", message)):
+                ctx.progress(max(0, done - 1), total, f"{match[1]} — Reading from AIRS…")
+            elif not total:
+                ctx.progress(0, 0, "Connecting to AIRS…")
+
         res = run_airs_vermogen_refresh_sync(
             triggered_by="manual-force" if force else "manual",
             force=force,
             dashboard_only=True,
-            on_step=lambda done, total, msg: ctx.progress(done, total, msg),
+            include_price_checks=False,
+            on_step=progress,
+            on_account_done=lambda done, total, account: ctx.progress(
+                done, total, f"{dashboard_progress_label(account)} — Updated from AIRS",
+                account=account, account_done=True),
             #  `ctx.check()` RAISES to unwind a job; here we only need the FLAG, because the scan
             # has to run its own finalisation (write the status, release `_LOCK`) before returning.
             # `cancelled` is the registry's own view of whether Cancel was pressed.
@@ -4224,42 +4237,12 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     )
 
     def _work(ctx) -> str:
-        #  The benchmark leg, same press — see the twin note in `_portfolio_refresh_stream`.
-        # The Analyse modal opens from either page and its Refresh is whichever of these two the
-        # page passed in, so a guarantee that holds on one of them and not the other is not a
-        # guarantee. Line only (`0, 0`): this is one call, not a phase with a denominator.
-        #  Skipped if the cancel is already in. This is two GuruFocus round trips (~3s) before
-        #   the scan starts, and spending them on a job the reader has already stopped is the
-        #   whole of a Cancel that appears to do nothing. `refresh_portfolio_fully` sees the same
-        #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
-        if not ctx.cancelled:
-            ctx.progress(0, 0, "Preparing refresh…")
-            # This is the verified repair path for the Risk tab's ACWI/AGGH dependency.  The
-            # toast says exactly what is happening; unlike an inline warning it never implies a
-            # background backfill merely because one is scheduled for later.
-            ctx.progress(0, 0, "Refreshing risk benchmark prices…")
-            try:
-                from asset_pipeline.price_refresh import refresh_risk_trackers  # noqa: PLC0415
-                repaired = refresh_risk_trackers()
-                backfill = repaired["backfill"]
-                ctx.progress(0, 0,
-                             f"Risk benchmark prices refreshed: {backfill['backfilled']} "
-                             "missing history series backfilled")
-            except Exception as e:  # noqa: BLE001 — a book refresh remains useful on its own
-                _log.warning("[airs refresh] risk benchmark prices not refreshed: %s: %s",
-                             type(e).__name__, e)
-            try:
-                from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
-                refresh_index_proxies(bypass_daily_guard=True)
-            except Exception as e:  # noqa: BLE001 — never fail a book refresh over the benchmark
-                _log.warning("[airs refresh] benchmark prices not refreshed: %s: %s",
-                             type(e).__name__, e)
+        from management_portfolios import dashboard_progress_label
+        label = dashboard_progress_label(portefeuille)
+        ctx.progress(0, 1, f"{label} — Reading from AIRS…")
         full = refresh_portfolio_fully(
             portefeuille=portefeuille, cascade=cascade,
-            on_step=lambda done, total, msg: ctx.progress(done, total, msg),
-            #  The flag, not `ctx.check()`. The scan has to reach its own `finally` to release
-            # `_LOCK`; unwinding it with an exception from the inside would leave the AirSPMS
-            # session locked against every later refresh. Same reason the fleet job gives.
+            halves=("book",), include_price_checks=False,
             should_stop=lambda: ctx.cancelled)
         #  The wording lives in `job_verdict`, NOT HERE. It was a closure, so nothing could test
         # it — and it read the BOOK's cancel flag alone while `refresh_portfolio_fully` also
@@ -4914,6 +4897,21 @@ async def refresh_account_isin_price_job(portefeuille: str, isin: str):
     job, reused = job_registry.start("airs.account-holding-price-check",
                                      f"{portefeuille}:{normalized}", _work)
     return {"job_id": job.id, "label": normalized, "already_running": reused}
+
+
+@router.post("/api/airs/sold-holdings/{isin}/refresh-price/job")
+async def refresh_sold_holding_price_job(isin: str):
+    import jobs as job_registry
+    from routers._airs_price_check import refresh_sold_holding_price
+    normalized = isin.strip().upper()
+    def work(ctx):
+        ctx.check()
+        ctx.progress(0, 1, "Checking the latest stock price…")
+        summary = refresh_sold_holding_price(normalized)
+        ctx.progress(1, 1, summary)
+        return summary
+    job, reused = job_registry.start('stock.sold-price', normalized, work)
+    return {'job_id': job.id, 'label': normalized, 'already_running': reused}
 
 
 class AirsAccountTransactions(BaseModel):

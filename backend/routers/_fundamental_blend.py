@@ -608,16 +608,20 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 cover_w[period] += abs(float(p.get("weight") or 0))
                 cover_n[period] += 1
     def _clears(d: str) -> bool:
+        if members and members[0].get('min_reporting_companies') is not None:
+            return cover_n[d] >= members[0]['min_reporting_companies']
         return (100.0 * cover_w[d] / total_w >= MIN_BLEND_COVERAGE_PCT
                 and 100.0 * cover_n[d] / total_n >= MIN_BLEND_COVERAGE_NAMES_PCT)
 
     def _point(d: str, value: float) -> dict:
         return {"period": d, "value": round(value, 6),
                 "covered_pct": round(100.0 * cover_w[d] / total_w, 2),
+                "reporting_companies": cover_n[d],
                 "covered_names_pct": round(100.0 * cover_n[d] / total_n, 2)}
 
     out: list[dict] = []
     if kind == "level" and any(p["fund"] for p in prepared):
+        minimum = members[0].get('min_reporting_companies') if members else None
         #  The aggregate path: sum the euros, do not average the growth rates.
         #
         # The chain below this one takes each member's own growth and averages those growths by
@@ -663,6 +667,8 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         for d in sorted(by_date):
             if not _clears(d):
                 continue
+            if minimum is not None and sum(p['fund'].get(d) is not None for p in prepared) < minimum:
+                continue
             if anchor is None:
                 anchor = d
                 #  Unless this series continues another, in which case 100 IS A FAKE COLLAPSE —
@@ -692,6 +698,8 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 continue
             both = [p for p in prepared
                     if p["fund"].get(anchor) is not None and p["fund"].get(d) is not None]
+            if minimum is not None and len(both) < minimum:
+                continue
             prev_sum = sum(p["fund"][anchor] for p in both)
             now_sum = sum(p["fund"][d] for p in both)
             #  A non-positive aggregate has no ratio. Vanishingly unlikely for an index and
@@ -904,8 +912,10 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
         if combine(pairs) is None:
             no_value += 1
         else:
-            misses_weight = covered < MIN_BLEND_COVERAGE_PCT
-            misses_names = covered_names < MIN_BLEND_COVERAGE_NAMES_PCT
+            minimum = members[0].get('min_reporting_companies') if members else None
+            misses_weight = minimum is None and covered < MIN_BLEND_COVERAGE_PCT
+            misses_names = (cover_n[year] < minimum if minimum is not None
+                            else covered_names < MIN_BLEND_COVERAGE_NAMES_PCT)
             below_weight += int(misses_weight)
             below_names += int(misses_names)
             below += int(misses_weight or misses_names)
@@ -923,6 +933,7 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
         "best_covered_pct": round(best, 2),
         "best_covered_names_pct": round(best_names, 2),
         "floor_pct": MIN_BLEND_COVERAGE_PCT,
+        "min_reporting_companies": members[0].get('min_reporting_companies') if members else None,
         "names_floor_pct": MIN_BLEND_COVERAGE_NAMES_PCT,
         "years": len(by_year),
         "years_below_floor": below,

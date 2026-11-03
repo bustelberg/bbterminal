@@ -11,7 +11,7 @@ import { cancelJob, startJob, type JobToast } from '../../../lib/stores/jobs';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
-import { MIN_YEAR_COVERAGE_PCT } from './marginData';
+import { ACWI_MIN_REPORTING_COMPANIES, MIN_YEAR_COVERAGE_PCT } from './marginData';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 import { medianAbs, negativeRunStart, usableStep } from './positiveChain';
 import { isUniverseTarget, type BenchTarget } from './benchSeries';
@@ -1498,8 +1498,10 @@ divide by that period's own Σ cap instead, on the line directly below this row'
               // constituents, 53.8% of cap); names alone would let ten tiny ones outvote a missing
               // giant. A carried figure counts toward neither.
               const covN = blend.coveredNames[y] ?? 0;
+              const minimum = data.rows[0]?.min_reporting_companies;
               const thin = lv != null
-                && (lv.covered < MIN_YEAR_COVERAGE_PCT || covN < MIN_YEAR_COVERAGE_PCT);
+                && (minimum != null ? covN * blend.contributors / 100 < minimum
+                  : lv.covered < MIN_YEAR_COVERAGE_PCT || covN < MIN_YEAR_COVERAGE_PCT);
               return (
                 <td key={y}
                   className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${
@@ -1507,7 +1509,8 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                   title={lv == null ? undefined
                     : `${lv.covered.toFixed(1)}% of the contributing weight and ${covN.toFixed(0)}% `
                       + 'of the companies reported this period'
-                      + (thin ? ` — under the ${MIN_YEAR_COVERAGE_PCT}% floor, so the chart omits it`
+                      + (thin ? (minimum != null ? ` — fewer than ${minimum} reporting companies, so the chart omits it`
+                        : ` — under the ${MIN_YEAR_COVERAGE_PCT}% floor, so the chart omits it`)
                         : '')}>
                   <span className="block">
                     <Cell>
@@ -1657,7 +1660,10 @@ export default function HoldingsRevenueModal({
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
-    return zeroesAreGaps(b as Resp);
+    const result = zeroesAreGaps(b as Resp);
+    if ('universe' in body && body.universe === 'ACWI') result.rows = result.rows.map(row => ({ ...row,
+      min_reporting_companies: ACWI_MIN_REPORTING_COMPANIES }));
+    return result;
   };
 
   useEffect(() => {

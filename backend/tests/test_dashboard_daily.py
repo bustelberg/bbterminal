@@ -68,6 +68,8 @@ def test_model_pricing_deduplicates_shared_models_and_surfaces_failures(monkeypa
         {"portefeuille": "BUS_Defensief_Dyn", "model_portfolio_id": 1}, {"portefeuille": "BUS_Neutraal_Dyn", "model_portfolio_id": 1},
         {"portefeuille": "BUS_Offensief_Dyn", "model_portfolio_id": 2}]})
     calls = []
+    progress = []
+    ctx = SimpleNamespace(cancelled=False, progress=lambda *args: progress.append(args[-1]))
     def price(pid, emit, *, stored_composition):
         assert stored_composition
         calls.append(pid)
@@ -76,9 +78,94 @@ def test_model_pricing_deduplicates_shared_models_and_surfaces_failures(monkeypa
         return {}
     monkeypatch.setattr(refresh, "refresh_portfolio", price)
     with pytest.raises(D.IncompleteRefresh) as caught:
-        S._body_airs_model_prices()
+        S._body_airs_model_prices(ctx)
     assert calls == [2, 1]  # Offensief before Neutraal, matching the dashboard refresh order.
     assert caught.value.summary["failed_names"] == ["BUS_Offensief_Dyn"]
+    assert any("error: bad price" in message for message in progress)
+
+
+def test_manual_model_refresh_reads_composition_when_previous_scan_is_old(monkeypatch):
+    import jobs
+    from routers import airs, _airs_account_links as links, _airs_portfolio_refresh as refresh
+
+    monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
+        {"portefeuille": "BUS_Offensief_Dyn", "model_portfolio_id": 1}]})
+    monkeypatch.setattr(refresh, "supabase", FakeSupabase({
+        "airs_model_portfolio": [{"id": 1, "portfolio_type": "fixed (0)",
+                                   "positions_scanned_at": "2000-01-01"}],
+    }))
+    reads = []
+    def composition(pid, emit, wait):
+        reads.append(pid)
+        emit("phase", phase="composition", message="1/5 Composition — reading AirSPMS…")
+        emit("progress", message="stored: model; composition dated 2000-01-01")
+        return {"datum": "2026-01-01", "previous_datum": "2026-01-01",
+                "rows": [{"isin": "TEST"}]}
+    monkeypatch.setattr(refresh, "_composition", composition)
+    monkeypatch.setattr(refresh, "_instruments", lambda *_: {})
+    monkeypatch.setattr(refresh, "_fx", lambda *_: {"failed": 0, "backfilled": 0, "extended": 0})
+    monkeypatch.setattr(refresh, "_prices", lambda *_: {"failed": 0, "fetched": 1, "already_current": 0})
+    monkeypatch.setattr(refresh, "_recompute", lambda *_: {"portfolio": {"ytd_pct": 1}})
+    messages, progress = [], []
+    def start(kind, label, work):
+        ctx = SimpleNamespace(cancelled=False, progress=lambda *args: progress.append(args[-1]))
+        messages.append(work(ctx))
+        return SimpleNamespace(id="manual-refresh"), False
+    monkeypatch.setattr(jobs, "start", start)
+
+    # This route only registers synchronous work and never awaits I/O.
+    with pytest.raises(StopIteration) as completed:
+        airs.airs_model_portfolios_refresh_job().send(None)
+    result = completed.value.value
+
+    assert result["job_id"] == "manual-refresh"
+    assert reads == [1]
+    assert messages == ["1/1 model portfolio(s) repriced"]
+    assert "Reading this portfolio from AIRS…" in progress
+    assert not any("composition dated" in message for message in progress)
+
+
+def test_manual_airs_refresh_finishes_without_stock_price_work(monkeypatch):
+    import jobs
+    import airs_vermogen
+    from routers import airs
+    progress = []
+    def refresh(**kwargs):
+        assert kwargs['include_price_checks'] is False
+        kwargs['on_step'](1, 22, '1/22: Bustelberg portfolios · Bustelberg Offensief')
+        kwargs['on_step'](1, 22, 'technical report receipt')
+        kwargs['on_account_done'](1, 22, 'BUS_Offensief_Dyn')
+        return {'status': 'ok', 'complete_accounts': 1, 'portfolios_found': 1}
+    monkeypatch.setattr(airs_vermogen, 'run_airs_vermogen_refresh_sync', refresh)
+    def start(kind, label, work):
+        work(SimpleNamespace(cancelled=False, progress=lambda *args, **kw: progress.append((args[-1], kw))))
+        return SimpleNamespace(id='airs-only'), False
+    monkeypatch.setattr(jobs, 'start', start)
+    with pytest.raises(StopIteration):
+        airs.airs_vermogen_refresh_job().send(None)
+    assert len(progress) == 2
+    assert progress[0][0].endswith('Reading from AIRS…')
+    assert progress[1][1] == {'account': 'BUS_Offensief_Dyn', 'account_done': True}
+
+
+def test_single_row_refresh_only_requests_airs_data(monkeypatch):
+    import jobs
+    from routers import airs, _airs_full_refresh as full
+    calls = []
+    def refresh(**kwargs):
+        calls.append(kwargs)
+        assert kwargs['halves'] == ('book',)
+        assert kwargs['include_price_checks'] is False
+        return {}
+    monkeypatch.setattr(full, 'refresh_portfolio_fully', refresh)
+    monkeypatch.setattr(full, 'job_verdict', lambda *_: 'Updated from AIRS')
+    def start(kind, label, work):
+        assert work(SimpleNamespace(cancelled=False, progress=lambda *_: None)) == 'Updated from AIRS'
+        return SimpleNamespace(id='airs-row'), False
+    monkeypatch.setattr(jobs, 'start', start)
+    with pytest.raises(StopIteration):
+        airs.airs_portfolio_refresh_job('BUS_Offensief_Dyn').send(None)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("kind", ["normaal", "meervoudig"])

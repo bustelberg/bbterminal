@@ -254,6 +254,42 @@ class TestTheCancelledCardSaysWhatHappened:
         assert "stored" in msg
 
 
+class TestBestEffortBenchmarkFill:
+    def test_empty_companies_do_not_hide_later_available_companies(self, rig, monkeypatch):
+        import routers._fundamental_backfill as backfill
+        seen = []
+        def ingest(c, **kw):
+            cid = c['company_id']
+            seen.append(cid)
+            return {'done': ['fin'], 'rows': 5 if cid == 16 else 0, 'unchanged': 0,
+                    'calls': 1, 'error': None if cid == 16 else fill.VENDOR_EMPTY_MARKER}
+        monkeypatch.setattr(backfill, 'ingest_company', ingest)
+        receipt = {}
+        fill.fill_company_ids(FakeCtx(), 'ACWI', list(range(1, 17)), force=True,
+                              best_effort=True, receipt=receipt)
+        assert set(seen) == set(range(1, 17))
+        assert receipt['attempted'] == 16
+        assert receipt['loaded'] == 1
+        assert receipt['failed'] == 15
+        assert receipt['deferred'] == 0
+        assert len(receipt['outcomes']) == 16
+
+    def test_all_empty_is_a_completed_best_effort_check(self, rig, monkeypatch):
+        import routers._fundamental_backfill as backfill
+        monkeypatch.setattr(backfill, 'ingest_company', lambda c, **kw:
+            {'done': [], 'rows': 0, 'unchanged': 0, 'calls': 1, 'error': fill.VENDOR_EMPTY_MARKER})
+        receipt = {}
+        fill.fill_company_ids(FakeCtx(), 'ACWI', [1, 2], force=True, best_effort=True, receipt=receipt)
+        assert receipt['failed'] == receipt['attempted'] == 2
+
+    def test_database_failures_are_still_failures(self, rig, monkeypatch):
+        import routers._fundamental_backfill as backfill
+        monkeypatch.setattr(backfill, 'ingest_company', lambda c, **kw:
+            {'done': [], 'rows': 0, 'unchanged': 0, 'calls': 1, 'error': 'database write failed'})
+        with pytest.raises(UserFacingJobError, match='database write failed'):
+            fill.fill_company_ids(FakeCtx(), 'ACWI', [1], force=True, best_effort=True)
+
+
 class TestAnAllFailedFillIsAFailedJob:
     def test_all_failed_fill_retains_structured_vendor_failure(self, rig, monkeypatch):
         ctx = FakeCtx()

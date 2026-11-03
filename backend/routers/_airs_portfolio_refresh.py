@@ -390,6 +390,20 @@ def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None,
     `wait` is passed to step 1 only — steps 2-5 take no lock. See `_composition`.
     """
     started = time.time()
+    detailed_emit = emit
+    phases = {
+        "composition": "Reading this portfolio from AIRS…",
+        "instruments": "Checking the companies in this portfolio…",
+        "fx": "Updating prices in euros…",
+        "prices": "Updating stock prices…",
+        "recompute": "Updating the portfolio return…",
+    }
+
+    def emit(kind, **fields):
+        _log.debug("[airs_refresh] portfolio %s %s", portfolio_id, fields.get("message", ""))
+        if kind == "phase":
+            detailed_emit(kind, **{**fields, "message": phases.get(fields.get("phase"), "Updating this portfolio…")})
+
     emit("progress", message=f"[portfolio {portfolio_id}] refresh started")
     if stored_composition:
         model = (supabase.table("airs_model_portfolio").select("portfolio_type,positions_datum,positions_error,positions_scanned_at")

@@ -1,5 +1,7 @@
 'use client';
 
+import { savedBenchmarkSeries } from './benchmarkSnapshot';
+
 import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -73,9 +75,9 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
   const marginByYr = useMemo(
     () => marginByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
 
-  const [benchData, benchErr] = useBenchInputs<MarginInputs>('margin-inputs', benchTarget);
+  const [benchData, benchErr] = useBenchInputs<MarginInputs>('margin-inputs', benchTarget, undefined, true);
   const benchByYr = useMemo(
-    () => (benchData ? marginByYear(benchData.rows, sbcCorrection) : null), [benchData, sbcCorrection]);
+    () => (benchData ? savedBenchmarkSeries(benchData, sbcCorrection ? 'corrected' : 'reported', () => marginByYear(benchData.rows, sbcCorrection)) : null), [benchData, sbcCorrection]);
 
   const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
 
@@ -96,10 +98,10 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <CardHeading chartKey="fcfMargin" sbc={sbcCorrection} />
 
-      {data == null && !err ? (
+      {(data == null || (!!benchTarget && benchData == null)) && !(err || benchErr) ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
-      ) : err ? (
-        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : (err || benchErr) ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : marginByYr.size === 0 ? (
           <MissingFundamentals message="No revenue / FCF ingested to compute a margin."
             target={holdingsTarget} name={holdingsName} />

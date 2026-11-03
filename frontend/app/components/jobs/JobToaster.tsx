@@ -8,6 +8,7 @@ import {
   attachRunningJobs, cancelJob, dismissJob, isAirsBusy, jobsStore, LINGER_SECONDS, type JobToast,
 } from '../../../lib/stores/jobs';
 import { fundamentalJobMessage } from './fundamentalJobMessage';
+import JobDetails from './JobDetails';
 
 const JOB_COPY: Record<Lang, {
   cancel: string; cancelling: string; cancelTitle: string; working: string; dismiss: string;
@@ -65,6 +66,30 @@ export function friendlyJobMessage(summary: string | null, lang: Lang): string |
       : `Cancelled before ${cancelled[1]}. No changes were made.`;
   }
   return plain;
+}
+
+export function portfolioJobMessage(job: Pick<JobToast, 'status' | 'message'>, lang: Lang): string {
+  if (job.status === 'done') return lang === 'nl' ? 'Bijgewerkt.' : 'Updated.';
+  if (job.status === 'failed') return lang === 'nl'
+    ? 'Niet alles kon worden bijgewerkt. Probeer het opnieuw.'
+    : 'Some data could not be updated. Please try again.';
+  if (job.status === 'cancelled') return lang === 'nl'
+    ? 'Gestopt. Opgehaalde gegevens zijn bewaard.'
+    : 'Stopped. Data already received has been saved.';
+  // Accept only reader-facing progress. Older servers can still stream diagnostic receipts.
+  if (/ — (Reading from AIRS…|Updated from AIRS)$/.test(job.message)) return lang === 'nl'
+    ? job.message.replace('Reading from AIRS…', 'Ophalen uit AIRS…').replace('Updated from AIRS', 'Bijgewerkt vanuit AIRS')
+    : job.message;
+  const stages: Record<string, string> = {
+    'Connecting to AIRS…': 'Verbinding maken met AIRS…',
+    'Reading this portfolio from AIRS…': 'Deze portefeuille ophalen uit AIRS…',
+    'Checking the companies in this portfolio…': 'Bedrijven in deze portefeuille controleren…',
+    'Updating prices in euros…': 'Prijzen in euro’s bijwerken…',
+    'Updating stock prices…': 'Aandelenkoersen bijwerken…',
+    'Updating the portfolio return…': 'Portefeuillerendement bijwerken…',
+  };
+  if (job.message in stages) return lang === 'nl' ? stages[job.message] : job.message;
+  return lang === 'nl' ? 'Portefeuillegegevens bijwerken…' : 'Updating portfolio data…';
 }
 
 /** Refresh all has two necessary AIRS stages: account data, then model compositions. Present them
@@ -153,15 +178,16 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   const busy = isAirsBusy(job);
   const unavailable = unavailableNotice(job.summary);
   const fundamentals = job.kind.startsWith('fundamentals.');
-  const portfolioRefresh = job.kind === 'airs.models.scan';
+  const benchmarkRepair = job.kind === 'fundamentals.benchmark-repair';
+  const portfolioRefresh = ['airs.models.scan', 'airs.models.refresh', 'airs.vermogen.refresh', 'airs.portfolio.refresh'].includes(job.kind);
   const humanSummary = friendlyJobMessage(job.summary, lang);
   const humanMessage = friendlyJobMessage(job.message, lang);
-  const displayMessage = portfolioRefresh
-    ? (job.status === 'done'
-        ? (lang === 'nl' ? 'De portefeuilles zijn bijgewerkt.' : 'The portfolios have been updated.')
-        : job.status === 'failed'
-          ? (lang === 'nl' ? 'Een deel van de portefeuilles kon niet worden bijgewerkt.' : 'Some portfolio data could not be updated.')
-          : (lang === 'nl' ? 'Portefeuillemodellen bijwerken…' : 'Updating portfolio models…'))
+  const displayMessage = benchmarkRepair
+    ? (job.status === 'failed' ? (humanSummary || (lang === 'nl' ? 'Bijwerken niet gelukt. Bekijk Details.' : 'Could not finish updating. Open Details.'))
+      : job.status === 'running' ? (/^(Checking |Loading missing |ACWI |SP500 |AEX )/.test(job.message)
+        ? job.message : 'Checking benchmark data…') : (humanSummary || humanMessage))
+    : portfolioRefresh
+    ? portfolioJobMessage(job, lang)
     : fundamentals
     ? fundamentalJobMessage(humanSummary || humanMessage)
     : (humanSummary || humanMessage);
@@ -203,7 +229,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
    */
   const [ms, setMs] = useState<number | null>(linger ? linger * 1000 : null);
   const [hover, setHover] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const showDetails = job.detailsOpen ?? false;
   // Derived, not stored: "at zero" and "fading" are the same fact, and holding it twice is how the
   // two come to disagree.
   const leaving = ms !== null && ms <= 0;
@@ -214,11 +240,11 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   // the tick it was scheduled for; a throttled background tab therefore stretches the countdown
   // rather than expiring the toast while nobody is looking, which is the behaviour we want.
   useEffect(() => {
-    if (!linger || hover) return;
+    if (!linger || hover || showDetails) return;
     const id = window.setInterval(
       () => setMs((m) => (m === null ? m : Math.max(0, m - TICK_MS))), TICK_MS);
     return () => window.clearInterval(id);
-  }, [linger, hover]);
+  }, [linger, hover, showDetails]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -316,26 +342,20 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
         </div>
       ) : (
         <p className={`whitespace-normal break-words text-[12px] ${tone.text}`}
-          title={[humanSummary, humanMessage].filter(Boolean).join('\n') || undefined}>
+          title={portfolioRefresh ? undefined : [humanSummary, humanMessage].filter(Boolean).join('\n') || undefined}>
           {displayMessage}
         </p>
       )}
 
-      {job.details?.length ? (
-        <div>
-          <button type="button" onClick={() => setShowDetails((visible) => !visible)}
+      <div>
+          <button type="button" onClick={() => jobsStore.set((state) => ({ jobs: state.jobs.map((item) =>
+            item.id === job.id ? { ...item, detailsOpen: !showDetails } : item) }))}
             className="text-[11px] text-accent-400 hover:text-accent-300">
             {showDetails ? (lang === 'nl' ? 'Details verbergen' : 'Hide details')
-              : (lang === 'nl' ? 'Details bekijken' : 'View details')}
+              : 'Details'}
           </button>
-          {showDetails && (
-            <ol role="log" aria-live="polite"
-              className="mt-1.5 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-neutral-800/60 bg-page/50 p-2 text-[11px] text-fg-muted">
-              {job.details.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}
-            </ol>
-          )}
+          {showDetails && <JobDetails job={job} />}
         </div>
-      ) : null}
 
       <div className="flex justify-end gap-2">
         {running && job.cancellable !== false && !job.cancelRequested && (

@@ -220,6 +220,17 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "indicators refresh on their own staleness schedule. The regional quota reserve still applies.",
     ),
     JobSpec(
+        id='acwi_weekly_coverage',
+        label='Weekly ACWI coverage and saved charts',
+        fills='ACWI statements, estimates, coverage reports and complete chart/statistics snapshots',
+        cadence='Every Saturday, 03:00 Amsterdam',
+        trigger={'day_of_week': 'sat', 'hour': 3, 'minute': 0, 'timezone': 'Europe/Amsterdam'},
+        options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
+        max_age_hours=24 * 8,
+        note='Checks every current constituent, retries available feeds weekly, respects subscriptions and '
+             'regional quota reserves, then atomically saves annual and quarterly chart bundles with statistics.',
+    ),
+    JobSpec(
         id="history_drift_check",
         label="History-drift probe",
         fills="re-fetches metric_data bars a vendor rewrote (splits, free-share attributions)",

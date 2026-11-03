@@ -388,8 +388,13 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                      prices: bool = False,
                      key_ratios: bool = False,
                      force: bool = False, limit: int = 0, only_due: bool = False,
-                     today: date | None = None, receipt: dict | None = None) -> str:
+                     today: date | None = None, receipt: dict | None = None,
+                     best_effort: bool = False) -> str:
     """Fetch the GuruFocus feeds for `ids`, reporting through the job `ctx`. Returns the summary.
+
+    `best_effort` is used by automatic benchmark checks: visit every eligible company once,
+    accept empty statements/subscription refusals as coverage gaps, and retain a per-company
+    receipt. Cancellation and quota checks still apply; unexpected all-failed batches still fail.
 
      `feeds="statements"` NARROWS **TWO** THINGS, AND NARROWING ONLY ONE IS A BUG. A fill makes
     two independent decisions: WHO is in the work list (`needs`, which returns anyone missing any of
@@ -573,6 +578,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     # empty GuruFocus template, an unsubscribed exchange, and a database write failure.
     failure_samples: list[str] = []
     failure_reasons: dict[str, int] = {}
+    outcomes: list[dict] = []
     # Rows the vendor returned that were already stored, so nothing was written for them. Reported
     # separately in the summary — see `ingest.metric_upsert.changed_rows` for why it is usually the
     # larger of the two by orders of magnitude.
@@ -657,7 +663,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         #  And not after a stop. A company that halted between feeds legitimately wrote nothing;
         # retrying it would spend fresh API calls on the far side of a Cancel — the one moment the
         # reader has explicitly asked us not to.
-        if not r["error"] and not r.get("stopped") and r["rows"] == 0 and not r.get("unchanged"):
+        if not best_effort and not r["error"] and not r.get("stopped") and r["rows"] == 0 and not r.get("unchanged"):
             retry_kwargs = {"refresh_cache": force or feeds == "smart"}
             if key_ratios:
                 retry_kwargs["include_key_ratios"] = True
@@ -670,7 +676,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             # up-to-date company writes nothing every day and that is the healthy outcome.
             if r["error"] and VENDOR_EMPTY_MARKER in r["error"]:
                 empty_streak += 1
-                if empty_streak >= VENDOR_EMPTY_LIMIT and not vendor_down.is_set():
+                if not best_effort and empty_streak >= VENDOR_EMPTY_LIMIT and not vendor_down.is_set():
                     vendor_down.set()
                     ctx.emit("info",
                              f"Stopping: {empty_streak} companies in a row came back with no "
@@ -690,6 +696,12 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                 # claims this company was finished.
                 ok += 1
             active_names.pop(int(c["company_id"]), None)
+            outcomes.append({'company_id': c['company_id'], 'company': who,
+                             'ticker': c.get('gurufocus_ticker'),
+                             'exchange': (c.get('gurufocus_exchange') or {}).get('exchange_code'),
+                             'status': 'unavailable' if r['error'] else 'checked',
+                             'reason': r['error'], 'rows': r['rows'],
+                             'unchanged': r.get('unchanged', 0), 'calls': r.get('calls', 0)})
             current_name = next(reversed(active_names.values()), None)
         ctx.spent(r.get("calls", 0))
         if r.get("stopped"):
@@ -796,7 +808,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                        loaded=ok, failed=failed, unavailable=len(refused),
                        deferred=max(0, len(work) - ok - failed), rows=rows, calls=calls,
                        failure_samples=failure_samples, failure_reasons=failure_reasons,
-                       unavailable_samples=refusal_samples)
+                       unavailable_samples=refusal_samples, outcomes=outcomes)
     if not work and refused:
         # A deliberate pre-flight refusal is an answer, not a successful zero-row refresh. This
         # is the common one-company shape for TSX/LSE/ASX holdings outside our GuruFocus plan.
@@ -829,7 +841,9 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         raise JobCancelled(
             f"CANCELLED after {ok + failed} of {len(work)} — {summary}. "
             "Everything fetched before the stop is stored; press again to continue from there.")
-    if failed and ok == 0:
+    expected_gaps = all(VENDOR_EMPTY_MARKER in reason or 'unsubscribed region' in reason.lower()
+                        for reason in failure_reasons)
+    if failed and ok == 0 and not (best_effort and expected_gaps):
         # An all-failed batch is not a successful job merely because the worker itself completed.
         # This is especially visible for a one-company refresh: the card used to turn green and
         # say `done` while its summary admitted `0 refetched, 1 failed`. Put the actionable vendor

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
-import { MIN_YEAR_COVERAGE_PCT } from './marginData';
+import { ACWI_MIN_REPORTING_COMPANIES, MIN_YEAR_COVERAGE_PCT } from './marginData';
+import { useBenchmarkRepair } from './benchmarkRepair';
+import { readBenchmarkSnapshot } from './benchmarkSnapshot';
 
 /**
  * The benchmark line every Long Equity chart can carry.
@@ -153,7 +155,12 @@ const CAPS_LIFTED_OUT = /-inputs$/;
  * Pure and exported for the test beside it: this is the half of the split payload that can be
  * wrong without anything failing.
  */
-export function spliceCaps<T>(data: T, caps: CapTable): T {
+export function spliceCaps<T>(data: T, caps: CapTable, universe?: string): T {
+  if (universe === 'ACWI') {
+    const d = data as { rows?: object[] };
+    if (Array.isArray(d?.rows)) data = { ...d, rows: d.rows.map(r => ({ ...r,
+      min_reporting_companies: ACWI_MIN_REPORTING_COMPANIES })) } as T;
+  }
   if (!caps || Object.keys(caps).length === 0) return data;
   const d = data as { rows?: { isin?: string }[] };
   if (!Array.isArray(d?.rows)) return data;
@@ -198,14 +205,31 @@ export function useBenchInputs<T>(
    * spelled at the call site is the shape that fails that way; a shared constant cannot.
    */
   extra?: Record<string, unknown>,
+  /** Chart callers opt into saved series; tables and drill-downs keep their detailed rows. */
+  savedChart = false,
 ): [T | null, string | null] {
   const [state, setState] = useState<[T | null, string | null]>([null, null]);
   const key = benchKey(target);
+  const [loadedKey, setLoadedKey] = useState('');
+  const repairRevision = useBenchmarkRepair(target);
   useEffect(() => {
     let alive = true;
+    const commit = (value: [T | null, string | null]) => { setLoadedKey(key); setState(value); };
     void (async () => {
-      setState([null, null]);
+      commit([null, null]);
       if (!target) return;
+      if (savedChart && isUniverseTarget(target)) {
+        try {
+          const snapshot = await readBenchmarkSnapshot(target.universe, target.cadence);
+          const saved = snapshot.series[path];
+          if (!saved) throw new Error(`Saved benchmark chart is missing: ${path}`);
+          if (alive) commit([{ rows: [], years: [], saved_series: saved,
+            built_at: snapshot.built_at } as T, null]);
+        } catch (error) {
+          if (alive) commit([null, error instanceof Error ? error.message : String(error)]);
+        }
+        return;
+      }
       const body = extra
         ? JSON.stringify({ ...JSON.parse(benchBody(target)) as object, ...extra })
         : benchBody(target);
@@ -237,17 +261,17 @@ export function useBenchInputs<T>(
           wantCaps ? read('universe-period-caps') as Promise<{ caps?: CapTable }> : null,
         ]);
         if (!alive) return;
-        setState([spliceCaps(rows as T, caps?.caps ?? {}), null]);
+        commit([spliceCaps(rows as T, caps?.caps ?? {}, target && isUniverseTarget(target) ? target.universe : undefined), null]);
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e);
         console.warn(`[bb:bench] ${path} ${target?.label}: ${detail}`, e);
-        if (alive) setState([null, detail]);
+        if (alive) commit([null, detail]);
       }
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, key]);
-  return state;
+  }, [path, key, repairRevision, savedChart]);
+  return loadedKey === key ? state : [null, null];
 }
 
 /**
@@ -308,9 +332,12 @@ export function benchNote(
   // moved the legend would have gone on quoting a floor that no longer existed — a caption that
   // contradicts the chart it explains, and nothing would have failed.
   if (!series || series.size === 0) {
-    return `${target.label}: no period clears the ${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
+    return isUniverseTarget(target) && target.universe === 'ACWI'
+      ? `${target.label}: fewer than ${ACWI_MIN_REPORTING_COMPANIES} companies have usable data for each period`
+      : `${target.label}: no period clears the ${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
   }
   if (series.size === 1) {
+    if (isUniverseTarget(target) && target.universe === 'ACWI') return `${target.label}: only one period has usable data from at least ${ACWI_MIN_REPORTING_COMPANIES} companies`;
     return `${target.label}: one period only — the rest fall under the `
       + `${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
   }

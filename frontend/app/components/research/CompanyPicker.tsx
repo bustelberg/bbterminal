@@ -50,6 +50,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
   const [externalRows, setExternalRows] = useState<ExternalAsset[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selectedExternal, setSelectedExternal] = useState<ExternalAsset | null>(null);
   const [isin, setIsin] = useState('');
@@ -57,12 +58,20 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
   const [addError, setAddError] = useState('');
   const box = useRef<HTMLDivElement>(null);
 
+  const selectingSuggestionText = () => {
+    const selection = window.getSelection();
+    return selection && !selection.isCollapsed
+      && (box.current?.contains(selection.anchorNode) || box.current?.contains(selection.focusNode));
+  };
+
   //  Debounced, and the in-flight request is aborted. Typing "nvidia" is six keystrokes; without
   // both of these it is six requests whose replies can land out of order, and the list settles on
   // whichever answered last rather than on what is in the box.
   useEffect(() => {
+    if (value && !editing) { setBusy(false); return; }
     const term = q.trim();
-    if (term.length < 2) { setRows([]); setExternalRows([]); setTruncated(false); return; }
+    if (term.length < 2) { setRows([]); setExternalRows([]); setTruncated(false); setBusy(false); return; }
+    setBusy(true);
     const ctrl = new AbortController();
     const t = setTimeout(() => {
       setBusy(true);
@@ -74,6 +83,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
           const b = await r.json().catch(() => null);
           if (!r.ok) throw new Error((b?.detail as string) ?? `HTTP ${r.status}`);
           const localRows = (b?.rows ?? []) as AssetPick[];
+          if (ctrl.signal.aborted) return;
           setRows(localRows);
           setTruncated(Boolean(b?.truncated));
           if (localRows.length || allowManual) {
@@ -85,6 +95,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
             { signal: ctrl.signal });
           const externalBody = await external.json().catch(() => null);
           if (!external.ok) throw new Error((externalBody?.detail as string) ?? `HTTP ${external.status}`);
+          if (ctrl.signal.aborted) return;
           setExternalRows((externalBody?.rows ?? []) as ExternalAsset[]);
         } catch (e) {
           if (ctrl.signal.aborted) return;      // our own cancel, not a failure
@@ -96,7 +107,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
       })();
     }, 200);
     return () => { clearTimeout(t); ctrl.abort(); };
-  }, [q, allowManual]);
+  }, [q, allowManual, value, editing]);
 
   const addExternal = async () => {
     if (!selectedExternal || !isin.trim()) return;
@@ -108,7 +119,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
       });
       const body = await r.json().catch(() => null);
       if (!r.ok) throw new Error((body?.detail as string) ?? `HTTP ${r.status}`);
-      onPick(body as AssetPick);
+      onPick(body as AssetPick); setEditing(false);
       setOpen(false); setSelectedExternal(null); setIsin('');
     } catch (e) {
       setAddError(e instanceof Error ? e.message : 'Could not add this company.');
@@ -126,7 +137,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  if (value) {
+  if (value && !editing) {
     return (
       <div>
         <div className="mb-1.5 text-sm font-medium text-fg-soft">{label}</div>
@@ -137,7 +148,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
           </div>
           <button
             type="button"
-            onClick={() => { onPick(null); setQ(''); setSelectedExternal(null); setIsin(''); setAddError(''); }}
+            onClick={() => { setEditing(true); setOpen(true); setQ(''); setSelectedExternal(null); setIsin(''); setAddError(''); }}
             className="shrink-0 text-xs text-fg-subtle transition-colors hover:text-fg"
           >
             Change
@@ -157,6 +168,7 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
       <label className="block text-sm font-medium text-fg-soft mb-1.5">{label}</label>
       <div className="flex gap-2">
         <input
+          autoFocus={editing}
           value={q}
           onChange={(e) => { setQ(e.target.value); setRows([]); setExternalRows([]); setTruncated(false); setOpen(true); setSelectedExternal(null); setIsin(''); setAddError(''); }}
           maxLength={allowManual ? 200 : undefined}
@@ -164,6 +176,9 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
           placeholder="Name, ISIN or ticker…"
           className="flex-1 min-w-0 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
         />
+        {editing && value && <button type="button"
+          onClick={() => { setEditing(false); setOpen(false); }}
+          className="shrink-0 text-xs text-fg-subtle hover:text-fg">Cancel</button>}
       </div>
 
       {open && q.trim().length >= (allowManual ? 1 : 2) && (
@@ -176,9 +191,11 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
           )}
           {rows.map((r) => (
             <button key={`${r.isin}-${r.analysis_id ?? ''}`} type="button"
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onPick(r); setOpen(false); setQ(r.name ?? r.isin); }}
-              onClick={() => { onPick(r); setOpen(false); setQ(r.name ?? r.isin); }}
-              className="w-full cursor-pointer text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
+              onClick={(e) => {
+                if (e.detail > 0 && selectingSuggestionText()) return;
+                onPick(r); setEditing(false); setOpen(false); setQ(r.name ?? r.isin);
+              }}
+              className="w-full select-text cursor-pointer text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
               <div className="text-sm text-fg-strong truncate">{r.name ?? r.isin}</div>
               <div className="text-[11px] text-fg-faint font-mono truncate">{r.isin}</div>
             </button>
@@ -212,9 +229,11 @@ export default function CompanyPicker({ label, value, onPick, allowManual = fals
           )}
           {!rows.length && externalRows.map((r) => (
             <button key={r.symbol} type="button"
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedExternal(r); setIsin(r.isin ?? ''); setAddError(''); }}
-              onClick={() => { setSelectedExternal(r); setIsin(r.isin ?? ''); setAddError(''); }}
-              className="w-full cursor-pointer text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
+              onClick={(e) => {
+                if (e.detail > 0 && selectingSuggestionText()) return;
+                setSelectedExternal(r); setIsin(r.isin ?? ''); setAddError('');
+              }}
+              className="w-full select-text cursor-pointer text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
               <div className="text-sm text-fg-strong truncate">{r.name}</div>
               <div className="text-[11px] text-fg-faint font-mono truncate">
                 {r.exchange ? `${r.exchange}: ` : ''}{r.symbol} · Add to research

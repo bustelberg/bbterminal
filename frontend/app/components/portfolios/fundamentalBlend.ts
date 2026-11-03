@@ -17,10 +17,11 @@
  * rather than anything about a modal. `HoldingsRevenueModal` re-exports the ones it used to own, so
  * no call site moved.
  */
-import { MIN_YEAR_COVERAGE_PCT } from './marginData';
+import { clearsCoverage } from './marginData';
 import { stepGrowth } from './stepGrowth';
 
 export type Row = {
+  min_reporting_companies?: number;
   isin: string; name: string; weight_pct: number; currency: string | null;
   ticker: string | null; exchange: string | null;
   /** The key the per-row refresh fetches on — a real `company.company_id`, not the `analysis_id`
@@ -469,9 +470,8 @@ export function buildBlend(data: Resp, metric?: string) {
         coverN[y] = (coverN[y] ?? 0) + 1;
       }
     }
-    const drawn = (y: string) =>
-      (100 * (coverW[y] ?? 0) / (coverTotal || 1)) >= MIN_YEAR_COVERAGE_PCT
-      && (100 * (coverN[y] ?? 0) / (parts.length || 1)) >= MIN_YEAR_COVERAGE_PCT;
+    const drawn = (y: string) => clearsCoverage(parts.map(p => p.r), coverN[y] ?? 0,
+      100 * (coverW[y] ?? 0) / (coverTotal || 1));
     /** Each part's value at each period it contributed to — own or carried. The chaining below
      *  takes ratios between periods that need not be adjacent, so the values have to be kept. */
     const at = new Map<typeof parts[number], Record<string, number>>();
@@ -616,6 +616,8 @@ export function buildBlend(data: Resp, metric?: string) {
     let chained = 100;
     for (const y of data.years) {
       if (!denom[y] || !drawn(y)) continue;
+      const required = parts[0]?.r.min_reporting_companies;
+      if (aggregate && required != null && parts.filter(p => fund.get(p)?.[y] != null).length < required) continue;
       if (aggregate && anchor != null) {
         /**
          *  Growth of a sum, and its decomposition is an identity rather than an approximation:
@@ -638,6 +640,8 @@ export function buildBlend(data: Resp, metric?: string) {
         const a = anchor;                     // narrowed for the closures below
         const spanning = parts.filter(
           (p) => fund.get(p)?.[a] != null && fund.get(p)?.[y] != null);
+        const minimum = parts[0]?.r.min_reporting_companies;
+        if (minimum != null && spanning.length < minimum) continue;
         const sA = spanning.reduce((s, p) => s + fund.get(p)![a], 0);
         const sD = spanning.reduce((s, p) => s + fund.get(p)![y], 0);
         //  No ratio without a positive base, and no line past a non-positive numerator — the same

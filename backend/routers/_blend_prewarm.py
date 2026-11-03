@@ -1,5 +1,8 @@
 """Rebuild the expensive benchmark blends in the background, so no reader pays for them.
 
+Full rebuilds also publish compact chart bundles to PostgreSQL. Those durable snapshots serve
+the Graphs tab across restarts; the in-memory constituent inputs remain useful for drill-downs.
+
 WHY
     `_blend_cache` makes the SECOND selection of an index free. The first one still costs what it
     costs, and after any fundamentals write `invalidate()` puts everybody back to first. Measured
@@ -46,7 +49,10 @@ WHY
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+import gzip
 import inspect
+import json
 import logging
 import os
 import threading
@@ -56,15 +62,12 @@ _log = logging.getLogger(__name__)
 
 # What the Long Equity benchmark dropdown offers, and the cadence the tab opens on.
 #
-#  Annual only, and aex is in the list anyway. Quarterly is a deliberate click and doubles this
-# whole budget for a view most readers never open; the cache still fills it lazily on the first
-# press, exactly as before. AEX costs ~2s — it is here not because it is slow but because
-# `invalidate()` dropped it too, and leaving one of three dropdown entries cold is the kind of
-# asymmetry that later reads as a bug.
+# Both cadences are saved ahead of time: switching to Quarterly must remain a small snapshot
+# read rather than becoming the first expensive company-data calculation for that cadence.
 #
 #  Order is cost-descending on purpose. An invalidation mid-rebuild abandons the rest, so the
 # entry that hurts most to lose is the one already finished rather than the one still queued.
-_DEFAULT_TARGETS = "ACWI:annual,SP500:annual,AEX:annual"
+_DEFAULT_TARGETS = "ACWI:annual,ACWI:quarterly,SP500:annual,SP500:quarterly,AEX:annual,AEX:quarterly"
 
 #  The env var is a kill switch as well as a knob: `BLEND_PREWARM=` (empty) disables it entirely,
 # which is what a box under memory pressure or a second replica wants. Unset = the default above.
@@ -238,6 +241,8 @@ async def _warm_one(label: str, cadence: str, gen: int,
     from routers.earnings import FundamentalCoverageRequest  # noqa: PLC0415
 
     done = 0
+    payloads = {}
+    started_at = datetime.now(timezone.utc).isoformat()
     for name, fn in endpoints if endpoints is not None else _endpoints():
         if _generation != gen:
             return done
@@ -253,7 +258,14 @@ async def _warm_one(label: str, cadence: str, gen: int,
             if "response" in inspect.signature(fn).parameters:
                 from starlette.responses import Response  # noqa: PLC0415
                 extra["response"] = Response()
-            await fn(body, _browser_request(), **extra)
+            result = await fn(body, _browser_request(), **extra)
+            if isinstance(result, dict):
+                payloads[name] = result
+            elif hasattr(result, 'body'):
+                raw = result.body
+                if result.headers.get('content-encoding') == 'gzip':
+                    raw = gzip.decompress(raw)
+                payloads[name] = json.loads(raw)
         except Exception as exc:                            # noqa: BLE001
             #  One endpoint's failure is not the rebuild's. A label with no members 404s and
             # always will; the other twelve are still worth warming.
@@ -263,6 +275,12 @@ async def _warm_one(label: str, cadence: str, gen: int,
         done += 1
         _log.debug("[blend-prewarm] %s %s/%s in %.1fs", name, label, cadence,
                    time.perf_counter() - t0)
+    if endpoints is None and _generation == gen:
+        from routers._benchmark_snapshots import publish  # noqa: PLC0415
+        try:
+            await asyncio.to_thread(publish, label, cadence, payloads, started_at)
+        except Exception as exc:
+            _log.warning('[benchmark-snapshot] keeping previous %s/%s result: %s', label, cadence, exc)
     return done
 
 

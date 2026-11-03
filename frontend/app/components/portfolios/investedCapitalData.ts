@@ -123,6 +123,7 @@ export function investedCapitalBlend(rows: CashReturnRow[]): Blend {
     // a decade — the look-ahead bias every other card here avoids, and the reason a zero-cap shell
     // period is excluded from the average at all.
     market_cap_by_period: r.market_cap_by_period,
+    min_reporting_companies: r.min_reporting_companies,
     revenue: Object.fromEntries(labelledSeries(r).map((p) => [p.label, p.value])),
   }));
   //  EVERY row stays in the list, including the ones with no series — they are the denominator the

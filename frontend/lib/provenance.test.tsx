@@ -68,13 +68,12 @@ describe('the amber chip is reserved for the lag we own', () => {
    *  stale as the test aged, so it is computed from today. */
   const today = new Date().toISOString().slice(0, 10);
 
-  it('stays quiet when we read the source today and the SOURCE is what is behind', () => {
+  it('warns when recently read AIRS values still have an old valuation date', () => {
     const html = renderToStaticMarkup(
       <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${today}T13:15:00Z`}
         kind="copied" note="a value" />,
     );
-    expect(html).not.toContain(INFO_ICON_WARN);
-    expect(html).toMatch(/>i</);
+    expect(html).toContain(INFO_ICON_WARN);
   });
 
   it('still fires when OUR copy is the stale side', () => {
@@ -120,7 +119,7 @@ describe('a subtree can supply the fetch time once, for all of its icons', () =>
      *  nothing about which of the other two you got. */
     const html = renderToStaticMarkup(
       <ProvenanceFetchedAt at={`${today}T13:15:00Z`}>
-        <Provenance source="airs_volk" asOf={LONG_AGO} kind="formula" note="a value" />
+        <Provenance source="airs_volk" asOf={today} kind="formula" note="a value" />
       </ProvenanceFetchedAt>,
     );
     expect(html).toContain(INFO_ICON);
@@ -226,12 +225,12 @@ describe('the icon and its card carry ONE verdict', () => {
     ).stale).toBe(true);
   });
 
-  it('AIRS freshness reports the acquisition run, not the source valuation age', () => {
+  it('a recent read does not make an old AIRS valuation current', () => {
     const today = new Date().toISOString().slice(0, 10);
     const f = provenanceFreshness(LONG_AGO, `${today}T13:00:00Z`, false, 'airs_att');
-    expect(f.stale).toBe(false);
-    expect(f.label).toBe('');
-    expect(f.label).not.toMatch(/old|trading day|valuation/);
+    expect(f.stale).toBe(true);
+    expect(f.label).toContain('recently checked');
+    expect(f.label).toContain('old');
   });
 
   it(' WHEN SHOWS OUR READ DATE, not the valuation date, wherever we know it', () => {
@@ -242,7 +241,7 @@ describe('the icon and its card carry ONE verdict', () => {
     // The card only renders inside the open tip, so assert the verdict the row is built from.
     expect(provenanceFreshness(
       LONG_AGO, `${LONG_AGO}T13:00:00Z`, false, 'airs_volk',
-    ).label).toContain('missing AIRS run');
+    ).label).toBe('AIRS data needs updating');
     expect(html).toContain(INFO_ICON_WARN);
   });
 

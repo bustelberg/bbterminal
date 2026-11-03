@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
 import CompanyPicker, { type AssetPick } from './CompanyPicker';
 import OwnerEarningsModal from '../portfolios/OwnerEarningsModal';
+import { BLEND_METRICS } from '../portfolios/LongEquityTab';
 
 /**
  * Two companies in ONE Fundamental view — both drawn on the same chart, on every chart.
@@ -33,8 +34,10 @@ import OwnerEarningsModal from '../portfolios/OwnerEarningsModal';
 export default function ResearchDashboard() {
   const [a, setA] = useState<AssetPick | null>(null);
   const [b, setB] = useState<AssetPick | null>(null);
+  const comparison = useMemo(() => b ? { isin: b.isin, name: b.name ?? b.isin } : null, [b]);
   const [preparing, setPreparing] = useState<string | null>(null);
   const pending = useRef(new Map<string, Promise<void>>());
+  const selectionVersion = useRef({ primary: 0, compare: 0 });
 
   const ensureFundamentals = useCallback((company: AssetPick): Promise<void> => {
     const alreadyPending = pending.current.get(company.isin);
@@ -43,7 +46,8 @@ export default function ResearchDashboard() {
     const run = (async () => {
       try {
         const metrics = await apiFetch(
-          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(company.isin)}/metrics`,
+          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(company.isin)}`
+            + `/metrics?cadence=annual&metric_keys=${encodeURIComponent(BLEND_METRICS.join(','))}`,
         );
         let missing = metrics.status === 404;
         if (metrics.ok) {
@@ -91,19 +95,21 @@ export default function ResearchDashboard() {
   }, []);
 
   const selectPrimary = async (company: AssetPick | null) => {
+    const version = ++selectionVersion.current.primary;
     if (!company) {
       setA(null);
-      setB(null);
       return;
     }
     const name = company.name ?? company.isin;
     setPreparing(name);
     await ensureFundamentals(company);
+    if (version !== selectionVersion.current.primary) return;
     setA(company);
     setPreparing(null);
   };
 
   const selectCompare = async (company: AssetPick | null) => {
+    const version = ++selectionVersion.current.compare;
     if (!company) {
       setB(null);
       return;
@@ -111,6 +117,7 @@ export default function ResearchDashboard() {
     const name = company.name ?? company.isin;
     setPreparing(name);
     await ensureFundamentals(company);
+    if (version !== selectionVersion.current.compare) return;
     setB(company);
     setPreparing(null);
   };
@@ -134,32 +141,21 @@ export default function ResearchDashboard() {
       <h1 className="text-lg font-semibold text-fg-strong">Research Dashboard</h1>
 
       <div className="grid gap-4 md:grid-cols-2 max-w-3xl mx-auto">
-        <div>
-          <div className="mb-1.5 text-sm font-medium text-fg-soft">Company</div>
-          <div className="flex min-h-10 items-center gap-3 rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm text-fg-strong">{a.name ?? a.isin}</div>
-              <div className="truncate font-mono text-[11px] text-fg-faint">{a.isin}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setA(null); setB(null); setPreparing(null); }}
-              className="shrink-0 text-xs text-fg-subtle transition-colors hover:text-fg"
-            >
-              Change
-            </button>
-          </div>
-        </div>
+        <CompanyPicker label="Company" value={a} onPick={selectPrimary} />
         <CompanyPicker label="Compare with (optional)" value={b} onPick={selectCompare} />
       </div>
 
+      {preparing && <p className="text-center text-xs text-fg-subtle">Preparing {preparing}…</p>}
       <OwnerEarningsModal
-        key={`${a.isin}-${b?.isin ?? 'none'}`}
         embedded
         isin={a.isin}
         name={a.name ?? a.isin}
-        compare={b ? { isin: b.isin, name: b.name ?? b.isin } : null}
-        onClose={() => { setA(null); setB(null); setPreparing(null); }}
+        compare={comparison}
+        onClose={() => {
+          selectionVersion.current.primary++;
+          selectionVersion.current.compare++;
+          setA(null); setB(null); setPreparing(null);
+        }}
       />
     </div>
   );

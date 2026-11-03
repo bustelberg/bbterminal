@@ -170,6 +170,7 @@ def refresh_portfolio_fully(
     on_event: Callable[..., None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     wait: float | None = SESSION_WAIT_SECONDS,
+    include_price_checks: bool = True,
 ) -> dict:
     """Both halves of one portfolio, brought current. Give it EITHER handle.
 
@@ -312,7 +313,7 @@ def refresh_portfolio_fully(
                      else "cancelled" if "cancelled" in states
                      else "ok" if states else "error")
     _say(f"{label} — {out['status']}")
-    if portefeuille and 'book' in halves and out['status'] == 'ok':
+    if include_price_checks and portefeuille and 'book' in halves and out['status'] == 'ok':
         from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
         _say(f'{label} — saving price check')
         accounts = [portefeuille] + [row['portefeuille'] for row in (out.get('book') or {}).get('cascaded', [])]

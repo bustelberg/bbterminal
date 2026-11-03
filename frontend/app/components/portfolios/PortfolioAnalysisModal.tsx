@@ -1980,7 +1980,8 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
   lookThrough, onLookThroughChange, onSectorOverride,
-  onSectorAllocation, onSummary, onRiskColumnsChange }: {
+  onSectorAllocation, onSummary, onRiskColumnsChange, onRefreshSoldPrice }: {
+  onRefreshSoldPrice: (isin: string, name: string) => Promise<string | null>;
   onRiskColumnsChange: (enabled: boolean) => void;
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
@@ -3004,7 +3005,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         <span className={`font-mono tabular-nums ${retTone(p.since_close_pct)}`}>
                           {fmtRet(p.since_close_pct)}
                         </span>
-                        <Provenance source="benchmark" asOf={p.since_close_as_of} kind="formula"
+                        <Provenance source="yfinance" asOf={p.since_close_as_of} kind="formula"
+                          onRefresh={p.isin ? () => onRefreshSoldPrice(p.isin!, p.name) : undefined}
                           what={copy.lang === 'nl' ? 'Koersrendement in EUR na verkoop; geen gerealiseerde bijdrage.' : 'EUR price return after sale; not a realised contribution.'}
                           note={copy.lang === 'nl' ? 'Slotkoersen inclusief valuta-effect. Coupons en uitkeringen niet meegerekend; geen werkelijk rekeningresultaat.' : 'Closing prices including FX. Coupons and distributions excluded; not an actual account result.'}
                           worked={p.since_close_from != null && p.since_close_to != null
@@ -4100,6 +4102,17 @@ export default function PortfolioAnalysisModal({
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
               ) : <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+                onRefreshSoldPrice={async (isin, companyName) => {
+                  const { done } = await startJob(
+                    `${API_URL}/api/airs/sold-holdings/${encodeURIComponent(isin)}/refresh-price/job`,
+                    `Refresh ${companyName} stock price`);
+                  const job = await done;
+                  if (job.status === 'done') {
+                    await reloadAnalysis();
+                    return job.summary;
+                  }
+                  return job.summary ?? 'Could not update this stock price. Please try again.';
+                }}
                 onRiskColumnsChange={setIncludeHoldingRisk}
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
                 onSummary={setNotesFor}

@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
+import { savedFit, type ChartStatistics } from './chartStatistics';
 import { AboutCard, AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { type ChartKey } from './longEquityCopy';
@@ -211,7 +212,7 @@ export { Stat } from './CardStats';
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin: _ingestIsin, onIngested,
   blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
-  benchNotes, memberCounts, benchCounts, coverageLabel,
+  benchNotes, memberCounts, benchCounts, coverageLabel, chartStatistics, benchStatistics,
 }: {
   cfg: MetricCfg;
   /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
@@ -244,6 +245,8 @@ export default function MetricGrowthCard({
    * one fetch exactly as they read the company's own. Null = no benchmark selected.
    */
   benchMetrics?: MetricRow[] | null;
+  chartStatistics?: Record<string, ChartStatistics>;
+  benchStatistics?: Record<string, ChartStatistics>;
   benchLabel?: string | null;
   /**
    * The second line's REAL target, passed down rather than rebuilt from `benchLabel`.
@@ -603,10 +606,12 @@ export default function MetricGrowthCard({
     () => clipPoints(omitBenchmarkForRawSeries ? [] : (benchReported ?? []), statSpan),
     [benchReported, statSpan, omitBenchmarkForRawSeries]);
 
-  const fit = useMemo(() => logLinearFit(ownStat), [ownStat]);          // growth only
+  const prepared = chartStatistics?.[cfg.benchmarkMetric];
+  const preparedBench = benchStatistics?.[cfg.benchmarkMetric];
+  const fit = useMemo(() => prepared ? savedFit(prepared, ownStat) : logLinearFit(ownStat), [ownStat, prepared]);
   /** The index's own fit, through the IDENTICAL function over its own points — there is no
    *  "benchmark R²" implementation to drift from this one. */
-  const benchFit = useMemo(() => logLinearFit(benchStat), [benchStat]);
+  const benchFit = useMemo(() => preparedBench ? savedFit(preparedBench, benchStat) : logLinearFit(benchStat), [benchStat, preparedBench]);
   /**  THE INDEX'S OWN SIGN TEST, NOT OURS. `linear` below is a fact about the BOOK's series and
    *  governs the axis; whether a growth RATE exists for the index is a fact about the index. An
    *  index that dips through zero has no CAGR even on a card whose own line never does. */
@@ -630,10 +635,10 @@ export default function MetricGrowthCard({
    * interval into it is a quarter or two, so ending a "per annum" rate there overstates it by the
    * fraction of the year that has not happened.
    */
-  const ptp = useMemo(() => endpointCagr(ownStat, (x) => periodTick(x, ltmXs)),
-                      [ownStat, ltmXs]);
-  const benchPtp = useMemo(() => endpointCagr(benchStat, (x) => periodTick(x, ltmXs)),
-                           [benchStat, ltmXs]);
+  const ptp = useMemo(() => prepared?.cagr ?? endpointCagr(ownStat, (x) => periodTick(x, ltmXs)),
+                      [ownStat, ltmXs, prepared]);
+  const benchPtp = useMemo(() => preparedBench?.cagr ?? endpointCagr(benchStat, (x) => periodTick(x, ltmXs)),
+                           [benchStat, ltmXs, preparedBench]);
   /**
    * The ratio branch's two tiles, book and index, over that same shared window — `pairedSpan` is
    * the helper the ten ratio CARDS use, so a `kind: 'ratio'` config here reads its Avg and Latest

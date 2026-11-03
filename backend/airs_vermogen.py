@@ -1110,7 +1110,8 @@ def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
 
 
 def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = False,
-                                   on_step=None, should_stop=None, dashboard_only: bool = False) -> dict:
+                                   on_step=None, should_stop=None, dashboard_only: bool = False,
+                                   on_account_done=None, include_price_checks: bool = True) -> dict:
     """Discover → download → parse → store, for every live portfolio that NEEDS it. Serialized
     via `_LOCK` (a second trigger while one runs returns busy). Returns the final
     status dict. Call from a thread — it does blocking Playwright + DB work.
@@ -1125,6 +1126,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
     `on_step(done, total, message)` and `should_stop()` are the JOB hooks — see
     `/api/airs/vermogen/refresh/job`. Both optional and both no-ops when absent, so the scheduler
     and the plain POST keep exactly today's behaviour.
+    `on_account_done(done, total, account)` publishes a row only after all its report
+    attempts and its receipt have been saved, before starting the next account.
 
      CANCELLATION IS CHECKED BETWEEN ACCOUNTS, NEVER INSIDE ONE. An account's four reports are
     downloaded and stored as a unit; stopping midway would leave it holding two fresh reports and
@@ -1417,6 +1420,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             # A fresh timestamp per account would make every account except the LAST look stale,
             # so 43 of 44 rows would silently drop out of the newest batch.
             _record_reports({name: res["reports_ok"]}, run_stamp)
+            if on_account_done is not None:
+                try:
+                    on_account_done(i, progress_total, name)
+                except Exception:
+                    _log.exception("[airs_vermogen] could not publish completed account %s", name)
             _emit("account_done", i=i, n=progress_total, account=name,
                   got=sorted(res["reports_ok"]), failed=[e["report"] for e in res["errors"]],
                   complete=len(res["reports_ok"]) == len(REPORTS),
@@ -1494,7 +1502,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         })
         _log.info("[airs_vermogen] %s refresh — %s (%s)",
                   triggered_by, _STATUS["message"], detail)
-        if triggered_by != 'auto' and not cancelled_at:
+        if include_price_checks and triggered_by != 'auto' and not cancelled_at:
             from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
             _emit('progress', message='Saving AIRS / Yahoo price checks')
             def _price_step(done, total, message):

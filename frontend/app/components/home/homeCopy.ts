@@ -29,14 +29,11 @@ type Tile = { label: string; description: string };
 
 export type HomeCopy = {
   welcome: string;
-  intro: string;
   tiles: Record<HomeTileKey, Tile>;
 };
 
 const EN: HomeCopy = {
   welcome: 'Welcome to BBTerminal',
-  intro: 'Your one stop shop for insight into Bustelberg portfolios, and in the future also equity '
-    + 'research about new companies.',
   tiles: {
     '/management-dashboard': {
       label: 'Management Dashboard',
@@ -125,8 +122,6 @@ const EN: HomeCopy = {
  *  are what the things are called, in either language. */
 const NL: HomeCopy = {
   welcome: 'Welkom bij BBTerminal',
-  intro: 'Uw one-stop-shop voor inzicht in Bustelberg-portefeuilles, en in de toekomst ook '
-    + 'aandelenonderzoek naar nieuwe bedrijven.',
   tiles: {
     '/management-dashboard': {
       label: 'Managementdashboard',

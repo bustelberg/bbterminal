@@ -19,6 +19,11 @@ import { runSSE } from '../stream';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'cancelled';
 
+export type JobProgress = {
+  done?: number; total?: number; message?: string; entryId?: number;
+  account?: string; accountDone?: boolean;
+};
+
 /** Older AIRS servers report lock refusals as successful job receipts. */
 export function isAirsBusy(job: { status: JobStatus; summary: string | null }): boolean {
   return job.status === 'done'
@@ -61,6 +66,8 @@ export type JobToast = {
   cancellable?: boolean;
   /** Recent progress lines, retained for the generic popup's on-demand run receipt. */
   details?: string[];
+  detailsOpen?: boolean;
+  dataChanged?: boolean;
   dismissed: boolean;
 };
 
@@ -220,7 +227,7 @@ export function startLocalJob(
  */
 export function watchJob(id: string, title: string, after = 0,
                          seed?: { kind?: string; label?: string },
-                         onProgress?: (e: { done?: number; total?: number; message?: string; entryId?: number })
+                         onProgress?: (e: JobProgress)
                            => void,
                          presentation?: { label?: string }): Promise<JobToast> {
   // A server job must retain its machine-readable label for deduplication and
@@ -260,7 +267,7 @@ export function watchJob(id: string, title: string, after = 0,
         const e = raw as {
           type?: string; kind?: string; label?: string; message?: string; status?: JobStatus;
           done?: number; total?: number; summary?: string | null; cancel_requested?: boolean;
-          api_calls?: number; entry_id?: number;
+          api_calls?: number; entry_id?: number; account?: string; account_done?: boolean; data_changed?: boolean;
         };
         if (e.type === 'job') {
           backendLabel = e.label ?? backendLabel;
@@ -288,8 +295,13 @@ export function watchJob(id: string, title: string, after = 0,
         const details = message
           ? [...(current?.details ?? []), message].slice(-100)
           : current?.details;
+        if (e.kind === 'diagnostic') {
+          upsert(id, { ...(details ? { details } : {}) });
+          return;
+        }
         upsert(id, {
           message,
+          ...(typeof e.data_changed === 'boolean' ? { dataChanged: e.data_changed } : {}),
           ...(details ? { details } : {}),
           ...(typeof e.done === 'number' ? { done: e.done } : {}),
           ...(typeof e.total === 'number' ? { total: e.total } : {}),
@@ -299,6 +311,7 @@ export function watchJob(id: string, title: string, after = 0,
         if (onProgress) {
           try {
             onProgress({ done: e.done, total: e.total, message: e.message,
+              account: e.account, accountDone: e.account_done,
               ...(typeof e.entry_id === 'number' ? { entryId: e.entry_id } : {}) });
           } catch (err) {
             traceError('jobs', `an onProgress listener for ${id} threw`, err);
@@ -325,7 +338,7 @@ export function watchJob(id: string, title: string, after = 0,
 export async function startJob(
   startUrl: string, title: string, init?: RequestInit,
   /** Per-progress-line callback — see `watchJob`. For callers whose screen the job rewrites. */
-  onProgress?: (e: { done?: number; total?: number; message?: string; entryId?: number }) => void,
+  onProgress?: (e: JobProgress) => void,
   presentation?: { label?: string },
 ): Promise<{ id: string; done: Promise<JobToast>; body: Record<string, unknown> }> {
   //  `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket

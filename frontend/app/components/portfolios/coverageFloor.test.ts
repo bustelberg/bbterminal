@@ -17,6 +17,15 @@ const YEARS = (r: { years: Record<string, number | null> }) => Object.keys(r.yea
 const VALUE = (r: { years: Record<string, number | null> }, y: string) => r.years[y] ?? null;
 
 describe('weightedByYear', () => {
+  it('ACWI draws exactly 500 usable reporters even below half the index weight and names', () => {
+    const sample: { weight_pct: number; min_reporting_companies: number; years: Record<string, number | null> }[] = Array.from({ length: 2000 }, (_, i) => ({
+      weight_pct: i < 500 ? 0.01 : 1, min_reporting_companies: 500,
+      years: i < 500 ? { '2024': 10, '2025': i < 499 ? 11 : null } : {} as Record<string, number | null>,
+    }));
+    const out = weightedByYear(sample, YEARS, VALUE);
+    expect(out.get(2024)).toBeCloseTo(10);
+    expect(out.has(2025)).toBe(false);
+  });
   it('is the weighted average, renormalised over whoever reported', () => {
     // 60/20 reporting -> (60x10 + 20x30)/80 = 15, NOT (600+600)/100 = 12.
     const out = weightedByYear(rows(w(60, { 2024: 10 }), w(20, { 2024: 30 }), w(20, {})), YEARS, VALUE);

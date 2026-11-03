@@ -377,8 +377,11 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * summarise against an index while the picker above it names a company and the Graphs tab beside
    * it draws one. The indices stay selectable underneath, exactly as on Graphs.
    */
-  const [bench, setBench] = useState<CagrBenchmark | typeof COMPARE_VALUE>(
-    compare ? COMPARE_VALUE : 'ACWI');
+  const [benchChoice, setBenchChoice] = useState<{ company?: string; value: CagrBenchmark | typeof COMPARE_VALUE }>(
+    { company: compare?.isin, value: compare ? COMPARE_VALUE : 'ACWI' });
+  const bench = benchChoice.company === compare?.isin
+    ? benchChoice.value : compare ? COMPARE_VALUE : 'ACWI';
+  const setBench = (value: CagrBenchmark | typeof COMPARE_VALUE) => setBenchChoice({ company: compare?.isin, value });
   /**  DERIVED AT RENDER, never assigned in an effect — that renders once against the wrong series
    *  and again against the right one, which on a table of CAGRs is two different sets of numbers. */
   const selected = compare && bench === COMPARE_VALUE ? COMPARE_VALUE : bench;

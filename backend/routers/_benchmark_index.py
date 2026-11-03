@@ -76,8 +76,16 @@ def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
            .eq("label", label).limit(1).execute().data or [])
     if not uni:
         return []
-    mem = (supabase.table("universe_membership").select("company_id")
-           .eq("universe_id", uni[0]["universe_id"]).execute().data or [])
+    mem = []
+    offset = 0
+    while True:
+        page = (supabase.table("universe_membership").select("company_id")
+                .eq("universe_id", uni[0]["universe_id"]).order("company_id")
+                .range(offset, offset + 999).execute().data or [])
+        mem.extend(page)
+        if len(page) < 1000:
+            break
+        offset += len(page)
     ids = sorted({m["company_id"] for m in mem})
 
     ccy_by_exch = {e["exchange_id"]: e["currency_code"] for e in

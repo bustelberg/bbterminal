@@ -63,7 +63,10 @@ const STORABLE = new Set([200, 404]);
 /** The reads. Anchored at both ends: `/fundamental-coverage` is cached, `/fundamental-coverage/
  *  ingest` is a write and must not match it. */
 const CACHEABLE: RegExp[] = [
+  // Small company identities; repeated searches share the normal mutation invalidation.
+  /^\/api\/asset-pipeline\/search$/,
   /^\/api\/earnings\/by-isin\/[^/]+\/metrics$/,
+  /^\/api\/benchmarks\/index\/[^/]+\/chart-snapshot$/,
   /^\/api\/earnings\/by-isin\/[^/]+\/growth-estimates$/,
   // The eleven derived Long Equity cards + their drill-down modals, which POST the identical body.
   /^\/api\/earnings\/[a-z0-9-]+-inputs$/,
@@ -74,6 +77,7 @@ const CACHEABLE: RegExp[] = [
   // requests for 0.19 MB each.
   /^\/api\/earnings\/universe-period-caps$/,
   /^\/api\/earnings\/fundamental-coverage$/,
+  /^\/api\/earnings\/chart-bundle$/,
   /^\/api\/earnings\/fundamental-blend(-metrics|-breakdown|-matrix)?$/,
   /^\/api\/earnings\/relative-growth-breakdown$/,
   /^\/api\/earnings\/portfolio-revenue-matrix$/,

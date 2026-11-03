@@ -56,6 +56,14 @@ export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' 
  * screen spanning different fractions of the same book.
  */
 export const MIN_YEAR_COVERAGE_PCT = 50;
+// ACWI uses an absolute reporting sample; portfolio and smaller-index rules stay percentage based.
+export const ACWI_MIN_REPORTING_COMPANIES = 500;
+
+export function clearsCoverage(rows: { min_reporting_companies?: number }[], count: number, weightPct: number): boolean {
+  const minimum = rows[0]?.min_reporting_companies;
+  return minimum != null ? count >= minimum
+    : weightPct >= MIN_YEAR_COVERAGE_PCT && 100 * count / (rows.length || 1) >= MIN_YEAR_COVERAGE_PCT;
+}
 
 /**
  * A period LABEL from the server → the numeric x every card plots on.
@@ -204,6 +212,7 @@ export function stepChanges(series: ReadonlyMap<number, number | null>): Map<num
  * Coverage here answers "of the companies this chart aggregates, how many reported this year".
  */
 export type Weighted = {
+  min_reporting_companies?: number;
   weight_pct: number;
   /** INDEX ROWS ONLY — the market cap as at each fiscal period, EUR, converted at that period's
    *  own end date (`period_caps_eur`). Absent for a portfolio: a holding weight is not a market
@@ -358,8 +367,7 @@ export function weightedByYear<T extends Weighted>(
   for (const x of axis) {
     const d = den.get(x) ?? 0;
     if (d <= 0) continue;
-    if (100 * (cov.get(x) ?? 0) / total < MIN_YEAR_COVERAGE_PCT) continue;
-    if (100 * (names.get(x) ?? 0) / rows.length < MIN_YEAR_COVERAGE_PCT) continue;
+    if (!clearsCoverage(rows, names.get(x) ?? 0, 100 * (cov.get(x) ?? 0) / total)) continue;
     out.set(x, (num.get(x) ?? 0) / d);
   }
   return out;

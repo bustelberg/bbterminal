@@ -127,6 +127,42 @@ def recheck_price_check_row(account: str, isin: str) -> dict:
     return _save_price_check(account, freshen=False)
 
 
+def refresh_sold_holding_price(isin: str) -> str:
+    """Refresh the pinned price series and EUR conversion of a known sold holding."""
+    from datetime import date
+    from asset_pipeline import store
+    from routers._airs_portfolio_refresh import _fx
+
+    watch = (supabase.table('asset_post_close_watch').select('last_sale_date')
+             .eq('isin', isin).limit(1).execute().data or [])
+    if not watch:
+        raise ValueError('This company has no saved sale history')
+    executions = (supabase.table('asset_execution').select('analysis_id,yahoo_symbol,currency')
+                  .eq('isin', isin).limit(1).execute().data or [])
+    if not executions or not executions[0].get('analysis_id') or not executions[0].get('yahoo_symbol'):
+        raise ValueError('No stock-price listing is available for this company')
+    row = executions[0]
+    def latest():
+        rows = (supabase.table('asset_price').select('target_date')
+                .eq('analysis_id', row['analysis_id']).not_.is_('close', 'null')
+                .order('target_date', desc=True).limit(1).execute().data or [])
+        return rows[0]['target_date'] if rows else None
+    before = latest()
+    anchor = watch[0].get('last_sale_date') or f'{date.today().year}-01-01'
+    if store.extend_series(row['analysis_id'], row['yahoo_symbol'], min(before or anchor, anchor)) is None:
+        store.store_series(row['analysis_id'], row['yahoo_symbol'], None)
+    fx = _fx({row.get('currency') or 'EUR'}, anchor, lambda *_a, **_k: None)
+    if fx['failed']:
+        raise RuntimeError('Could not update prices in euros. Please try again.')
+    from routers._analysis_cache import invalidate
+    invalidate()
+    after = latest()
+    if not after:
+        raise RuntimeError('No stock prices were returned. Please try again later.')
+    return (f'No newer closing price is available. Latest price: {after}.' if after == before
+            else f'Stock prices updated through {after}.')
+
+
 def saved_price_checks(accounts: list[str], *, client=None) -> dict[str, dict]:
     if not accounts:
         return {}

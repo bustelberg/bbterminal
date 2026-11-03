@@ -1,5 +1,7 @@
 'use client';
 
+import { savedBenchmarkSeries } from './benchmarkSnapshot';
+
 import { useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -71,9 +73,9 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   const ratioByYr = useMemo(
     () => seriesByYear(data?.rows ?? [], mode, sbcCorrection), [data, mode, sbcCorrection]);
 
-  const [benchData, benchErr] = useBenchInputs<CashReturnInputs>('cash-return-inputs', benchTarget);
+  const [benchData, benchErr] = useBenchInputs<CashReturnInputs>('cash-return-inputs', benchTarget, undefined, true);
   const benchByYr = useMemo(
-    () => (benchData ? seriesByYear(benchData.rows, mode, sbcCorrection) : null), [benchData, mode, sbcCorrection]);
+    () => (benchData ? savedBenchmarkSeries(benchData, mode === 'roic' ? 'roic' : sbcCorrection ? 'croic_corrected' : 'croic_reported', () => seriesByYear(benchData.rows, mode, sbcCorrection)) : null), [benchData, mode, sbcCorrection]);
 
   const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
 
@@ -116,10 +118,10 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
         </div>
       </div>
 
-      {data == null && !err ? (
+      {(data == null || (!!benchTarget && benchData == null)) && !(err || benchErr) ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
-      ) : err ? (
-        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : (err || benchErr) ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : ratioByYr.size === 0 ? (
           <MissingFundamentals
             message={M.derived ? 'No FCF / capital figures ingested to compute a ratio.'

@@ -54,8 +54,8 @@ def earnings(monkeypatch):
         extras.append([body.cadence, list(metrics)])
         return _CAPS, _TOTALS
 
-    def _rows(_rows, _covered, caps=None, cadence="annual", totals=None):
-        calls.append({"caps": caps, "cadence": cadence, "totals": totals})
+    def _rows(_rows, _covered, caps=None, cadence="annual", totals=None, universe=None):
+        calls.append({"caps": caps, "cadence": cadence, "totals": totals, "universe": universe})
         return {"metrics": [], "blend_notes": {}}
 
     monkeypatch.setattr(e, "_blend_inputs", _inputs)

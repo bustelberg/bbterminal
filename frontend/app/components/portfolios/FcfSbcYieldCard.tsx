@@ -1,5 +1,7 @@
 'use client';
 
+import { savedBenchmarkSeries } from './benchmarkSnapshot';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -98,9 +100,9 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
   const yieldByYr = useMemo(
     () => fcfSbcYieldByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
 
-  const [benchData, benchErr] = useBenchInputs<FcfSbcYieldInputs>('fcf-sbc-yield-inputs', benchTarget);
+  const [benchData, benchErr] = useBenchInputs<FcfSbcYieldInputs>('fcf-sbc-yield-inputs', benchTarget, undefined, true);
   const benchByYr = useMemo(
-    () => (benchData ? fcfSbcYieldByYear(benchData.rows, sbcCorrection) : null), [benchData, sbcCorrection]);
+    () => (benchData ? savedBenchmarkSeries(benchData, sbcCorrection ? 'corrected' : 'reported', () => fcfSbcYieldByYear(benchData.rows, sbcCorrection)) : null), [benchData, sbcCorrection]);
 
   const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
 
@@ -125,10 +127,10 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
           note={'Daily: trailing-twelve-month FCF − SBC stays flat between filings; market cap changes each trading day using the close and share count. Off, cadence follows the tab.'} />
       </div>
 
-      {data == null && !err ? (
+      {(data == null || (!!benchTarget && benchData == null)) && !(err || benchErr) ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
-      ) : err ? (
-        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : (err || benchErr) ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : yieldByYr.size === 0 ? (
           <MissingFundamentals message="No FCF / market-cap figures ingested to compute a yield."
             target={holdingsTarget} name={holdingsName} />

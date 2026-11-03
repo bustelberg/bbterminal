@@ -87,11 +87,11 @@ export default function Page() {
 
   return (
     <CompactHelpProvider><div className="min-h-screen bg-page text-fg">
-      <div className="border-b border-neutral-800/40"><div className="mx-auto w-full max-w-[58rem] px-4 py-5 sm:px-8">
+      <div className="border-b border-neutral-800/40"><div className="mx-auto w-full max-w-[72rem] px-4 py-5 sm:px-8">
         <h1 className="text-xl font-semibold text-fg-strong">{t.page.title}</h1>
       </div></div>
 
-      <div className="mx-auto w-full max-w-[58rem] px-4 py-5 sm:px-8 sm:py-6 space-y-5">
+      <div className="mx-auto w-full max-w-[72rem] px-4 py-5 sm:px-8 sm:py-6 space-y-5">
         {/* The segmented control the rest of the app uses for a small, fixed set of named views
             (see the holdings table's "Weight returns by") — discrete choices, not a slider.
              NOT RENDERED AT ONE TAB. A segmented control with a single, permanently-pressed

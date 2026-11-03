@@ -450,7 +450,9 @@ def load_company_metric_rows(company_id: int, metric_keys: list[str] | None = No
             .in_("metric_code", _LONGEQUITY_METRIC_CODES)
             .order("target_date")
         )))
-    return rows
+    # Narrow chart callers use fiscal price points above, not thousands of daily
+    # closes used to fill those points. Broad valuation callers retain the daily series.
+    return [row for row in rows if row.get('metric_code') != 'close_price'] if requested else rows
 
 
 @router.get("/api/earnings/{company_id}/metrics")
@@ -518,7 +520,7 @@ async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual",
             #  Annual only. Every point of a quarterly series is already a trailing twelve months,
             # so the newest one needs no second name — see `_ltm_rows` for why it cannot be derived
             # on the client from the raw quarters this payload carries.
-            rows = rows + await asyncio.to_thread(_ltm_rows, info["company_id"], rows)
+            rows = rows + await asyncio.to_thread(_ltm_rows, info["company_id"], rows, requested or None)
         return {**info, "metrics": rows}
     except HTTPException:
         raise
@@ -1186,6 +1188,7 @@ async def fundamental_blend(body: FundamentalCoverageRequest, request: Request):
             fund_for = totals.get(code, {})
             out[code] = blend_series(
                 [{"weight": r["weight_pct"], "points": per_company.get(r["company_id"], {}),
+                  **({'min_reporting_companies': 500} if body.universe == 'ACWI' else {}),
                   "fund_points": fund_for.get(r["company_id"], {})}
                  for r in covered], code)
         return out
@@ -1402,7 +1405,7 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
     return out + _ltm_blend_rows(cids, metrics, cadence)
 
 
-def _ltm_rows(company_id: int, annual_rows: list[dict]) -> list[dict]:
+def _ltm_rows(company_id: int, annual_rows: list[dict], metric_keys: list[str] | None = None) -> list[dict]:
     """The LTM row per metric, for the ANNUAL payload — one trailing-twelve-month point per metric,
     at the newest quarterly period-end, when that reaches PAST the last full fiscal year.
 
@@ -1429,7 +1432,8 @@ def _ltm_rows(company_id: int, annual_rows: list[dict]) -> list[dict]:
             newest_annual[code] = d
     out: list[dict] = []
     newest_ttm: dict[str, dict] = {}
-    for r in _ttm_metric_rows(company_id):          # already TTM, cadence-aware, annual-coded
+    ttm = _ttm_metric_rows(company_id, metric_keys) if metric_keys else _ttm_metric_rows(company_id)
+    for r in ttm:                                 # already TTM, cadence-aware, annual-coded
         code = str(r.get("metric_code") or "")
         d = str(r.get("target_date"))[:10]
         if r.get("numeric_value") is not None and d > str(newest_ttm.get(code, {}).get(
@@ -2389,7 +2393,8 @@ def _positive_only_members(by_metric: dict[str, dict[int, dict[str, float]]],
 def _blend_rows(rows: list[dict], covered: list[dict],
                 caps: dict[int, dict[str, float]] | None = None,
                 cadence: str = "annual",
-                totals: dict[str, dict[int, dict[str, float]]] | None = None) -> dict:
+                totals: dict[str, dict[int, dict[str, float]]] | None = None,
+                universe: str | None = None) -> dict:
     """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
     streaming one cannot drift: they differ only in HOW the rows arrive.
 
@@ -2518,6 +2523,7 @@ def _blend_rows(rows: list[dict], covered: list[dict],
                 for year in {d[:4] for d in points if d[:4] < first}:
                     weights.setdefault(year, weights[first])
             blend_members.append({"weight": r["weight_pct"],
+                          **({'min_reporting_companies': 500} if universe == 'ACWI' else {}),
                           # Absent for a portfolio — see the `caps` note on this function.
                           **({"weights": weights} if weights is not None else {}),
                           "points": per_company.get(r["company_id"], {}),
@@ -2764,7 +2770,7 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: R
             #  Same blend, different read. Only the fetch changes — `_blend_rows` is untouched, so
             # a narrowed request cannot blend by a different rule than a full one.
             rows = _bulk_blend_rows([r["company_id"] for r in covered], body.metrics, body.cadence)
-            return _blend_rows(rows, covered, caps, body.cadence, totals)
+            return _blend_rows(rows, covered, caps, body.cadence, totals, body.universe)
         # The PORTFOLIO path takes the same cadence as the single-company one, through the same
         # roll-up — otherwise a book's Long Equity tab would ignore a toggle its holdings honour.
         load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
@@ -2775,7 +2781,7 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: R
         # stops at its last full fiscal year while a benchmark blended through `_bulk_blend_rows`
         # runs a quarter further — see `_ltm_blend_rows`.
         rows += _ltm_blend_rows([r["company_id"] for r in covered], None, body.cadence)
-        return _blend_rows(rows, covered, caps, body.cadence, totals)
+        return _blend_rows(rows, covered, caps, body.cadence, totals, body.universe)
 
     return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
 
@@ -2827,11 +2833,64 @@ async def _blend_metrics_events(body: FundamentalCoverageRequest):
         # every aggregatable metric's euros. See `_blend_extras`.
         caps, totals = await asyncio.to_thread(_blend_extras, body, covered, [])
         built = await asyncio.to_thread(
-            _blend_rows, rows, covered, caps, body.cadence, totals)
+            _blend_rows, rows, covered, caps, body.cadence, totals, body.universe)
     except Exception as e:  # noqa: BLE001 — see the docstring: there is no status code left to use
         yield _sse({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         return
     yield _sse({"type": "result", "payload": _blend_envelope(built, covered, cov)})
+
+
+class ChartBundleRequest(BaseModel):
+    cadence: str = Field(default='annual', pattern='^(annual|quarterly)$')
+    isin: str | None = None
+    own: FundamentalCoverageRequest | None = None
+    benchmark: FundamentalCoverageRequest | None = None
+
+
+@router.post('/api/earnings/chart-bundle')
+async def chart_bundle(body: ChartBundleRequest):
+    """Both growth lines and all their statistics are one atomic response."""
+    from routers._chart_statistics import paired_statistics
+    from routers._benchmark_snapshots import read, read_comparison
+    keys = ['price_ps', 'eps_nri', 'eps_nri_estimate', 'revenue', 'fcf_ps', 'shares']
+    cadence = body.cadence
+
+    async def own_line():
+        if body.isin:
+            try:
+                return await get_earnings_metrics_by_isin(body.isin, cadence, ','.join(keys))
+            except HTTPException as error:
+                if error.status_code == 404:
+                    return {'metrics': []}
+                raise
+        if body.own and body.own.universe:
+            saved = await asyncio.to_thread(read, body.own.universe, cadence)
+            if saved is None:
+                raise HTTPException(503, 'The saved charts are being prepared. Please try again shortly.')
+            return dict(saved['growth'])
+        if body.own:
+            return await fundamental_blend_metrics(body.own.model_copy(update={'metrics': keys, 'cadence': cadence}), None)
+        raise HTTPException(422, 'A company or portfolio is required')
+
+    async def comparison_line(own):
+        if not body.benchmark:
+            return None, None
+        if body.benchmark.universe:
+            saved = await asyncio.to_thread(read_comparison, body.benchmark.universe, cadence, own.get('metrics', []))
+            if saved is None:
+                raise HTTPException(503, 'The saved benchmark charts are being prepared. Please try again shortly.')
+            return dict(saved['growth']), saved['built_at']
+        return await fundamental_blend_metrics(body.benchmark.model_copy(update={'metrics': keys, 'cadence': cadence}), None), None
+
+    own = await own_line()
+    benchmark, revision = await comparison_line(own)
+    own_stats, bench_stats = await asyncio.to_thread(
+        paired_statistics, own.get('metrics', []), benchmark.get('metrics', []) if benchmark is not None else None,
+        cadence, benchmark.get('chart_statistics') if benchmark else None)
+    own = {**own, 'chart_statistics': own_stats}
+    if benchmark is not None:
+        benchmark = {**benchmark, 'chart_statistics': bench_stats}
+    return {'own': own, 'benchmark': benchmark, 'cadence': cadence, 'benchmark_built_at': revision, 'ready': True}
 
 
 @router.post("/api/earnings/fundamental-blend-metrics/stream")
@@ -3277,6 +3336,26 @@ def _ttm_metric_rows(company_id: int, metric_keys: list[str] | None = None) -> l
     """
     out: list[dict] = []
     requested = set(metric_keys or ())
+    # One paginated read for all requested quarterly codes. The old loop made one
+    # network request per spelling of every metric, even for a four-chart request.
+    metrics = [m for m in _TTM_RULE if not requested or m in requested]
+    codes_by_metric = {m: tuple(c.replace('annuals__', 'quarterly__') for c in _metric_codes(m))
+                       for m in metrics}
+    wanted = sorted({code for codes in codes_by_metric.values() for code in codes})
+    by_code: dict[str, list[dict]] = defaultdict(list)
+    offset = 0
+    while wanted:
+        page = (supabase.table('metric_data')
+                .select('company_id,metric_code,target_date,numeric_value')
+                .eq('company_id', company_id).in_('metric_code', wanted)
+                .gte('target_date', _BLEND_START)
+                .order('target_date').order('metric_code').order('source_code')
+                .range(offset, offset + _PAGE - 1).execute().data or [])
+        for row in page:
+            by_code[row['metric_code']].append(row)
+        if len(page) < _PAGE:
+            break
+        offset += len(page)
     for metric, rule in _TTM_RULE.items():
         # Annual analyst estimates deliberately have no TTM equivalent.  A narrowed caller still
         # gets every requested reported metric that has a declared roll-up, and nothing invented
@@ -3291,7 +3370,7 @@ def _ttm_metric_rows(company_id: int, metric_keys: list[str] | None = None) -> l
         qcodes = tuple(c.replace("annuals__", "quarterly__") for c in _metric_codes(metric))
         rows: list[dict] = []
         for qc in qcodes:
-            rows += _page_metrics(company_id, qc, exact=True)
+            rows += by_code.get(qc, [])
         # The window each point was rolled from — computed only when a caller asked, see the .
         for date, val in _ttm_by_period(rows, rule, key="date").items():
             #  `company_id` IS NOT DECORATION HERE. These rows also feed `_blend_rows`, which keys
@@ -4093,6 +4172,7 @@ async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
                    if m.get("numeric_value") is not None}
             if pts:
                 members.append({"weight": caps.get(cid, 1.0), "points": pts,
+                                **({'min_reporting_companies': 500} if label == 'ACWI' else {}),
                                 "fund_points": totals.get(cid, {}),
                                 "weights": period_caps.get(cid) or None})
         blend = blend_series(members, code)

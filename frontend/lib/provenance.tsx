@@ -9,7 +9,7 @@
  * at the digits. This attaches that whole answer to the value.
  *
  * The badge turns amber when the source-specific freshness policy says the value is stale, and the
- * popover states why. AIRS follows its 08:00 Amsterdam acquisition schedule; dated market feeds
+ * popover states why. AIRS follows its 11:00 Amsterdam acquisition schedule; dated market feeds
  * use their own observation dates. Rendered via {@link InfoTip} so it appears instantly and cannot
  * be clipped by an overflow ancestor.
  */
@@ -154,7 +154,13 @@ export function provenanceFreshness(
   // AIRS happened to publish a newer valuation. This also dates structural AIRS values such as a
   // portfolio name, which have a fetch time but no independent `as_of` date.
   if (source && isAirsSource(source) && fetchedAt) {
-    return airsScheduleFreshness(fetchedAt);
+    const read = airsScheduleFreshness(fetchedAt);
+    if (read.stale) return read;
+    const valuation = snapshotFreshness(asOf);
+    if (valuation?.tone === 'stale') return {
+      stale: true, label: `AIRS values are ${valuation.label}; recently checked`,
+    };
+    return read;
   }
   if (!asOf) return { stale: false, label: '' };
   const f = snapshotFreshness(asOf);
@@ -235,7 +241,7 @@ export type ProvKind = 'copied' | 'formula';
 function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
   const [busy, setBusy] = React.useState(false);
   return (
-    <Field label="Update">
+    <div className="flex items-center">
       <button
         type="button"
         disabled={busy}
@@ -254,21 +260,16 @@ function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
             })
             .finally(() => setBusy(false));
         }}
-        className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-md
-                   bg-accent-200/60 border border-accent-300/60 text-accent-400
-                   hover:bg-accent-200 hover:border-accent-300 active:bg-accent-300/60
+        aria-busy={busy}
+        className="inline-flex items-center justify-center text-[11px] leading-4 font-medium px-2 py-1 rounded-md
+                   bg-transparent border border-neutral-700/60 text-fg-subtle
+                   hover:bg-overlay/5 hover:text-fg hover:border-neutral-600
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50
                    disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
       >
-        {/*  INLINE SVG, NOT AN EMOJI OR A GLYPH. `lib/chartTheme` aside, this app draws its icons;
-            an emoji renders at a different weight on every platform and cannot take `currentColor`. */}
-        <svg className={`w-3 h-3 shrink-0 ${busy ? 'animate-spin' : ''}`} viewBox="0 0 16 16"
-          fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-          <path strokeLinecap="round" d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2v3h-3" />
-        </svg>
         {busy ? 'Refreshing…' : (action.label ?? 'Refresh')}
       </button>
-    </Field>
+    </div>
   );
 }
 
@@ -295,7 +296,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
   //  The card's own action beats the surface's. A tile that knows a targeted door (the benchmark
   // proxy) should use it rather than the whole-book refresh its panel offers everything else.
   const surface = useContext(RefreshContext);
-  const refreshAction = onRefresh ? { run: onRefresh } : surface;
+  const refreshAction = onRefresh ? { run: onRefresh } : isAirsSource(source) ? surface : undefined;
   //  The verdict is passed in, not recomputed. See `provenanceFreshness`: this card recomputing
   // it from `asOf` alone is precisely how it came to contradict the icon that opened it.
   const f = fresh;
@@ -315,14 +316,23 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
   // explain and nothing to act on.
   if (compact) return <CompactHelp summary={what ?? note ?? s.label} method={how}
     worked={worked} notation={legend?.length ? <Legend items={legend} /> : null} calculation={calculation}
-    facts={<>
-      <div>{where ?? s.label}{what && note && <span> · {note}</span>}</div>
-      <div>{when ?? (column ? (lang === 'nl' ? 'Datums staan bij de individuele waarden.' : 'Dates are shown with individual values.')
-        : asOf ? asOf : (lang === 'nl' ? 'Bron heeft geen vastgelegde datum.' : 'Source date unavailable.'))}</div>
-      {!column && fetchedAt && fetchedAt.slice(0, 10) !== asOf?.slice(0, 10) && <div>{lang === 'nl' ? 'Opgehaald' : 'Read'} · {fetchedAt.slice(0, 10)}</div>}
-      {f.stale && <FreshnessPill stale label={f.label} />}
-      {refreshAction && fresh.stale && <RefreshField action={refreshAction} />}
-    </>} />;
+    facts={<div className="space-y-2 border-t border-neutral-800/50 pt-2">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[11px] leading-4">
+        <dt>{lang === 'nl' ? 'Bron' : 'Source'}</dt>
+        <dd className="m-0 text-right text-fg-subtle">{where ?? s.label}</dd>
+        <dt>{lang === 'nl' ? 'Waardedatum' : 'Values dated'}</dt>
+        <dd className="m-0 text-right tabular-nums text-fg-subtle">{when ?? asOf ?? '—'}</dd>
+        {!column && fetchedAt && <>
+          <dt>{lang === 'nl' ? 'Gecontroleerd' : 'Last checked'}</dt>
+          <dd className="m-0 text-right tabular-nums text-fg-subtle">{fetchedAt.slice(0, 10)}</dd>
+        </>}
+      </dl>
+      {note && source !== 'airs_att' && <p className="m-0 text-[11px] leading-4">{note}</p>}
+      {(f.stale || (refreshAction && onRefresh)) && <div className="flex items-center justify-between gap-3 border-t border-neutral-800/50 pt-2">
+        {f.stale ? <span className="text-[11px] leading-4 text-warn-400">{f.label}</span> : <span />}
+        {refreshAction && (fresh.stale || onRefresh) && <div className="shrink-0"><RefreshField action={refreshAction} /></div>}
+      </div>}
+    </div>} />;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
@@ -360,14 +370,14 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
                 : <span className="text-fg-muted">no dated source (a structural / computed value)</span>)}
         </Field>
         {/*  THE ACTION THE AMBER BADGE ALREADY PROMISED. The icon's own aria-label has read
-            "not current; refresh to update" since it was written, and until now there was nowhere
+            "older or incomplete data; view details" since it was written, and until now there was nowhere
             to press: the only things that could move a stale figure were a scheduled tick or a
             whole-book Refresh that re-scrapes AirSPMS to fix one number. Requested 2026-09-08 in
             those words — "so the user can see its outdated and click refresh on that specific
             metric".
              ONLY WHEN STALE. A refresh button under a current figure invites a pointless vendor
             call, and it is the amber badge that makes this an answer rather than a decoration. */}
-        {refreshAction && fresh.stale && <RefreshField action={refreshAction} />}
+        {refreshAction && (fresh.stale || onRefresh) && <RefreshField action={refreshAction} />}
         {/*  THE MATHS IS TYPESET HERE TOO, NOT ONLY IN `AspectCard` (2026-09-01). The house
             style says every ⓘ on this dashboard states its arithmetic through `worked` + `legend`
             — and half the dashboard's cards are PROVENANCE cards, which had no way to. So the
@@ -572,7 +582,7 @@ export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, co
         className={`ml-1 ${fresh.stale ? INFO_ICON_WARN : INFO_ICON}`}
         //  The state is in the label, not only in the hue. A colour is the whole signal for a
         // sighted reader and none of it for anyone else.
-        aria-label={`data source and formula${fresh.stale ? ' — not current; refresh to update' : ''}`}
+        aria-label={`data source and formula${fresh.stale ? ' — older or incomplete data; view details' : ''}`}
       >
         {fresh.stale ? '!' : 'i'}
       </span>

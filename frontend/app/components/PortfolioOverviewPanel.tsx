@@ -15,7 +15,6 @@ import { defaultLookThroughCertificates } from './portfolios/portfolioDefaults';
 import { cancelJob, isAirsBusy, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
 import { PORTFOLIO_SECTORS } from './portfolios/etfSectorLookThrough';
-import { createLiveReload } from '../../lib/liveReload';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import AccountTransactions from './portfolios/AccountTransactions';
 import AccountTotalReturn from './portfolios/AccountTotalReturn';
@@ -527,24 +526,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       console.warn('[AIRS models] all substantial accounts are already paired');
     }
 
-    // Scanning discovers/repairs model compositions; it does NOT calculate their current return.
-    // The row Refresh does this through `refresh_portfolio_fully`. Run the shared batch equivalent
-    // even when no scan was necessary so Refresh all has the same result as refreshing every row.
-    setScanningModels(true);
-    try {
-      const { id, done } = await startJob(
-        `${API_URL}/api/airs/model-portfolios/refresh/job`,
-        'Refreshing paired model portfolios');
-      setModelsJob(id);
-      const job = await done;
-      if (job.status === 'failed') logDetail('model portfolio refresh failed', job.summary);
-      else console.warn(`[AIRS models] valuation refresh ${job.status} — ${job.summary ?? ''}`);
-    } catch (e) {
-      console.warn('[AIRS models] valuation refresh failed — the accounts are unaffected', e);
-    } finally {
-      setScanningModels(false);
-      setModelsJob(null);
-    }
+    // AIRS supplies the overview return and dates. Stock-price calculations are
+    // maintained by scheduled jobs, separately from this refresh.
+
   };
 
   // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
@@ -577,7 +561,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
 
   }, []);
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (completedAccount?: string) => {
     await traceScope('overview', 'loading the portfolios table', async () => {
       try {
         const r = await apiFetch(`${API_URL}/api/airs/portfolios/overview`);
@@ -604,8 +588,20 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               + 'never been scraped. Every return column on this page will be blank.');
           }
         }
-        writeOverviewCache(body);
-        setRows(body);
+        if (completedAccount) {
+          // Publish the whole completed row together. Other accounts may still be
+          // between reports, so their partially written values must stay off-screen.
+          const updated = body.find((row) => row.dynamic_portefeuille === completedAccount);
+          if (updated) setRows((previous) => {
+            const current = previous ?? [];
+            return current.some((row) => row.dynamic_portefeuille === completedAccount)
+              ? current.map((row) => row.dynamic_portefeuille === completedAccount ? updated : row)
+              : [...current, updated];
+          });
+        } else {
+          writeOverviewCache(body);
+          setRows(body);
+        }
         setErr(null);
       } catch (e) {
         traceError('overview', 'the portfolios table could not be loaded', e);
@@ -626,7 +622,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     let lastStarted = -Infinity;
     // Read stored overview data only; this never starts an AIRS refresh.
     const reload = () => {
-      if (document.hidden || pending || Date.now() - lastStarted < 5000) return;
+      if (refreshingAll || document.hidden || pending || Date.now() - lastStarted < 5000) return;
       pending = true;
       lastStarted = Date.now();
       void loadOverview().finally(() => { pending = false; });
@@ -640,7 +636,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       document.removeEventListener('visibilitychange', reload);
       window.removeEventListener('focus', reload);
     };
-  }, [loadOverview]);
+  }, [loadOverview, refreshingAll]);
 
   /**
    * Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
@@ -658,7 +654,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * job is two places to keep in step, and the toast already carries the outcome, the failure and
    * the countdown. `refreshMsg` stays for everything else on this panel that is NOT a job.
    */
-  const refreshOne = async (portefeuille: string, displayName = portefeuille) => {
+  const refreshOne = async (portefeuille: string, displayName = portefeuille, cascade = true) => {
     //  One job per row, enforced here and not by the button's `disabled`. A second job on the same
     // account cannot do any work — the backend `_LOCK` answers "busy" — but it DOES get a job id
     // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
@@ -670,7 +666,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     setRefreshingRows((s) => new Set(s).add(portefeuille));
     try {
       const { id, done } = await startJob(
-        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
+        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job?cascade=${cascade}`,
         t.common.refreshingFromAirs(displayName), undefined, undefined, { label: displayName });
       setRowJobs((m) => ({ ...m, [portefeuille]: id }));
       //  The cancel that arrived before the id. The button flips on the press, so Cancel is
@@ -740,56 +736,33 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * real loss of diagnosability disguised as cleanup. The toast carries `i/n: name` live, which is
    * what answers "is it moving"; this answers "what did it actually do".
    */
-  /**
-   * Reload the table WHILE a fleet scan is running, so rows land as they are written.
-   *
-   *  The scan stores each account as it goes, and the panel used to repaint only when the whole
-   * job resolved — several minutes of watching figures that had already been replaced in the
-   * database. This is driven by the job's own progress lines (`startJob`'s `onProgress`), so there
-   * is no second source of truth about how far along it is.
-   *
-   *  Throttled, and single-flighted. `loadOverview` reads every account; firing it on all 44
-   * progress lines would be 44 whole-table reads racing each other, and the LAST one to return
-   * would win regardless of which was newest — a scan could visibly go backwards. One in flight at
-   * a time, at most one every `RELOAD_EVERY_MS`, and a request that arrives while one is running
-   * sets a flag instead of queueing a second.
-   *
-   *  It does not touch `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
-   * mid-scan would collapse or blank an open book under the reader every few seconds. The end of
-   * the run still clears them once, which is where a full re-read belongs.
-   */
-  /**
-   *  The throttle and the single-flight live in `lib/liveReload.ts`, WHICH IS TESTED. Two bugs
-   * were found there by its own tests and neither would have been visible here: the FIRST advance
-   * was swallowed by the throttle window, and a throttled advance set a flag that only a RUNNING
-   * reload ever consumed — so a scan reporting its remaining progress inside one window never
-   * repainted again. Concurrency written inline in a component is concurrency nobody can test.
-   *
-   *  It does not touch `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
-   * mid-scan would collapse or blank an open book under the reader every few seconds. The end of
-   * the run still clears them once, which is where a full re-read belongs.
-   */
-  const live = useRef<ReturnType<typeof createLiveReload> | null>(null);
-
+  // Completed accounts are published in scan order. Narration and account-start
+  // events never reload rows that AIRS is still writing.
   // Both modes stay within the dashboard collections and their model dependencies.
-  // A normal press refreshes missing/stale reports; forcing re-reads everything in that scope.
-  const refreshAll = async (force = false) => {
+  // A manual press must re-read AIRS, even if the incremental scheduler would skip it.
+  const refreshAll = async (force = true) => {
     if (refreshingAll) return;
     setRefreshMsg(null);
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
     setRefreshingAll(true);
     try {
-      //  A fresh one per run. Its `seen` high-water mark is per-scan; reusing it would make the
-      // second "Refresh all" of a session ignore every progress line below the first run's count.
-      live.current = createLiveReload(() => loadOverview(), 4000);
+      let completedRows = Promise.resolve();
       const { id, done } = await startJob(
         `${API_URL}/api/airs/vermogen/refresh/job${force ? '?force=true' : ''}`,
         t.overview.refreshAll,
         undefined,
-        (e) => live.current?.onProgress(e.done));
+        (e) => {
+          if (!e.accountDone || !e.account) return;
+          const account = e.account;
+          completedRows = completedRows.then(async () => {
+            await loadOverview(account);
+            if (open === account) await loadDetail(account);
+          }).catch((error) => logDetail(`could not update ${account}`, error));
+        });
       setFleetJob(id);
       const job = await done;
+      await completedRows;
       //  Cleared the moment phase one resolves, not in the `finally`. Phase two is a job of its
       // own now, and `allJob = fleetJob ?? modelsJob` is only the LIVE one if the finished half
       // stops claiming to be running — otherwise the  would spend the whole model scan wired to a
@@ -824,7 +797,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // readable nickname and the id-only views. Running it after the reader pressed Cancel would
       // be minutes more of exactly what they asked to stop.
       if (job.status === 'done' && !isAirsBusy(job)) {
-        await scanModels(force);
+        await scanModels(false);
         setDetail({});
         setIsins({});
         await loadOverview();
@@ -975,7 +948,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         SHARED COMPONENTS KEPT THEIR SIZES ON PURPOSE — the provenance ⓘ cards, the state badges,
        `LinkCell` and the Analyse modal all render on other screens too, so bumping them here
        would silently resize those. What grew is what this file owns. */
-    <section className="mx-auto w-full max-w-[54rem] rounded-2xl border border-neutral-800/40 bg-card p-3 shadow-sm sm:p-5 space-y-4">
+    <section className="mx-auto w-full max-w-[68rem] rounded-2xl border border-neutral-800/40 bg-card p-3 shadow-sm sm:p-5 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <h3 className="text-[15px] font-semibold text-fg-strong">
@@ -988,8 +961,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-          {/* A normal press checks every visible account and re-reads only data that is missing or
-              stale. That keeps Refresh all quick while the daily scan maintains full coverage. */}
+          {/* A manual refresh re-reads AIRS reports; stock-price work runs separately. */}
           <button type="button"
             onClick={() => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(); } }}
             // Inert only in the gap between the press and the job id arriving — see the row button.
@@ -998,7 +970,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               ? (modelsJob
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
                 : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
-              : 'Reads every current AIRS account: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book. It also refreshes and recalculates every paired model portfolio, just like the row-level Refresh. This can take several minutes.'}
+              : 'Updates each portfolio from AIRS, in tab order. Each row updates as soon as its AIRS data is saved.'}
             className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
@@ -1059,8 +1031,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
           {/* Narrow fixed action/numeric columns, with the remaining width for names.
               The table scrolls within this card on small screens. */}
-          <table className="w-full min-w-[40rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[12rem]" /></colgroup>
+          <table className="w-full min-w-[52rem] table-fixed text-[13px] whitespace-nowrap">
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[12rem]" /><col className="w-[12rem]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1074,6 +1046,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
                 <th className="px-2 py-2.5 font-medium text-right"
                   title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">Since</th>
+                <th className="px-2 py-2.5 font-medium text-right"
+                  title="Latest AIRS valuation date available for this portfolio.">To</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1281,6 +1255,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
+                          onRefresh={async () => {
+                            await refreshOne(r.dynamic_portefeuille, r.name, false);
+                            return null;
+                          }}
                           staleReason={r.missing_reports?.includes('att')
                             ? 'Rendement was missing from the latest AIRS scan' : undefined}
                           what="This account's return so far this year, as AIRS itself reports it."
@@ -1291,10 +1269,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
                         }).format(new Date(`${r.ytd_from}T00:00:00Z`)) : '—'}
                       </td>
+                      <td className="px-2 py-2.5 text-right text-[13px] text-fg-muted">
+                        {r.as_of ? new Intl.DateTimeFormat('en-GB', {
+                          day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+                        }).format(new Date(`${r.as_of}T00:00:00Z`)) : '—'}
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={5} className="px-3 py-3 bg-inset space-y-2">
+                        <td colSpan={6} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
                             <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
                           )}

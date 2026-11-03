@@ -163,7 +163,7 @@ export default function OwnerEarningsModal({
    * of the book it is — and a 62% sleeve and a 4% one draw equally confident lines. `sharePct` is
    * the allocation slice's own figure, so it agrees with the bars on the screen behind this one.
    */
-  const eyebrow = ['Fundamental', book ? title : null,
+  const eyebrow = [book ? title : null,
     book && sharePct != null ? `${sharePct.toFixed(1)}% of the portfolio` : null,
   ].filter(Boolean).join(' · ');
   //  `scope` IS BUILT FURTHER DOWN, below the tab state — it now follows the company the
@@ -262,6 +262,7 @@ export default function OwnerEarningsModal({
   const [sbcCorrection, setSbcCorrection] = useState(true);
   // Graphs and Tables keep independent selectors, so retain both reported targets and choose the
   // one belonging to the visible tab. A hidden visited tab must never overwrite "currently active".
+  const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
   const [graphsBenchmark, setGraphsBenchmark] = useState<BenchTarget | null>(null);
   const [tablesBenchmark, setTablesBenchmark] = useState<BenchTarget | null>(null);
   const activeBenchmark = tab === 'longequity' ? graphsBenchmark
@@ -302,8 +303,9 @@ export default function OwnerEarningsModal({
         embedded ? 'w-full h-[82vh] min-w-0' : 'w-[80vw] h-[80vh]'}`}
         onClick={(e) => e.stopPropagation()}>
 
-        <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
-          <div className="min-w-0">
+        <div className="flex shrink-0 items-center gap-4 overflow-x-auto pb-3">
+        <div className="min-w-0 shrink-0">
+          <div className="flex items-baseline gap-3">
             {/*  THE EYEBROW IS EVERYTHING THAT IS TRUE OF OTHER ROWS TOO — the dialog, the slice,
                 the identifier. The line under it is the one thing that is true only of this one.
                 Keeping them at the same size is what made the portfolio's name disappear into a
@@ -311,8 +313,8 @@ export default function OwnerEarningsModal({
             {/*  SMALL AND MUTED, NOT UPPERCASED. The size and the ink already set the name below
                 apart; small caps on top of that was decoration, and it stopped being harmless once
                 the line carried a sentence — "62.4% OF THE PORTFOLIO" shouts a footnote. */}
-            <div className="flex items-baseline gap-2 flex-wrap text-sm text-fg-muted">
-              <span>{eyebrow}</span>
+            <div className="flex shrink-0 items-baseline gap-2 whitespace-nowrap text-xs text-fg-muted">
+              {eyebrow && <span>{eyebrow}</span>}
               {/*  NOT WHEN IT IS THE SUBJECT. A company with no name on file is titled BY its ISIN
                   below, where printing it twice would read as two different identifiers. */}
               {/*  `shownIsin`, NOT `isin` — on a valuation tab switched to company B this line
@@ -327,11 +329,10 @@ export default function OwnerEarningsModal({
                 more than the type itself does. */}
             {/*  `subject` EVERYWHERE EXCEPT THE TWO VALUATION TABS, where the reader may have
                 switched this modal to company B and nothing else on those screens says so. */}
-            <div className="text-2xl font-semibold text-fg-strong truncate leading-tight">
+            <div className="max-w-[20rem] text-lg font-semibold text-fg-strong truncate leading-tight"
+              title={onValuationTab ? (shownName || shownIsin) : subject}>
               {onValuationTab ? (shownName || shownIsin) : subject}</div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close"
-            className="text-fg-faint hover:text-fg-strong text-xl leading-none px-1 -mt-1">×</button>
         </div>
 
         {/* Tabs: the chart suite, the LongEquity revenue-growth read, and — for a single company
@@ -343,8 +344,8 @@ export default function OwnerEarningsModal({
             the tab and then explaining the emptiness inside it would be an invitation to a number
             that does not exist. */}
         {hasInstrument && (
-          <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
-          <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
+          <div className="flex flex-1 items-center gap-3 whitespace-nowrap">
+          <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
             {((isAgg
               //  `Tables` SITS BESIDE `Graphs`. It is the same reads those cards draw,
               // summarised, so it belongs with them rather than at the far end of the row.
@@ -377,6 +378,7 @@ export default function OwnerEarningsModal({
               the SBC box would make the same action appear and disappear depending on which chart
               you were looking at. It sits in the right-aligned group so it keeps its place when
               the SBC label comes and goes; `ml-auto` moved onto this wrapper for the same reason. */}
+          <div ref={setControlsHost} className="flex shrink-0 items-center" />
           <div className="ml-auto flex items-center gap-3 min-w-0">
           {/*  NO `onDone` — THE COMPONENT ALREADY DROPS THE READ CACHE ITSELF, which is what makes
               a filled figure reachable on every tab here. This used to re-key the Old-charts blend,
@@ -401,8 +403,8 @@ export default function OwnerEarningsModal({
 
               Its `title` carries the coverage instead, which is the honest place for it: the
               control is stable, the scope is stated. */}
-          <LangSwitch lang={lang} onChange={setLang}
-            title="Language. English is the source; so far only the Tables tab is translated — the other tabs stay English whichever is selected." />
+          {!embedded && <LangSwitch lang={lang} onChange={setLang}
+            title="Language. English is the source; so far only the Tables tab is translated — the other tabs stay English whichever is selected." />}
           {/* Only on the tab it governs — and it governs four of that tab's charts, which is why it
               is a tab-level control rather than something inside one card. Stock-based compensation
               is a real cost paid in shares that never leaves the cash-flow statement, so reported
@@ -447,6 +449,9 @@ export default function OwnerEarningsModal({
           </div>
           </div>
         )}
+        <button type="button" onClick={onClose} aria-label="Close"
+          className="ml-auto shrink-0 text-fg-faint hover:text-fg-strong text-xl leading-none px-1">×</button>
+        </div>
 
         {/* The ONLY scrolling region. A tab that wants its own always-visible controls makes
             them `sticky top-0` inside here — see LongEquityTab. */}
@@ -496,6 +501,7 @@ export default function OwnerEarningsModal({
                 drill-down and the ingest, and on a group it was the bare "Stocks". See `subject`. */}
             <LongEquityTab isin={isin} name={subject} basket={basket} portfolioId={portfolioId}
               compare={compare}
+              controlsHost={tab === 'longequity' ? controlsHost : null}
               onBenchmarkChange={setGraphsBenchmark}
               sbcCorrection={sbcCorrection} />
           </div>

@@ -1739,6 +1739,37 @@ def _fire_benchmark_fundamentals() -> None:
     _spawn_body("benchmark_fundamentals_fill")
 
 
+def _fire_acwi_weekly_coverage() -> None:
+    _spawn_body('acwi_weekly_coverage')
+
+
+def _body_acwi_weekly_coverage(ctx=None) -> tuple[str, dict]:
+    from routers._acwi_weekly import run
+    from common.pg import _db_url
+    import psycopg
+    class WeeklyContext(_LogCtx):
+        def emit(self, kind, message='', **data):
+            super().emit(kind, message, **data)
+            if ctx is not None and kind == 'diagnostic':
+                ctx.emit(kind, message, **data)
+        def spent(self, calls):
+            super().spent(calls)
+            if ctx is not None:
+                ctx.spent(calls)
+    url = _db_url()
+    if not url:
+        raise RuntimeError('Weekly ACWI maintenance requires a database connection for its cross-replica lock')
+    with psycopg.connect(url, autocommit=True, connect_timeout=5,
+                         options='-c statement_timeout=5000') as conn:
+        if not conn.execute("SELECT pg_try_advisory_lock(hashtext('bbterminal.acwi_weekly_coverage'))").fetchone()[0]:
+            return 'Weekly ACWI maintenance is already running.', {'skipped': 'another replica holds the lease'}
+        try:
+            return run(WeeklyContext(lambda: _cancel_requested(ctx), step=_reporter(ctx), label='ACWI'),
+                       reserve=_FUNDAMENTALS_REGION_FLOOR)
+        finally:
+            conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.acwi_weekly_coverage'))")
+
+
 def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
     """`[(company_id, gurufocus exchange_code)]` for one index — the GuruFocus side of it.
 
@@ -1973,10 +2004,11 @@ def _fire_airs_model_prices() -> None:
     _spawn_body("airs_model_prices")
 
 
-def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
-    """Price each paired model from today's stored composition without another AIRS read.
+def _body_airs_model_prices(ctx=None, *, stored_composition: bool = True) -> tuple[str, dict]:
+    """Price paired models, reusing today's scan only for the scheduled pipeline.
 
-    Attempt every model, then report any failures together in the job receipt.
+    Manual refreshes read compositions live: the preceding repair-only scan may have
+    retained yesterday's valid composition. Attempt every model and report failures together.
     """
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_portfolio_refresh import refresh_portfolio  # noqa: PLC0415
@@ -1997,7 +2029,10 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
 
     def _on_result(name: str, res: dict) -> None:
         done["n"] += 1
-        step(done["n"], len(paired), f"{dashboard_progress_label(name)} — {res.get('model_status') or res.get('status')}")
+        message = f"{dashboard_progress_label(name)} — {res.get('model_status') or res.get('status')}"
+        if res.get("error"):
+            message += f": {res['error']}"
+        step(done["n"], len(paired), message)
 
     step(0, len(paired), f"pricing {len(paired)} model portfolio(s)")
     results = []
@@ -2006,7 +2041,7 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
             raise _Cancelled("stopped before model pricing")
         try:
             result = refresh_portfolio(pid, lambda kind, **kw: step(done["n"], len(paired), kw.get("message", "")),
-                                       stored_composition=True)
+                                       stored_composition=stored_composition)
             results.append({"portefeuille": account, "model_portfolio_id": pid,
                             "model_status": "skipped" if result.get("status") == "skipped" else "ok",
                             "model": result})
@@ -2414,6 +2449,7 @@ def _register_bodies() -> None:
         "benchmark_price_slice": _body_benchmark_price_slice,
         "asset_price_refresh": _body_asset_price_refresh,
         "benchmark_fundamentals_fill": _body_benchmark_fundamentals,
+        'acwi_weekly_coverage': _body_acwi_weekly_coverage,
         "table_size_sample": _body_table_size_sample,
     })
     #  The same late binding, for the same reason — see `_WATCHDOG_STARTERS`. These two are the
@@ -2784,6 +2820,7 @@ def register_scheduler(app) -> None:
         # Weekly due-only fundamentals pass. It fetches only companies whose next filing could
         # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
+        _register("acwi_weekly_coverage", _fire_acwi_weekly_coverage)
         # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week
         # overlap and immediately repair a rescale; this Monday slice catches isolated old-bar
         # corrections that leave the recent tail untouched.
