@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, type WeeklyCell, type WeeklyReturns } from './weeklyReturns';
+import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, weeklyCorrelation, type WeeklyCell, type WeeklyReturns } from './weeklyReturns';
 
 describe('Instrument-only weekly returns', () => {
   const options = [
@@ -49,5 +49,27 @@ describe('Instrument-only weekly returns', () => {
     const sample = data();
     sample.selected!.weeks[1] = { status: 'missing_price', from_price: 110, price: null, return_pct: null };
     expect(periodReturn(sample)?.value).toBeCloseTo(-1);
+  });
+  it('calculates positive and negative correlation from paired weekly returns', () => {
+    const a = data(), b = data();
+    expect(weeklyCorrelation(a, b)).toEqual({ value: expect.closeTo(1), count: 3 });
+    b.selected!.weeks.forEach((cell) => { cell.return_pct = -cell.return_pct!; });
+    expect(weeklyCorrelation(a, b).value).toBeCloseTo(-1);
+  });
+  it('excludes missing, mismatched and out-of-window observations', () => {
+    const a = data(), b = data();
+    b.periods[0].as_of_date = '2026-01-03';
+    expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 2 });
+    b.selected!.weeks[1].return_pct = null;
+    expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 1 });
+    expect(weeklyCorrelation(a, a, ['2026-01-11', '2026-01-18'])).toEqual({ value: null, count: 2 });
+    expect(weeklyCorrelation(null, a)).toEqual({ value: null, count: 0 });
+  });
+  it('does not invent a correlation for a constant series', () => {
+    const a = data(), b = data();
+    b.selected!.weeks.forEach((cell) => { cell.return_pct = 0; });
+    expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 3 });
+    b.selected!.weeks.forEach((cell) => { cell.return_pct = 3.3; });
+    expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 3 });
   });
 });

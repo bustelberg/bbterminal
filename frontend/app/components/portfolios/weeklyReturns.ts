@@ -32,6 +32,36 @@ export function periodReturn(data: WeeklyReturns | undefined, window?: [string, 
   return Number.isFinite(value) ? { value, from, to } : null;
 }
 
+/** Pearson correlation of paired weekly returns over identical actual quote intervals. */
+export function weeklyCorrelation(first: WeeklyReturns | null, second: WeeklyReturns | null, window: [string, string] | null = null) {
+  const other = new Map<string, number>();
+  const key = (period: WeeklyReturns['periods'][number]) => `${period.target_date}|${period.from_date}|${period.as_of_date}`;
+  second?.periods.forEach((period, index) => {
+    const value = second.selected?.weeks[index]?.return_pct;
+    if (period.from_date && period.as_of_date && value != null && Number.isFinite(value)) other.set(key(period), value);
+  });
+  const pairs: [number, number][] = [];
+  first?.periods.forEach((period, index) => {
+    if (window && (period.target_date < window[0] || period.target_date > window[1])) return;
+    const a = first.selected?.weeks[index]?.return_pct;
+    const b = other.get(key(period));
+    if (a != null && Number.isFinite(a) && b != null) pairs.push([a, b]);
+  });
+  const count = pairs.length;
+  if (count < 3) return { value: null, count };
+  if (pairs.every(([a]) => a === pairs[0][0]) || pairs.every(([, b]) => b === pairs[0][1])) return { value: null, count };
+  const scale = Math.max(1, ...pairs.flatMap(([a, b]) => [Math.abs(a), Math.abs(b)]));
+  const meanA = pairs.reduce((sum, [a]) => sum + a / scale, 0) / count;
+  const meanB = pairs.reduce((sum, [, b]) => sum + b / scale, 0) / count;
+  let covariance = 0, varianceA = 0, varianceB = 0;
+  pairs.forEach(([a, b]) => {
+    const x = a / scale - meanA, y = b / scale - meanB;
+    covariance += x * y; varianceA += x * x; varianceB += y * y;
+  });
+  const value = covariance / Math.sqrt(varianceA * varianceB);
+  return { value: Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : null, count };
+}
+
 export function instrumentLabel(instrument: InstrumentOption): string {
   return [instrument.name, instrument.currency, instrument.isin].filter(Boolean).join(' · ');
 }

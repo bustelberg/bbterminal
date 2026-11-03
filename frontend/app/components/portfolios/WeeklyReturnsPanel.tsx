@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { useLang } from '../../../lib/i18n';
-import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
+import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, weeklyCorrelation, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
 
 const day = (value: string | null, nl: boolean) => value
   ? new Date(`${value}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
@@ -319,6 +319,7 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   const linked = { hovered, onHover, window, onWindow };
   const onFirst = useCallback((data: WeeklyReturns | null) => setFirst(data), []);
   const onSecond = useCallback((data: WeeklyReturns | null) => setSecond(data), []);
+  const correlation = useMemo(() => weeklyCorrelation(first, second, window), [first, second, window]);
   const scale = Math.max(1, ...[first, second].flatMap((data) =>
     weeklyBars(data?.selected?.weeks ?? []).map((value) => Math.abs(value ?? 0)))) * 1.1;
   if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
@@ -327,8 +328,19 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
       <span>{window ? `${day(weekStart(window[0]) < '2026-01-01' ? '2026-01-01' : weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
       {window && <button type="button" className="text-accent-300 hover:underline" onClick={() => onWindow(null)}>{lang === 'nl' ? 'Selectie wissen' : 'Clear selection'}</button>}
     </div>
-    <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
+    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2">
       <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} linked={linked} />
+      <div className="flex h-24 w-24 self-center flex-col items-center justify-center gap-1 rounded-xl border border-neutral-800/40 bg-elevated text-center"
+        title={lang === 'nl'
+          ? 'Correlatie van wekelijkse koersrendementen: −1 tegenovergesteld, 0 geen lineair verband, +1 gelijkgericht. Alleen overeenkomende koersdatums; minimaal 3 weken. Volgt de geselecteerde periode.'
+          : 'Weekly price-return correlation: −1 opposite, 0 no linear relationship, +1 together. Matching price dates only; at least 3 weeks. Follows the selected period.'}>
+        <span className="text-[11px] text-fg-muted">{lang === 'nl' ? 'Correlatie' : 'Correlation'}</span>
+        <span className="text-2xl font-semibold tabular-nums text-fg">{correlation.value == null ? '—' : correlation.value.toFixed(2)}</span>
+        <span className="text-[10px] text-fg-muted">{!first || !second ? (lang === 'nl' ? 'Kies 2 instrumenten' : 'Choose 2 instruments')
+          : correlation.count < 3 ? (lang === 'nl' ? 'Minimaal 3 weken' : 'At least 3 weeks')
+          : correlation.value == null ? (lang === 'nl' ? 'Geen variatie' : 'No variation')
+          : `${correlation.count} ${lang === 'nl' ? 'weken' : 'weeks'}`}</span>
+      </div>
       <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onSecond} linked={linked} />
     </div>
   </div>;
