@@ -21155,14 +21155,36 @@
           },
           {
             "in": "query",
+            "name": "instrument_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "in": "query",
             "name": "weeks",
             "required": false,
             "schema": {
-              "default": 12,
-              "maximum": 104,
-              "minimum": 4,
-              "title": "Weeks",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 104,
+                  "minimum": 4,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Weeks"
             }
           }
         ],
@@ -21207,14 +21229,13 @@
           },
           {
             "in": "query",
-            "name": "weeks",
-            "required": false,
+            "name": "instrument_id",
+            "required": true,
             "schema": {
-              "default": 12,
-              "maximum": 104,
-              "minimum": 4,
-              "title": "Weeks",
-              "type": "integer"
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Instrument Id",
+              "type": "string"
             }
           }
         ],

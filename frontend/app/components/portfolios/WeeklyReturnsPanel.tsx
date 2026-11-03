@@ -1,141 +1,135 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { useLang } from '../../../lib/i18n';
-import { priceSegments, type WeeklyReturns, type WeeklyInstrument } from './weeklyReturns';
+import { instrumentLabel, searchInstruments, weeklyBars, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
 
-const quote = (value: number | null | undefined) => value == null ? '—'
-  : value.toLocaleString('nl-NL', { maximumFractionDigits: 4 });
-const day = (value: string | null) => value ? new Date(`${value}T12:00:00`).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
+const day = (value: string | null, nl: boolean) => value
+  ? new Date(`${value}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const percent = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 
-function PriceChart({ instrument, data }: { instrument: WeeklyInstrument; data: WeeklyReturns }) {
-  const segments = priceSegments(instrument.weeks);
-  const prices = segments.flat().map((point) => point.price);
-  if (!prices.length) return null;
-  const low = Math.min(...prices), high = Math.max(...prices);
-  const x = (index: number) => 80 + index / Math.max(1, data.periods.length - 1) * 670;
-  const y = (price: number) => high === low ? 70 : 20 + (high - price) / (high - low) * 100;
-  return <section className="rounded-lg border border-neutral-800/40 bg-elevated p-3">
-    <div className="flex flex-wrap justify-between gap-2 text-xs">
-      <span className="font-medium text-fg-strong">{instrument.name}</span>
-      <span className="text-fg-subtle">AIRS · Huidige koers · {instrument.currency}</span>
-    </div>
-    <svg viewBox="0 0 800 150" role="img" aria-label={`${instrument.name} · AIRS prices`} className="mt-2 w-full max-h-44 text-accent-400">
-      <text x="0" y="24" fill="currentColor" fontSize="11">{quote(high)}</text>
-      <text x="0" y="123" fill="currentColor" fontSize="11">{quote(low)}</text>
-      <line x1="80" x2="750" y1="120" y2="120" stroke="currentColor" opacity=".15" />
-      {segments.map((segment, i) => <g key={i}>
-        <polyline points={segment.map((point) => `${x(point.index)},${y(point.price)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="2" />
-        {segment.map((point) => <circle key={point.index} cx={x(point.index)} cy={y(point.price)} r="3" fill="currentColor">
-          <title>{day(data.periods[point.index].as_of_date)} · {quote(point.price)} {instrument.currency}</title>
-        </circle>)}
-      </g>)}
-      <text x="80" y="145" fill="currentColor" fontSize="10">{day(data.periods[0]?.as_of_date)}</text>
-      <text x="750" y="145" textAnchor="end" fill="currentColor" fontSize="10">{day(data.periods.at(-1)?.as_of_date ?? null)}</text>
-    </svg>
-  </section>;
+function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
+  const bars = weeklyBars(data.selected?.weeks ?? []);
+  const limit = Math.max(1, ...bars.map((value) => Math.abs(value ?? 0))) * 1.1;
+  const left = 65, right = 925, top = 25, bottom = 260;
+  const mid = (top + bottom) / 2;
+  const step = (right - left) / Math.max(1, bars.length);
+  const width = Math.min(18, step * .65);
+  const y = (value: number) => mid - value / limit * (bottom - top) / 2;
+  const labels: Record<string, string> = nl ? {
+    added: 'Toegevoegd', reentered: 'Opnieuw gekocht', sold: 'Verkocht', not_held: 'Niet in bezit',
+    missing_snapshot: 'Geen koers', missing_previous: 'Vorige koers ontbreekt', missing_price: 'Geen koers',
+  } : { added: 'Added', reentered: 'Bought again', sold: 'Sold', not_held: 'Not held',
+    missing_snapshot: 'No price', missing_previous: 'Previous price missing', missing_price: 'No price' };
+  return <svg viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf 1 januari 2026' : 'Weekly price changes from 1 January 2026'}`} className="w-full min-w-0 text-fg-subtle">
+    {[-limit, 0, limit].map((value) => <g key={value}>
+      <line x1={left} x2={right} y1={y(value)} y2={y(value)} stroke="currentColor" opacity={value === 0 ? .4 : .12} />
+      <text x={left - 9} y={y(value) + 4} textAnchor="end" fill="currentColor" fontSize="11">{value.toFixed(1)}%</text>
+    </g>)}
+    {bars.map((value, index) => {
+      const period = data.periods[index];
+      const x = left + step * (index + .5);
+      const cell = data.selected?.weeks[index];
+      const title = `${day(period.target_date, nl)} · ${value == null ? (labels[cell?.status ?? ''] ?? '—') : percent(value)}\n${day(period.from_date, nl)} → ${day(period.as_of_date, nl)}`;
+      return value == null ? <circle key={period.target_date} cx={x} cy={mid} r="1.5" fill="currentColor" opacity=".3"><title>{title}</title></circle>
+        : <rect key={period.target_date} x={x - width / 2} y={value >= 0 ? y(value) : mid}
+            width={width} height={Math.max(1, Math.abs(y(value) - mid))} rx="1"
+            className={value > 0 ? 'fill-current text-pos-300' : value < 0 ? 'fill-current text-neg-300' : 'fill-current text-fg-subtle'}>
+          <title>{title}</title>
+        </rect>;
+    })}
+    <text x={left} y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
+    {data.periods.map((period, index) => {
+      if (!index || index > bars.length - 3 || period.target_date.slice(0, 7) === data.periods[index - 1].target_date.slice(0, 7)) return null;
+      const label = new Date(`${period.target_date}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { month: 'short' });
+      return <text key={period.target_date} x={left + step * (index + .5)} y="292" textAnchor="middle" fill="currentColor" fontSize="11">{label}</text>;
+    })}
+    <text x={right} y="292" textAnchor="end" fill="currentColor" fontSize="11">{day(data.through, nl)}</text>
+    {!bars.some((value) => value != null) && <text x="495" y="105" textAnchor="middle" fill="currentColor" fontSize="13">{nl ? 'Nog geen wekelijkse rendementen beschikbaar' : 'No weekly returns available yet'}</text>}
+  </svg>;
 }
 
 export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: string | null }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
-  const [weeks, setWeeks] = useState(12);
+  const listId = useId();
+  const [selection, setSelection] = useState<{ account: string; id: string } | null>(null);
+  const selectedId = selection && selection.account === portefeuille ? selection.id : null;
+  const [query, setQuery] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{ key: string; data?: WeeklyReturns; error?: string } | null>(null);
+  const [result, setResult] = useState<{ account: string; key: string; data?: WeeklyReturns; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [jobError, setJobError] = useState<string | null>(null);
-  const [currentOnly, setCurrentOnly] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const key = `${portefeuille}|${weeks}|${revision}`;
-  const data = result?.key === key ? result.data : undefined;
+  const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
+  const key = `${portefeuille}|${selectedId ?? ''}|${revision}`;
+  const options = result && result.account === portefeuille ? result.data?.options ?? [] : [];
+  const chosen = options.find((item) => item.id === selectedId) ?? (selectedId ? undefined : options[0]);
+  const data = result?.key === key && !result.error ? result.data : undefined;
+
   useEffect(() => {
     if (!portefeuille) return;
     const controller = new AbortController();
     let active = true;
+    const url = `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns${selectedId ? `?instrument_id=${encodeURIComponent(selectedId)}` : ''}`;
     void (async () => {
       try {
-        const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns?weeks=${weeks}`, { signal: controller.signal });
+        const response = await apiFetch(url, { signal: controller.signal });
         const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Could not load weekly prices');
-        if (active) setResult({ key, data: payload });
+        if (!response.ok) throw new Error(payload.detail ?? 'Could not load weekly returns');
+        if (active) setResult({ account: portefeuille, key, data: payload });
       } catch (error) {
-        if (active) setResult({ key, error: String(error instanceof Error ? error.message : error) });
+        if (active) setResult((previous) => ({ account: portefeuille, key,
+          data: previous?.account === portefeuille ? previous.data : undefined,
+          error: error instanceof Error ? error.message : String(error) }));
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [key, portefeuille, weeks]);
+  }, [key, portefeuille, selectedId]);
+
+  function choose(instrument: InstrumentOption) {
+    if (portefeuille) setSelection({ account: portefeuille, id: instrument.id });
+    setQuery(null);
+  }
 
   async function loadHistory() {
-    if (!portefeuille || busy) return;
-    setBusy(true); setJobError(null);
+    if (!portefeuille || !chosen || busy) return;
+    const instrument = chosen;
+    choose(instrument);
+    setBusy(true); setNotice(null);
     try {
-      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?weeks=${weeks}`,
-        nl ? 'Wekelijkse AIRS-koersen laden' : 'Loading weekly AIRS prices');
+      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?instrument_id=${encodeURIComponent(instrument.id)}`,
+        `${instrument.name} · AIRS`);
       const job = await done;
-      invalidateReadCache('weekly AIRS snapshots saved');
+      invalidateReadCache('selected AIRS instrument history saved');
       setRevision((value) => value + 1);
-      if (job.status !== 'done') setJobError(nl ? 'Niet alle weken konden worden geladen. Open Details voor de uitleg.' : 'Some weeks could not be loaded. Open Details for the explanation.');
-    } catch (error) { setJobError(error instanceof Error ? error.message : String(error)); }
+      if (job.status !== 'done') setNotice({ id: instrument.id, text: nl ? 'Niet alles kon worden geladen. Zie Details.' : 'Some history could not be loaded. See Details.' });
+    } catch (error) { setNotice({ id: instrument.id, text: error instanceof Error ? error.message : String(error) }); }
     finally { setBusy(false); }
   }
 
-  if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om de wekelijkse koersen te zien.' : 'Link an AIRS portfolio to see weekly prices.'}</p>;
-  const instruments = data?.instruments.filter((item) => !currentOnly || item.held === true) ?? [];
-  const columns = data?.periods.map((period, index) => ({ period, index })).reverse() ?? [];
-  const chosen = instruments.find((item) => item.id === selected) ?? instruments[0];
-  const labels: Record<string, string> = nl ? {
-    added: 'Toegevoegd', reentered: 'Opnieuw gekocht', sold: 'Verkocht', not_held: 'Niet in bezit',
-    missing_snapshot: 'Geen weekopname', missing_previous: 'Vorige week ontbreekt', missing_price: 'Geen koers',
-  } : { added: 'Added', reentered: 'Bought again', sold: 'Sold', not_held: 'Not held',
-    missing_snapshot: 'No snapshot', missing_previous: 'Previous week missing', missing_price: 'No price' };
+  if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="text-sm font-semibold text-fg-strong">{nl ? 'Wekelijkse koersveranderingen' : 'Weekly price changes'}</h3>
-        <p className="mt-1 max-w-3xl text-xs text-fg-subtle">{nl ? 'AIRS Huidige koers, in de genoteerde valuta. Extra aankopen en verkopen veranderen dit percentage niet. Dividend, coupons en valutaveranderingen zijn uitgesloten. Een aandelensplitsing kan een sprong geven.' : 'AIRS Huidige koers, in the quoted currency. Buying or selling more does not change this percentage. Dividends, coupons and currency changes are excluded. Stock splits can cause jumps.'}</p>
-      </div>
-      <div className="flex items-center gap-2 text-xs">
-        <select aria-label={nl ? 'Aantal weken' : 'Number of weeks'} value={weeks} disabled={busy} onChange={(event) => setWeeks(Number(event.target.value))} className="rounded-md border border-neutral-800/40 bg-elevated px-2 py-1.5 text-fg">
-          {[12, 26, 52].map((value) => <option key={value} value={value}>{value} {nl ? 'weken' : 'weeks'}</option>)}
-        </select>
-        <button type="button" disabled={busy} onClick={() => void loadHistory()} className="rounded-md border border-neutral-800/40 bg-elevated px-3 py-1.5 font-medium text-fg-muted hover:text-accent-300 disabled:opacity-50">{busy ? (nl ? 'Geschiedenis laden…' : 'Loading history…') : (nl ? 'Geschiedenis laden' : 'Load history')}</button>
-      </div>
+    <div className="flex flex-wrap items-center gap-3">
+      <input list={listId} aria-label={nl ? 'Instrument zoeken' : 'Search instruments'} autoComplete="off"
+        value={query ?? chosen?.name ?? ''} placeholder={nl ? 'Zoek een instrument…' : 'Search an instrument…'}
+        title={chosen ? instrumentLabel(chosen) : undefined}
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => { const value = event.target.value; setQuery(value); const exact = options.find((option) => instrumentLabel(option) === value); if (exact) choose(exact); }}
+        onBlur={() => setQuery(null)}
+        onKeyDown={(event) => { if (event.key === 'Enter' && query) { const found = searchInstruments(options, query); if (found.length === 1) { event.preventDefault(); choose(found[0]); } } }}
+        className="min-w-56 flex-1 rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent-500/60" />
+      <datalist id={listId}>{options.map((instrument) => <option key={instrument.id} value={instrumentLabel(instrument)} />)}</datalist>
+      <button type="button" disabled={busy || !chosen || query !== null} onClick={() => void loadHistory()}
+        className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-xs font-medium text-fg-muted hover:text-accent-300 disabled:opacity-50">
+        {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Ontbrekende geschiedenis laden' : 'Load missing history')}
+      </button>
     </div>
-    {jobError && <p role="alert" className="text-xs text-neg-300">{jobError}</p>}
-    {result?.key === key && result.error && <p role="alert" className="text-sm text-neg-300">{result.error}</p>}
-    {!data && !(result?.key === key && result.error) && <p role="status" className="text-sm text-fg-muted">{nl ? 'Opgeslagen koersen laden…' : 'Loading saved prices…'}</p>}
-    {data && <>
-      <div className="flex flex-wrap justify-between gap-2 text-xs text-fg-subtle">
-        <label className="flex items-center gap-2"><input type="checkbox" checked={currentOnly} onChange={(event) => setCurrentOnly(event.target.checked)} />{nl ? 'Alleen huidige posities' : 'Current holdings only'}</label>
-        <span>{data.missing_weeks ? (nl ? `${data.missing_weeks} weken ontbreken · laad de geschiedenis om deze aan te vullen` : `${data.missing_weeks} weeks missing · load history to fill them`) : (nl ? 'Dagelijkse AIRS-opnamen bewaren automatisch de nieuwste koers van elke week.' : 'Daily AIRS snapshots automatically retain each week’s latest prices.')}</span>
-      </div>
-      {chosen && <PriceChart instrument={chosen} data={data} />}
-      <div className="overflow-auto rounded-lg border border-neutral-800/40">
-        <table className="w-full border-collapse text-xs"><thead><tr className="bg-elevated text-fg-subtle">
-          <th className="sticky left-0 z-10 min-w-52 bg-elevated p-3 text-left">{nl ? 'Instrument' : 'Instrument'}</th>
-          {columns.map(({ period }) => <th key={period.week_end} className="min-w-20 p-2 text-right font-medium" title={`${nl ? 'Koersen van' : 'Quotes dated'} ${day(period.as_of_date)} · ${nl ? 'Vergeleken met' : 'Compared with'} ${day(period.from_date)}`}>
-            <span className="block">{period.partial ? (nl ? 'Deze week' : 'This week') : day(period.week_end)}</span>
-            <span className="text-[10px] font-normal">{day(period.as_of_date)}</span>
-          </th>)}
-        </tr></thead><tbody>{instruments.map((instrument) => <tr key={instrument.id} className="border-t border-neutral-800/30">
-          <td className="sticky left-0 z-10 bg-card p-3"><button type="button" onClick={() => setSelected(instrument.id)} className={`text-left font-medium hover:text-accent-300 ${chosen?.id === instrument.id ? 'text-accent-300' : 'text-fg'}`}>{instrument.name}</button>
-            <span className="mt-0.5 block text-[10px] text-fg-subtle">{instrument.isin ?? (nl ? 'AIRS-naam · geen ISIN' : 'AIRS name · no ISIN')} · {instrument.currency}{instrument.held === false ? (nl ? ' · Niet meer in bezit' : ' · No longer held') : ''}</span>
-          </td>
-          {columns.map(({ period, index }) => {
-            const cell = instrument.weeks[index];
-            return <td key={period.week_end} className={`p-2 text-right tabular-nums ${cell.return_pct == null ? 'text-fg-subtle' : cell.return_pct >= 0 ? 'bg-pos-500/5 text-pos-300' : 'bg-neg-500/5 text-neg-300'}`} title={`${labels[cell.status] ?? ''} ${day(period.from_date)}: ${quote(cell.from_price)} → ${day(period.as_of_date)}: ${quote(cell.price)} ${instrument.currency}`}>
-              {cell.return_pct == null ? <span className="text-[10px]">{labels[cell.status] ?? '—'}</span> : `${cell.return_pct >= 0 ? '+' : ''}${cell.return_pct.toFixed(2)}%`}
-            </td>;
-          })}
-        </tr>)}</tbody></table>
-      </div>
-      {!instruments.length && <p className="text-sm text-fg-muted">{currentOnly && data.instruments.length
-        ? (nl ? 'Huidige posities zijn voor de laatste week niet beschikbaar. Toon alle instrumenten om de opgeslagen geschiedenis te zien.' : 'Current holdings are unavailable for the latest week. Show all instruments to see saved history.')
-        : (nl ? 'Nog geen wekelijkse koersen opgeslagen. Laad de geschiedenis om te beginnen.' : 'No weekly prices saved yet. Load history to get started.')}</p>}
-      <p className="text-[11px] text-fg-subtle">{nl ? 'Een rendement vereist twee opeenvolgende weekopnamen van hetzelfde instrument. Ontbrekende weken blijven leeg. Aankopen en verkopen tussen twee opnamen zijn niet altijd zichtbaar.' : 'A return requires two consecutive weekly snapshots of the same instrument. Missing weeks stay blank. Trades between snapshots may not be visible.'}</p>
-    </>}
+    {result?.key === key && result.error && <p role="alert" className="text-xs text-neg-300">{result.error}</p>}
+    {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
+    {data ? <ReturnChart data={data} nl={nl} /> : !(result?.key === key && result.error)
+      ? <p role="status" className="py-16 text-center text-xs text-fg-muted">{nl ? 'Rendementen laden…' : 'Loading returns…'}</p> : null}
   </div>;
 }

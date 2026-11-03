@@ -346,7 +346,7 @@ export default function ActiveSharePanel({
       {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
           lazy load real rather than merely hidden.  Return-based views receive the policy sleeve;
           Active Share itself remains the deliberately narrower stock-sleeve measure. */}
-      {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} />}
+      {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}
       {view === 'te' && (
         <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           portefeuille={portefeuille}

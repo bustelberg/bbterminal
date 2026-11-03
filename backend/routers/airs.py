@@ -3994,21 +3994,27 @@ async def airs_monthly_report(portefeuille: str, month: str, include_details: bo
 
 
 @router.get('/api/airs/accounts/{portefeuille}/weekly-returns')
-async def airs_weekly_returns(portefeuille: str, weeks: int = Query(12, ge=4, le=104)):
+async def airs_weekly_returns(portefeuille: str, instrument_id: str | None = None,
+                              weeks: int | None = Query(None, ge=4, le=104)):
     """Saved weekly AIRS quotes; opening the tab never starts an AIRS scan."""
-    from routers._airs_weekly_returns import read_returns
-    return await asyncio.to_thread(read_returns, portefeuille, weeks)
+    if weeks is not None and instrument_id is None:
+        # Keep already-open older clients readable during the frontend rollout.
+        from routers._airs_weekly_returns import read_returns
+        return await asyncio.to_thread(read_returns, portefeuille, weeks)
+    from routers._airs_instrument_returns import read
+    return await asyncio.to_thread(read, portefeuille, instrument_id)
 
 
 @router.post('/api/airs/accounts/{portefeuille}/weekly-returns/job')
-async def airs_weekly_returns_job(portefeuille: str, weeks: int = Query(12, ge=4, le=104)):
+async def airs_weekly_returns_job(portefeuille: str, instrument_id: str = Query(..., min_length=1, max_length=512)):
     import jobs as job_registry
-    from routers._airs_monthly_report import _account
-    from routers._airs_weekly_returns import collect_history
-    await asyncio.to_thread(_account, portefeuille)
-    label = f'{portefeuille} · Weekly price history'
-    job, reused = job_registry.start(f'airs.weekly-returns.{portefeuille}', label,
-                                    lambda ctx: collect_history(portefeuille, weeks, ctx))
+    import hashlib
+    from routers._airs_instrument_returns import state, collect
+    _, _, _, _, selected = await asyncio.to_thread(state, portefeuille, instrument_id)
+    label = f"{selected['name']} · AIRS history"
+    key = hashlib.sha256(instrument_id.encode()).hexdigest()[:16]
+    job, reused = job_registry.start(f'airs.weekly-returns.{portefeuille}.{key}', label,
+                                    lambda ctx: collect(portefeuille, instrument_id, ctx))
     return {'job_id': job.id, 'label': label, 'already_running': reused}
 
 

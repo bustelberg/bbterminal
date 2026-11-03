@@ -17191,7 +17191,8 @@ export interface operations {
     airs_weekly_returns_api_airs_accounts__portefeuille__weekly_returns_get: {
         parameters: {
             query?: {
-                weeks?: number;
+                instrument_id?: string | null;
+                weeks?: number | null;
             };
             header?: never;
             path: {
@@ -17223,8 +17224,8 @@ export interface operations {
     };
     airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post: {
         parameters: {
-            query?: {
-                weeks?: number;
+            query: {
+                instrument_id: string;
             };
             header?: never;
             path: {

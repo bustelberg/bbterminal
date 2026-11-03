@@ -2,18 +2,34 @@
 
 ## Weekly instrument returns
 
-Analyse → Risk → Returns reads saved weekly `Huidige koers` observations. The normal daily
+Analyse → Risk → Returns has a searchable selector across the union of instruments in saved
+AIRS history, including sold/closed positions. Its green/red weekly return bars start at the
+fixed date 1 January 2026. The year-opening observation is 31 December 2025 (or the most recent
+available valuation in that week); the first bar never includes an entire pre-2026 week.
+
+It reads saved weekly `Huidige koers` observations. The normal daily
 holdings capture atomically publishes the complete quote set to `airs_weekly_holding_snapshot`,
 retaining the latest actual AIRS date per week. This requires
 `20261103160000_airs_weekly_holding_snapshots.sql`, which also seeds real historical observations
 already stored in `airs_holding`. No extra scheduled AIRS login or vendor price feed is needed.
 
-Load history is an explicit cancellable, per-account AIRS job for missing/older weekly observations.
-It uses the shared daily-refresh lease and AIRS session lock. It tries only weekdays inside each
+Load missing history is an explicit cancellable job scoped to the selected instrument.
+`airs_weekly_instrument_snapshot` stores only that instrument's observed quote or verified
+absence, separately from complete portfolio snapshots. Apply
+`20261103170000_airs_instrument_weekly_history.sql` before deploying this reader.
+AIRS still supplies dated portfolio reports; only the missing dates needed by the selected
+instrument are downloaded. Reports reused for holiday/year-opening fallbacks are fetched once
+per job. Other instruments are never saved as a partial portfolio snapshot. Valid saved quotes
+and verified non-held dates are reused; explicit retries can recheck genuinely unavailable quotes.
+The instrument view uses calendar weeks through Sunday and the last completed Amsterdam calendar
+day, so actual Saturday/Sunday AIRS valuations remain usable. The opening observation cannot move
+past 31 December 2025, and a weekly fallback cannot leave its own calendar week.
+
+The history loader uses the shared daily-refresh lease and AIRS session lock. It tries dates inside each
 requested week, preserves holiday fallback dates, and never modifies live holdings, returns or
 transactions. Authentication and download errors remain errors; a genuinely unavailable week stays
-missing. The selected 12/26/52-week display includes the current week to date and one extra opening
-observation for the first return.
+missing. The display includes the current week to date and the separate year-opening observation
+needed for the first return. Selecting instruments never starts acquisition.
 
 Returns compare the same ISIN and quoted currency in adjacent weekly snapshots. Exact AIRS name
 and currency are a labelled fallback when ISIN is absent. Accrued-interest and cash lines are

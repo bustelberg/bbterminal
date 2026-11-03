@@ -60,16 +60,20 @@ def matrix(account: str, snapshots: list[dict], weeks: int, through: date) -> di
         key = week_end(actual).isoformat()
         if key not in by_week or str(snapshot['as_of_date']) > str(by_week[key]['as_of_date']):
             by_week[key] = snapshot
-    periods, instruments, seen = [], {}, set()
+    return _observations_matrix(account, [(end, by_week.get(end.isoformat())) for end in ends], through)
+
+
+def _observations_matrix(account, observations, through, seed=()):
+    periods, seen = [], set()
+    instruments = {row['id']: {**row, 'weeks': []} for row in seed}
     previous = None
     previous_date = None
-    for index, end in enumerate(ends):
-        snapshot = by_week.get(end.isoformat())
+    for index, (end, snapshot) in enumerate(observations):
         current = _quotes(snapshot['holdings']) if snapshot else None
         actual = str(snapshot['as_of_date'])[:10] if snapshot else None
         if index:
-            periods.append({'week_end': end.isoformat(), 'as_of_date': actual,
-                            'from_date': previous_date, 'partial': end > through,
+            periods.append({'week_end': week_end(end).isoformat(), 'target_date': end.isoformat(), 'as_of_date': actual,
+                            'from_date': previous_date, 'partial': week_end(end) > through,
                             'available': snapshot is not None})
             identities = set(instruments) | set(current or {}) | set(previous or {})
             for key in identities:
@@ -96,7 +100,9 @@ def matrix(account: str, snapshots: list[dict], weeks: int, through: date) -> di
                     state = 'missing_price'
                 else:
                     change = (now['price'] / before['price'] - 1) * 100
-                    state = 'priced'
+                    state = 'priced' if isfinite(change) else 'missing_price'
+                    if not isfinite(change):
+                        change = None
                 instruments[key]['weeks'].append({'status': state, 'return_pct': change,
                                                    'price': now['price'] if now else None,
                                                    'from_price': before['price'] if before else None})

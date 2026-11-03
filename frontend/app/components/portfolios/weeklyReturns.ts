@@ -5,19 +5,22 @@ export type WeeklyInstrument = {
   id: string; name: string; isin: string | null; currency: string; held: boolean | null; weeks: WeeklyCell[];
 };
 export type WeeklyReturns = {
-  portefeuille: string; through: string; missing_weeks: number;
-  periods: { week_end: string; as_of_date: string | null; from_date: string | null; partial: boolean; available: boolean }[];
-  instruments: WeeklyInstrument[];
+  portefeuille: string; start_date: string; through: string; missing_observations: number;
+  periods: { week_end: string; target_date: string; as_of_date: string | null; from_date: string | null; partial: boolean; available: boolean }[];
+  options: InstrumentOption[]; selected: WeeklyInstrument | null;
 };
+export type InstrumentOption = Pick<WeeklyInstrument, 'id' | 'name' | 'isin' | 'currency'>;
 
-/** Break price lines at missing observations and periods when the instrument wasn't held. */
-export function priceSegments(cells: WeeklyCell[]): { index: number; price: number }[][] {
-  const segments: { index: number; price: number }[][] = [];
-  let active: { index: number; price: number }[] | null = null;
-  cells.forEach((cell, index) => {
-    if (cell.price == null || !Number.isFinite(cell.price)) { active = null; return; }
-    if (!active) { active = []; segments.push(active); }
-    active.push({ index, price: cell.price });
-  });
-  return segments;
+/** Missing observations remain gaps, never zero-return bars. */
+export function weeklyBars(cells: WeeklyCell[]): (number | null)[] {
+  return cells.map((cell) => cell.return_pct != null && Number.isFinite(cell.return_pct) ? cell.return_pct : null);
+}
+
+export function instrumentLabel(instrument: InstrumentOption): string {
+  return [instrument.name, instrument.currency, instrument.isin].filter(Boolean).join(' · ');
+}
+
+export function searchInstruments(options: InstrumentOption[], query: string): InstrumentOption[] {
+  const needle = query.trim().toLowerCase();
+  return options.filter((option) => instrumentLabel(option).toLowerCase().includes(needle));
 }

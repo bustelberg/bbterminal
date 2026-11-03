@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { priceSegments, type WeeklyCell } from './weeklyReturns';
+import { instrumentLabel, searchInstruments, weeklyBars, type WeeklyCell } from './weeklyReturns';
 
-const cell = (price: number | null, status = 'priced'): WeeklyCell => ({ price, status, return_pct: null });
-
-describe('AIRS weekly price observations', () => {
-  it('breaks lines at sales, missing weeks and missing quotes', () => {
-    expect(priceSegments([cell(100), cell(110), cell(null, 'sold'), cell(120, 'reentered'), cell(null), cell(130)]))
-      .toEqual([[{ index: 0, price: 100 }, { index: 1, price: 110 }], [{ index: 3, price: 120 }], [{ index: 5, price: 130 }]]);
+describe('Instrument-only weekly returns', () => {
+  const options = [
+    { id: 'A|USD', name: 'Adobe', isin: 'US00724F1012', currency: 'USD' },
+    { id: 'B|EUR', name: 'Sold fund', isin: 'IE000EXAMPLE', currency: 'EUR' },
+  ];
+  it('searches the full catalogue by name, ISIN and currency, including sold instruments', () => {
+    expect(searchInstruments(options, 'adob')).toEqual([options[0]]);
+    expect(searchInstruments(options, 'ie000')).toEqual([options[1]]);
+    expect(searchInstruments(options, 'EUR')).toEqual([options[1]]);
+    expect(searchInstruments(options, '')).toEqual(options);
+    expect(instrumentLabel(options[0])).toContain('US00724F1012');
   });
-  it('keeps a single real observation without inventing earlier prices', () => {
-    expect(priceSegments([cell(null), cell(100, 'added')])).toEqual([[{ index: 1, price: 100 }]]);
+  it('preserves missing bars, genuine zero and negative returns', () => {
+    const cells = [null, 0, -2.5, 3.5, Infinity].map((return_pct) => ({ return_pct, price: 100, status: 'priced' } as WeeklyCell));
+    expect(weeklyBars(cells)).toEqual([null, 0, -2.5, 3.5, null]);
   });
 });
