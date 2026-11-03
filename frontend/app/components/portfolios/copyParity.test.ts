@@ -129,6 +129,9 @@ const SHARED = new Set([...FINANCE_EN, ...AIRS_FIELDS, ...SAME_WORD, ...IDENTIFI
 
 // Proper names and labels kept in English in both languages.
 const SHARED_PATHS: Record<string, Set<string>> = {
+  riskCopy: new Set([
+    'views.returns', // User-requested feature name: Returns in both languages.
+  ]),
   analyseCopy: new Set([
     'actions.attribution', // User-requested feature name: Performance in both languages.
   ]),
