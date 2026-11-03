@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { useLang } from '../../../lib/i18n';
-import { instrumentLabel, searchInstruments, weeklyBars, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
+import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
 
 const day = (value: string | null, nl: boolean) => value
   ? new Date(`${value}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
@@ -211,6 +211,12 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   const options = result && result.account === portefeuille ? result.data?.options ?? [] : [];
   const chosen = options.find((item) => item.id === selectedId);
   const data = selectedId && result?.key === key && !result.error ? result.data : undefined;
+  const ytd = useMemo(() => periodReturn(data), [data]);
+  const selectedReturn = useMemo(() => linked.window ? periodReturn(data, linked.window) : null, [data, linked.window]);
+  const returnColor = (value: number | undefined) => value == null || value === 0 ? 'text-fg' : value > 0 ? 'text-pos-300' : 'text-neg-300';
+  const quoteDates = (value: ReturnType<typeof periodReturn>) => value
+    ? `${nl ? 'AIRS koersen' : 'AIRS prices'} · ${day(value.from, nl)} → ${day(value.to, nl)}`
+    : (nl ? 'Begin- of eindkoers ontbreekt. Laad de ontbrekende geschiedenis.' : 'Opening or closing price missing. Load missing history.');
 
   useEffect(() => {
     if (!portefeuille) return;
@@ -260,7 +266,13 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
   return <div className="flex h-full min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800/30 bg-elevated/30 p-3">
     <div className="flex h-20 shrink-0 flex-col items-start gap-2">
-      <InstrumentPicker options={options} selected={chosen} onSelect={choose} nl={nl} />
+      <div className="flex w-full items-start justify-between gap-2">
+        <InstrumentPicker options={options} selected={chosen} onSelect={choose} nl={nl} />
+        <div className="shrink-0 text-right" title={chosen ? quoteDates(ytd) : undefined}>
+          <div className="text-[10px] font-medium text-fg-muted">YTD</div>
+          <div className={`text-lg font-semibold tabular-nums ${returnColor(ytd?.value)}`}>{ytd ? percent(ytd.value) : '—'}</div>
+        </div>
+      </div>
       <button type="button" disabled={busy || !chosen} onClick={() => void loadHistory()}
         className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-xs font-medium text-fg-muted hover:text-accent-300 disabled:opacity-50">
         {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Ontbrekende geschiedenis laden' : 'Load missing history')}
@@ -280,6 +292,15 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
         </text>
         <text x="65" y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
       </svg>}
+    </div>
+    <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-t border-neutral-800/30 pt-2" title={chosen && linked.window ? quoteDates(selectedReturn) : undefined}>
+      <div className="min-w-0 text-xs text-fg-muted">
+        <div>{nl ? 'Rendement geselecteerde periode' : 'Selected period return'}</div>
+        <div className="mt-1 text-[10px]">{linked.window
+          ? selectedReturn ? `${day(selectedReturn.from, nl)} → ${day(selectedReturn.to, nl)}` : (chosen ? (nl ? 'Begin- of eindkoers ontbreekt' : 'Opening or closing price missing') : (nl ? 'Kies een instrument' : 'Choose an instrument'))
+          : (nl ? 'Sleep over de grafiek om een periode te kiezen' : 'Drag across a chart to select a period')}</div>
+      </div>
+      <div className={`shrink-0 text-xl font-semibold tabular-nums ${returnColor(selectedReturn?.value)}`}>{selectedReturn ? percent(selectedReturn.value) : '—'}</div>
     </div>
   </div>;
 }

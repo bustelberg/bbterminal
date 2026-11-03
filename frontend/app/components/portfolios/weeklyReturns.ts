@@ -16,6 +16,22 @@ export function weeklyBars(cells: WeeklyCell[]): (number | null)[] {
   return cells.map((cell) => cell.return_pct != null && Number.isFinite(cell.return_pct) ? cell.return_pct : null);
 }
 
+/** A price return uses the opening and closing quotes, never a sum of weekly percentages. */
+export function periodReturn(data: WeeklyReturns | undefined, window?: [string, string] | null) {
+  if (!data?.selected || !data.periods.length) return null;
+  const first = window ? data.periods.findIndex((period) => period.target_date === window[0]) : 0;
+  const last = window ? data.periods.findIndex((period) => period.target_date === window[1]) : data.periods.length - 1;
+  if (first < 0 || last < first) return null;
+  const opening = data.selected.weeks[first]?.from_price;
+  const closing = data.selected.weeks[last]?.price;
+  const from = data.periods[first].from_date;
+  const to = data.periods[last].as_of_date;
+  if (!from || !to || opening == null || closing == null || !Number.isFinite(opening) || !Number.isFinite(closing)
+      || opening <= 0 || closing <= 0) return null;
+  const value = (closing / opening - 1) * 100;
+  return Number.isFinite(value) ? { value, from, to } : null;
+}
+
 export function instrumentLabel(instrument: InstrumentOption): string {
   return [instrument.name, instrument.currency, instrument.isin].filter(Boolean).join(' · ');
 }
