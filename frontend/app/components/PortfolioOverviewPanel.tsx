@@ -1046,10 +1046,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <SortTh label="Year-to-date" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
-                <th className="px-2 py-2.5 font-medium text-right"
-                  title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">Since</th>
-                <th className="px-2 py-2.5 font-medium text-right"
-                  title="Latest AIRS valuation date available for this portfolio.">To</th>
+                <th className="px-2 py-2.5 font-medium text-right normal-case"
+                  title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">{t.overviewDates.since}</th>
+                <th className="px-2 py-2.5 font-medium text-right normal-case"
+                  title="Latest AIRS valuation date available for this portfolio.">{t.overviewDates.to}</th>
                 <SortTh label="Month-to-date" k="mtd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="This month's return, reported by AIRS Rendementen. Shown only when AIRS has a value for the current month." />

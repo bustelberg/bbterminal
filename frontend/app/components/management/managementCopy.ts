@@ -33,6 +33,7 @@ import { useLang, type Lang } from '../../../lib/i18n';
 type TabCopy = { label: string; note: string };
 
 export type ManagementCopy = {
+  overviewDates: { since: string; to: string };
   page: {
     title: string;
     tabs: { bustelberg: TabCopy; toppenberg: TabCopy; imagine_fund: TabCopy; topselecties: TabCopy; test_topselecties: TabCopy };
@@ -162,6 +163,7 @@ export type ManagementCopy = {
 };
 
 const en: ManagementCopy = {
+  overviewDates: { since: 'since', to: 'to' },
   page: {
     title: 'Management Dashboard',
     tabs: {
@@ -301,6 +303,7 @@ const en: ManagementCopy = {
  * is a rate. The two are confusable in exactly the place it matters, a column of percentages.
  */
 const nl: ManagementCopy = {
+  overviewDates: { since: 'vanaf', to: 'tot' },
   page: {
     title: 'Managementdashboard',
     tabs: {
