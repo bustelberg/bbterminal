@@ -31,6 +31,10 @@ def test_weekly_retries_available_companies_preserves_quota_and_publishes_both_c
     async def build(label, cadence, gen):
         published.append(cadence)
     monkeypatch.setattr(warm, '_warm_one', build)
+    async def seed(label, cadence):
+        assert not requested
+        return {'built_at': now}
+    monkeypatch.setattr(warm, 'ensure_saved', seed)
     monkeypatch.setattr(snapshots, 'read', lambda *a: {'built_at': datetime.now(timezone.utc).isoformat(),
                                                     'growth': {'member_counts': {}}})
     message, result = weekly.run(FakeCtx(), reserve=2000)

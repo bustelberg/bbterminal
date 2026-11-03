@@ -295,13 +295,34 @@ async def _warm_all(gen: int) -> None:
                   label, cadence, n, time.perf_counter() - t0)
 
 
+async def ensure_saved(label: str, cadence: str) -> dict:
+    """Seed a missing public chart from stored inputs, without acquiring vendor data.
+
+    An existing complete revision remains available while acquisition/rebuilds run.
+    This path is background work only; chart readers never call it.
+    """
+    from routers._benchmark_snapshots import read
+
+    saved = await asyncio.to_thread(read, label, cadence, compact=True)
+    if saved is not None:
+        return saved
+    await _warm_one(label, cadence, _generation)
+    saved = await asyncio.to_thread(read, label, cadence, compact=True)
+    if saved is None:
+        raise RuntimeError(f'{label}/{cadence}: initial saved chart could not be published')
+    return saved
+
+
 async def _warm_boot_critical(gen: int) -> None:
-    """Warm the shared first-paint dependencies before the full startup rebuild."""
+    """Seed saved charts and shared inputs before waiting for the ingest pipeline."""
     endpoints = _boot_endpoints()
     for label, cadence in _targets():
         if _generation != gen:
             _log.warning("[blend-prewarm] startup fast path abandoned at %s — cache changed", label)
             return
+        # The compact chart is what page readers need. Do not postpone its first
+        # publication behind a long vendor fill or warm only in-memory inputs.
+        await ensure_saved(label, cadence)
         t0 = time.perf_counter()
         n = await _warm_one(label, cadence, gen, endpoints)
         _log.info("[blend-prewarm] startup prerequisites %s/%s warmed %d endpoints in %.1fs",
@@ -317,10 +338,8 @@ def _run() -> None:
     """
     while True:
         _wake.wait()
-        # Startup is the one cache-cold event that is not caused by a burst of writes.  Serving
-        # the cap table and growth bundle first turns the first open from "nothing until all chart
-        # work is warm" into a useful, progressively completed view.  The full pass remains off
-        # the request path in this worker thread.
+        # Publish missing durable chart bundles first. Existing complete bundles
+        # remain readable while the full refresh proceeds in this worker thread.
         global _boot_fast_path
         if _boot_fast_path:
             _boot_fast_path = False

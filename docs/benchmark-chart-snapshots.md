@@ -3,7 +3,8 @@
 The Graphs tab reads one `/api/benchmarks/index/{label}/chart-snapshot?cadence=annual|quarterly`
 bundle for all benchmark charts. The response contains completed growth series, ratio series for
 every toggle, reporting counts and the build timestamp. It contains no company input rows.
-Company comparisons and the calculation drill-downs still use their detailed inputs.
+Company comparisons use the exact same saved benchmark series; only the selected company's
+own figures are loaded separately. Calculation drill-downs still use detailed inputs.
 
 `benchmark_chart_snapshot` stores complete bundles in PostgreSQL, so server restarts and cache
 expiration do not put expensive company reads back on the chart request. A missing snapshot
@@ -14,6 +15,10 @@ data invalidation. The previous result remains readable throughout the rebuild. 
 atomic, refuses incomplete endpoint sets, and does not allow a rebuild that started earlier to
 overwrite a newer one. `BLEND_PREWARM` controls the index/cadence targets; both cadences for ACWI,
 SP500 and AEX are included by default. A disabled prewarmer continues serving the last saved result.
+
+Startup seeds missing saved bundles before waiting for ingestion to finish. The weekly ACWI job
+also seeds both cadences from stored data before discovery and vendor downloads. Acquisition
+improves the next published revision; it never holds the first available chart hostage.
 
 Apply `20261103123000_benchmark_chart_snapshots.sql` and
 `20261103124500_benchmark_chart_statistics_reads.sql` before deploying these readers. To seed or

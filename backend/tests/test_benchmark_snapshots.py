@@ -61,3 +61,27 @@ def test_chart_route_reads_only_saved_payload_and_keeps_available_results(monkey
     response = asyncio.run(benchmarks.benchmark_chart_snapshot('ACWI', request, 'annual'))
     assert json.loads(response.body) == expected
     assert response.headers['X-BB-Benchmark-Built-At'] == expected['built_at']
+
+
+def test_missing_snapshot_is_seeded_from_stored_inputs_before_boot_warm(monkeypatch):
+    saved = {}
+    events = []
+    monkeypatch.setattr(snapshots, 'read', lambda label, cadence, **kw: saved.get(cadence))
+    async def build(label, cadence, gen, endpoints=None):
+        events.append(('publish' if endpoints is None else 'inputs', cadence))
+        if endpoints is None:
+            saved[cadence] = {'built_at': 'ready'}
+        return 1
+    monkeypatch.setattr(warm, '_warm_one', build)
+    monkeypatch.setattr(warm, '_targets', lambda: [('ACWI', 'annual'), ('ACWI', 'quarterly')])
+    asyncio.run(warm._warm_boot_critical(warm._generation))
+    assert events == [('publish', 'annual'), ('inputs', 'annual'), ('publish', 'quarterly'), ('inputs', 'quarterly')]
+
+
+def test_existing_snapshot_stays_readable_without_rebuilding_or_vendor_requests(monkeypatch):
+    saved = {'built_at': 'previous-complete-revision'}
+    monkeypatch.setattr(snapshots, 'read', lambda *a, **kw: saved)
+    async def unexpected(*a, **kw):
+        pytest.fail('An available saved chart needs no acquisition or rebuild')
+    monkeypatch.setattr(warm, '_warm_one', unexpected)
+    assert asyncio.run(warm.ensure_saved('ACWI', 'annual')) is saved

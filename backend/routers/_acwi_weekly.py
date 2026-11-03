@@ -16,6 +16,12 @@ def run(ctx, *, reserve):
     from routers._benchmark_snapshots import read
 
     ctx.check()
+    # Publish the data we already hold before any discovery or slow vendor work.
+    # A first-time user must not wait for thousands of company requests to finish.
+    for cadence in ('annual', 'quarterly'):
+        ctx.check()
+        ctx.progress(0, 0, f'Preparing saved ACWI {cadence} charts…')
+        asyncio.run(warm.ensure_saved('ACWI', cadence))
     ctx.progress(0, 0, 'Checking ACWI company coverage…')
     members = _members('ACWI', require_market_cap=False)
     companies = company_rows([m['company_id'] for m in members])
