@@ -34,7 +34,7 @@ _unavailable_until = 0.0
 def _digest(revisions: tuple) -> str:
     value = hashlib.sha256(b'prepared-analyse-v1')
     for name, _mtime, _size in revisions:
-        value.update(name.encode())
+        value.update(Path(name).relative_to(_ROOT).as_posix().encode())
         value.update(Path(name).read_bytes())
     return value.hexdigest()
 

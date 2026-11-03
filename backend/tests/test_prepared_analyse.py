@@ -138,6 +138,7 @@ def test_process_code_is_frozen_but_live_config_changes_invalidate(monkeypatch, 
     code.write_text('old code')
     config.write_text('{"old":true}')
     monkeypatch.setattr(P, '_FILES', (code, config))
+    monkeypatch.setattr(P, '_ROOT', tmp_path)
     before = P.code_version()
     code.write_text('newly deployed code for the next process')
     assert P.code_version() == before

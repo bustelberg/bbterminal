@@ -52,6 +52,19 @@ def test_fx_complete_for_last_market_close_does_not_request_unpublished_fixing(m
     assert refresh._fx({'USD'}, '2026-01-01', lambda *a, **kw: None)['failed'] == 0
 
 
+def test_prepared_snapshot_identity_is_portable_between_deployments(monkeypatch, tmp_path):
+    from routers import _prepared_analyse as prepared
+    digests = []
+    for deployment in ('operator-checkout', 'railway-container'):
+        root = tmp_path / deployment
+        source = root / 'routers' / 'analysis.py'
+        source.parent.mkdir(parents=True)
+        source.write_text('same calculation code', encoding='utf-8')
+        monkeypatch.setattr(prepared, '_ROOT', root)
+        digests.append(prepared._digest(((str(source), 0, source.stat().st_size),)))
+    assert digests[0] == digests[1]
+
+
 def test_completed_airs_boundary_does_not_request_today(monkeypatch):
     import airs_scanner
     import airs_vermogen as vermogen
