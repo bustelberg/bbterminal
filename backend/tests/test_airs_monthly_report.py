@@ -52,6 +52,17 @@ def test_neutraal_monthly_benchmark_uses_reviewed_60_40_policy(monkeypatch):
     assert report._weighted_months('UNKNOWN', months) == {}
 
 
+def test_report_flags_missing_benchmark_separately_from_airs_refresh(monkeypatch):
+    account = 'BUS_Neutraal_Dyn'
+    db = FakeSupabase({'airs_performance': [{'portefeuille': account, 'periode': '2026-11-02',
+        'rendement': .5, 'cumulatief_rendement': 4}], 'airs_monthly_report': []})
+    monkeypatch.setattr(report, 'supabase', db)
+    monkeypatch.setattr(report, '_weighted_months', lambda *_: {})
+    assert report.read_report(account, '2026-11', include_details=False)['benchmark_needs_refresh'] is True
+    monkeypatch.setattr(report, '_weighted_months', lambda *_: {'2026-11': {'return_pct': 0}})
+    assert report.read_report(account, '2026-11', include_details=False)['benchmark_needs_refresh'] is False
+
+
 def test_calendar_window_never_requests_unvalued_today_or_future_month():
     assert report.month_window('2026-10', date(2026, 10, 26)) == ('2026-10-01', '2026-10-23', '2026-09-30')
     assert report.month_window('2024-02', date(2026, 10, 26)) == ('2024-02-01', '2024-02-29', '2024-01-31')

@@ -2200,6 +2200,10 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     accounts = sorted((row["portefeuille"] for row in list_accounts()
                        if row.get("holdings") and is_dashboard_account(row.get('portefeuille'))),
                       key=dashboard_refresh_key)
+    from routers._monthly_benchmark import ensure_daily
+    summary['monthly_benchmarks'] = ensure_daily(accounts, ctx)
+    if summary['monthly_benchmarks']['errors']:
+        failures['monthly_benchmarks'] = summary['monthly_benchmarks']['errors']
     try:
         summary["year_end"] = finalise_previous_year(ctx, dashboard_only=True)
         if any(row["errors"] for row in summary["year_end"]):

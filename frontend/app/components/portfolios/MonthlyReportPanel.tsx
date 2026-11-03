@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { useLang } from '../../../lib/i18n';
 import { startJob } from '../../../lib/stores/jobs';
 import type { MonthlyPosition, MonthlyReport } from './monthlyReport';
-import { savedContributionCalculation } from './monthlyReport';
+import { savedContributionCalculation, monthlyBenchmarkMissing } from './monthlyReport';
 import InfoTip from '../InfoTip';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
@@ -27,6 +27,9 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [benchmarkError, setBenchmarkError] = useState(false);
+  const benchmarkAttempts = useRef(new Set<string>());
   const [reload, setReload] = useState(0);
   const [selection, setSelection] = useState(0);
   const [detailsHeight, setDetailsHeight] = useState(0);
@@ -46,7 +49,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     const cached = saved.current.get(key);
     // The month strip needs only returns. Load positions when a month opens, and keep
     // completed detail while this panel is mounted. Refresh explicitly clears this cache.
-    if (cached && (!detailsOpen || (!cached.needs_refresh && !cached.warning && cached.snapshot?.positions
+    if (cached && !monthlyBenchmarkMissing(cached, month) && (!detailsOpen || (!cached.needs_refresh && !cached.warning && cached.snapshot?.positions
       && cached.snapshot.positions.every((position) => Object.hasOwn(position, 'contribution_calculation'))))) {
       setReport(cached); setPending(false); return;
     }
@@ -67,7 +70,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     if (key === month && detailsOpen) { setDetailsOpen(false); return; }
     automaticAttempts.current.delete(`${portefeuille}|${key}`);
     setSelection((n) => n + 1);
-    setMonth(key); setDetailsOpen(true); setJobError(null);
+    setMonth(key); setDetailsOpen(true); setJobError(null); setBenchmarkError(false);
   };
   const fetchMonth = useCallback(async () => {
     if (!portefeuille || fetching.current) return;
@@ -100,6 +103,26 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     automaticAttempts.current.add(key);
     void fetchMonth();
   }, [detailsOpen, pending, busy, report, month, portefeuille, fetchMonth, selection]);
+  const refreshBenchmark = useCallback(async () => {
+    if (!portefeuille || benchmarkBusy) return;
+    const key = `${portefeuille}|${month}`;
+    benchmarkAttempts.current.add(key);
+    setBenchmarkBusy(true); setBenchmarkError(false);
+    try {
+      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-benchmark/job?month=${month}`,
+        `${name} · Benchmark`);
+      const job = await done;
+      if (job.status !== 'done') throw new Error('Benchmark update incomplete');
+      saved.current.delete(key);
+      if (mounted.current) setReload((value) => value + 1);
+    } catch { if (mounted.current) setBenchmarkError(true); }
+    finally { if (mounted.current) setBenchmarkBusy(false); }
+  }, [portefeuille, month, name, benchmarkBusy]);
+  useEffect(() => {
+    if (pending || benchmarkBusy || !report || report.month !== month || report.portefeuille !== portefeuille
+        || !monthlyBenchmarkMissing(report, month) || benchmarkAttempts.current.has(`${portefeuille}|${month}`)) return;
+    void refreshBenchmark();
+  }, [pending, benchmarkBusy, report, month, portefeuille, refreshBenchmark]);
   const selectedReport = report?.month === month && report.portefeuille === portefeuille ? report : null;
   const performance = selectedReport?.snapshot?.sections.performance;
   const perf = performance?.status === 'ok' ? performance.data : report?.months.find((r) => r.month === month);
@@ -203,8 +226,8 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const overviewBenchmarkMonth = useOverview && overviewReturns.from && overviewReturns.asOf
     && overviewReturns.from.slice(0, 7) === overviewReturns.asOf.slice(0, 7)
     ? overviewReturns.asOf.slice(0, 7) : null;
-  const benchmarkForMonth = (key: string) => key === overviewBenchmarkMonth
-    ? overviewReturns?.benchmark : report?.weighted_benchmark?.[key]?.return_pct;
+  const benchmarkForMonth = (key: string) => (key === overviewBenchmarkMonth ? overviewReturns?.benchmark : null)
+    ?? report?.weighted_benchmark?.[key]?.return_pct;
   const compoundedThrough = useOverview ? overviewReturns.asOf : summary?.end;
   const compoundedFrom = useOverview ? overviewReturns.from : summary?.start;
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'
@@ -273,6 +296,9 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
             <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(benchmarkForMonth(month))}`}>{pct(benchmarkForMonth(month))}</span></div>
         </div>
         {report.warning && <p className="text-xs text-warn-300">{report.warning}</p>}
+        {benchmarkBusy && <p role="status" className="text-xs text-fg-muted">{text('Loading benchmark…', 'Benchmark laden…')}</p>}
+        {!benchmarkBusy && (benchmarkError || (!pending && selectedReport && monthlyBenchmarkMissing(selectedReport, month)
+          && benchmarkAttempts.current.has(`${portefeuille}|${month}`))) && <p role="alert" className="text-xs text-warn-300">{text('Benchmark is not available yet.', 'Benchmark is nog niet beschikbaar.')} <button type="button" className="underline" onClick={() => void refreshBenchmark()}>{text('Try again', 'Opnieuw proberen')}</button></p>}
         {report.needs_refresh && !report.warning && <p className="text-xs text-warn-300">{busy ? text('Loading this month’s position results from AIRS…', 'De positieresultaten van deze maand worden uit AIRS opgehaald…') : text('Some position results are incomplete. Refresh this month to try again.', 'Sommige positieresultaten zijn onvolledig. Ververs deze maand om het opnieuw te proberen.')}</p>}
         <div className={`${box} overflow-hidden`}><h4 className="px-5 pt-4 text-sm font-medium text-fg-strong">{text('Individual positions', 'Individuele posities')}</h4>
           {!positions ? <p className="p-5 text-sm text-fg-subtle">{busy ? text('Reading AIRS position reports…', 'AIRS-positierapporten ophalen…') : text('Position results are not available yet.', 'De positieresultaten zijn nog niet beschikbaar.')}</p>

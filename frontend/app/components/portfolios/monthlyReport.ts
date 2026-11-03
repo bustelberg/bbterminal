@@ -20,6 +20,7 @@ export type MonthlyPosition = { name: string; isin: string | null; return_pct: n
 type Section<T> = { status: 'ok' | 'no_data' | 'error'; data: T | null; message?: string };
 export type MonthlyReport = { portefeuille: string; month: string; start: string; end: string; opening_date: string;
   available_years?: number[];
+  benchmark_needs_refresh?: boolean;
   year_summary?: { complete?: boolean; return_pct: number | null; benchmark_pct: number | null; start: string | null; end: string | null };
   weighted_benchmark?: Record<string, { return_pct: number; start_date: string; end_date: string; source: string;
     components?: { ticker: string; weight_pct: number; return_pct: number; start_date: string; end_date: string;
@@ -33,6 +34,16 @@ export type MonthlyReport = { portefeuille: string; month: string; start: string
     performance: Section<Performance>; opening: Section<Valuation>; closing: Section<Valuation>;
     transactions: Section<Sheet>; journal?: Section<Journal[]>;
   } } | null };
+
+export function monthlyBenchmarkMissing(report: MonthlyReport, month: string): boolean {
+  if (report.weighted_benchmark?.[month]?.return_pct != null) return false;
+  if (report.month === month && report.benchmark_needs_refresh != null) return report.benchmark_needs_refresh;
+  // Older responses do not declare applicability. Other benchmark months prove
+  // a policy exists; an unclassified portfolio must not trigger vendor jobs.
+  return Object.keys(report.weighted_benchmark ?? {}).length > 0
+    && report.months.some((row) => row.month === month && row.rendement != null)
+    && report.weighted_benchmark?.[month]?.return_pct == null;
+}
 
 /** Older responses already carry the source reports, but not the worked calculation.
  * Reconstruct its operands for the popover without declaring the month reconciled.

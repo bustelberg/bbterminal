@@ -4046,6 +4046,22 @@ async def airs_weekly_returns_job(portefeuille: str, instrument_id: str = Query(
     return {'job_id': job.id, 'label': label, 'already_running': reused}
 
 
+@router.post('/api/airs/accounts/{portefeuille}/monthly-benchmark/job')
+async def airs_monthly_benchmark_job(portefeuille: str, month: str):
+    import jobs as job_registry
+    from routers._airs_monthly_report import _account, month_window
+    from routers._monthly_benchmark import ensure
+    await asyncio.to_thread(_account, portefeuille)
+    month_window(month)
+
+    def work(ctx):
+        ensure(portefeuille, month, ctx)
+        return 'Benchmark updated.'
+
+    job, reused = job_registry.start('airs.monthly-benchmark', f'{portefeuille}:{month}', work)
+    return {'job_id': job.id, 'already_running': reused}
+
+
 @router.post('/api/airs/accounts/{portefeuille}/monthly-report/job')
 async def airs_monthly_report_job(portefeuille: str, month: str):
     """Acquire one historical month, with progress and cooperative cancellation."""

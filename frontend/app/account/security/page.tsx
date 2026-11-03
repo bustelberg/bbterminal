@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '../../../lib/supabase/client';
 import { describeMfaError, explainVerdict } from '../../../lib/mfaError';
 import { expectedTotp, explainCode, serverSkewSeconds } from '../../../lib/totp';
@@ -40,7 +40,8 @@ export default function AccountSecurityPage() {
   // Enrolment in flight: the factor GoTrue created, plus what it wants us to show.
   const [pending, setPending] = useState<
     { id: string; qr: string; secret: string } | null>(null);
-  const [name, setName] = useState('');
+  const autoStarted = useRef(false);
+  const enrolling = useRef(false);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
@@ -87,7 +88,9 @@ export default function AccountSecurityPage() {
     return () => { alive = false; };
   }, []);
 
-  async function startEnrol() {
+  const startEnrol = useCallback(async () => {
+    if (enrolling.current) return;
+    enrolling.current = true;
     setError(null);
     setNotice(null);
     setBusy(true);
@@ -100,7 +103,7 @@ export default function AccountSecurityPage() {
       for (const id of unverifiedIds(factors ?? [])) {
         await supabase.auth.mfa.unenroll({ factorId: id }).catch(() => undefined);
       }
-      const friendlyName = name.trim() || suggestName(factors ?? []);
+      const friendlyName = suggestName(factors ?? []);
       const { data, error: e } = await supabase.auth.mfa.enroll({
         factorType: 'totp',
         friendlyName,
@@ -110,13 +113,21 @@ export default function AccountSecurityPage() {
         setError(describeMfaError({ message: e.message }));
         return;
       }
-      setName(friendlyName);
       setPending({ id: data.id, qr: data.totp.qr_code, secret: data.totp.secret });
       setCode('');
+    } catch (cause) {
+      setError(describeMfaError({ message: cause instanceof Error ? cause.message : String(cause) }));
     } finally {
+      enrolling.current = false;
       setBusy(false);
     }
-  }
+  }, [factors, supabase]);
+
+  useEffect(() => {
+    if (factors === null || verifiedFactors(factors).length || pending || removing || error || autoStarted.current) return;
+    autoStarted.current = true;
+    void startEnrol();
+  }, [factors, pending, removing, error, startEnrol]);
 
   async function confirmEnrol() {
     if (!pending || !isCompleteCode(code)) return;
@@ -172,7 +183,6 @@ export default function AccountSecurityPage() {
       }
       setPending(null);
       setCode('');
-      setName('');
       setNotice(copy.enrolled);
       await load();
       if (firstAuthenticator) {
@@ -239,10 +249,9 @@ export default function AccountSecurityPage() {
       { year: 'numeric', month: 'short', day: 'numeric' });
 
   return (
-    <div className="p-6 max-w-2xl mx-auto space-y-5">
+    <div className="p-6 max-w-md mx-auto space-y-5">
       <header>
         <h1 className="text-lg font-semibold tracking-tight text-fg-strong">{copy.title}</h1>
-        <p className="mt-1 text-sm text-fg-subtle leading-relaxed">{copy.intro}</p>
       </header>
 
       {/*  ABOVE the error slot on purpose: when the clock is out, EVERY code fails, so this is
@@ -271,12 +280,7 @@ export default function AccountSecurityPage() {
         <p className="text-sm text-fg-subtle">{copy.loading}</p>
       ) : (
         <div className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-4">
-          {active.length === 0 ? (
-            <div>
-              <p className="text-sm font-medium text-fg-strong">{copy.noneTitle}</p>
-              <p className="mt-1 text-xs text-fg-subtle">{copy.noneBody}</p>
-            </div>
-          ) : (
+          {active.length > 0 && (
             <ul className="divide-y divide-neutral-800/30">
               {active.map((f) => (
                 <li key={f.id} className="flex items-center gap-3 py-2.5 first:pt-0">
@@ -304,22 +308,7 @@ export default function AccountSecurityPage() {
 
           {!pending && !removing && (
             <div className="space-y-3 pt-1">
-              <div>
-                <label htmlFor="factor-name"
-                  className="block text-xs font-medium text-fg-muted mb-1.5">
-                  {copy.nameLabel}
-                </label>
-                <input
-                  id="factor-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={copy.namePlaceholder}
-                  className="w-full bg-inset border border-neutral-700 rounded-lg px-3.5 py-2.5
-                             text-sm text-fg-strong placeholder-fg-faint transition-colors
-                             focus:outline-none focus:border-accent-500 focus:ring-2
-                             focus:ring-accent-500/25 focus:bg-card"
-                />
-              </div>
+              {busy ? <p role="status" className="text-sm text-fg-subtle">{copy.loading}</p> :
               <button
                 type="button"
                 onClick={() => void startEnrol()}
@@ -328,7 +317,7 @@ export default function AccountSecurityPage() {
                            text-sm font-medium rounded-lg px-4 py-2.5 transition-colors"
               >
                 {active.length === 0 ? copy.addFirst : copy.add}
-              </button>
+              </button>}
             </div>
           )}
 
@@ -336,7 +325,6 @@ export default function AccountSecurityPage() {
             <div className="space-y-4 pt-1">
               <div>
                 <p className="text-sm font-medium text-fg-strong">{copy.scanTitle}</p>
-                <p className="mt-1 text-xs text-fg-subtle">{copy.scanBody}</p>
               </div>
 
               {/*  THE QR IS AN SVG STRING FROM GOTRUE, injected as markup because that is the
@@ -401,7 +389,6 @@ export default function AccountSecurityPage() {
                              focus:border-accent-500 focus:ring-2 focus:ring-accent-500/25
                              focus:bg-card"
                 />
-                <p className="mt-1.5 text-[11px] text-fg-faint">{copy.codeHint}</p>
               </div>
 
               <div className="flex gap-2">
@@ -415,14 +402,14 @@ export default function AccountSecurityPage() {
                 >
                   {busy ? copy.confirming : copy.confirm}
                 </button>
-                <button
+                {active.length > 0 && <button
                   type="button"
                   onClick={() => void cancelEnrol()}
                   className="text-sm text-fg-muted hover:text-fg-strong px-3 py-2.5
                              transition-colors"
                 >
                   {copy.cancel}
-                </button>
+                </button>}
               </div>
             </div>
           )}

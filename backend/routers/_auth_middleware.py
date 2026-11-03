@@ -281,6 +281,7 @@ _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Analyse → fetch exactly one month's AIRS reports, with progress/cancel.
     re.compile(r"^/api/airs/accounts/[^/]+/monthly-report/job$"),
+    re.compile(r"^/api/airs/accounts/[^/]+/monthly-benchmark/job$"),
     re.compile(r"^/api/airs/accounts/[^/]+/weekly-returns/job$"),
     # Overview → one row's Refresh (re-scan this book's AIRS reports).
     re.compile(r"^/api/airs/portfolios/[^/]+/refresh/job$"),

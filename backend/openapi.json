@@ -20940,6 +20940,55 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/monthly-benchmark/job": {
+      "post": {
+        "operationId": "airs_monthly_benchmark_job_api_airs_accounts__portefeuille__monthly_benchmark_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Monthly Benchmark Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts/{portefeuille}/monthly-report": {
       "get": {
         "description": "Stored AIRS reports for a calendar month; opening never starts a scrape.",

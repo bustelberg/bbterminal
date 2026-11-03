@@ -1,5 +1,14 @@
 # AIRS model portfolios (/management-dashboard)
 
+Monthly benchmark recovery: a month response reports `benchmark_needs_refresh` separately
+from missing AIRS position data. The UI never reuses a cached month with a missing applicable
+benchmark. It automatically runs `/accounts/{account}/monthly-benchmark/job`, then rereads
+the report. Recovery first checks saved data, and only requests the ACWI/AGGH ETF histories
+and USD FX if the required return cannot be read. It never redownloads AIRS holdings.
+The existing daily post-AIRS job verifies monthly benchmarks for all dashboard accounts,
+repairs shared sources once, and retains per-account failures in its durable job receipt.
+Missing provider data remains an explicit retryable failure, never a fabricated zero return.
+
 ## Prepared Risk tabs
 
 Risk opens with one `/api/airs/portfolio/risk-bundle` POST for the exact displayed

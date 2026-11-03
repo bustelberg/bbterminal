@@ -40,6 +40,26 @@ describe('AIRS monthly report', () => {
     await act(async () => button.click());
   };
 
+  it('recovers a missing benchmark separately, then replaces the cached month without rereading AIRS', async () => {
+    let ready = false;
+    vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify({
+      ...completeResponse(), benchmark_needs_refresh: !ready,
+      weighted_benchmark: ready ? { '2026-10': { return_pct: 1.23, start_date: '2026-09-30', end_date: '2026-10-23', source: 'ETF' } } : {},
+    })));
+    vi.mocked(startJob).mockImplementation(async (url) => {
+      expect(String(url)).toContain('/monthly-benchmark/job?month=2026-10');
+      ready = true;
+      return job('done');
+    });
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+    expect(startJob).toHaveBeenCalledOnce();
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain('Weighted benchmark · EUR +1.23%');
+    await openOctober();
+    expect(startJob).toHaveBeenCalledOnce();
+    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.23%');
+  });
+
   it('opens a month with only its reported return and individual positions', async () => {
     vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
       '2026-10': { return_pct: 1.23, start_date: '2026-09-30', end_date: '2026-10-23', source: 'ACWI ETF · EUR' },

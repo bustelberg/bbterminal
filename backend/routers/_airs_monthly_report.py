@@ -239,10 +239,16 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
         benchmark = _weighted_months(portefeuille, annual).get(last["date"][:7], {})
         summary = {"return_pct": last["cum_pct"], "benchmark_pct": benchmark.get("return_pct"),
                    "start": anchor, "end": last["date"]}
+    weighted_benchmark = _weighted_months(portefeuille, months)
+    from routers._airs_portfolio_variant import portfolio_variant
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles
+    benchmark_expected = bool(_weighted_benchmark_profiles().get(portfolio_variant(portefeuille) or ''))
+    benchmark_missing = benchmark_expected and any(row['month'] == month for row in months) and month not in weighted_benchmark
     return {
         "available_years": sorted(years, reverse=True), "year_summary": {**summary, "complete": finalised},
         "portefeuille": portefeuille, "month": month, "start": start,
-        "end": end, "opening_date": opening, "months": months, "weighted_benchmark": _weighted_months(portefeuille, months),
+        "end": end, "opening_date": opening, "months": months, "weighted_benchmark": weighted_benchmark,
+        "benchmark_needs_refresh": benchmark_missing,
         "snapshot": bundle.get("report") if bundle else None,
         "fetched_at": bundle.get("fetched_at") if bundle else None,
         "needs_refresh": not bundle or str(bundle["datum_tot"])[:10] != end or has_errors,
@@ -266,7 +272,7 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
     # historical records, not an in-memory replacement for a missing migration.
     supabase.table("airs_monthly_report").select("month").limit(1).execute()
     ctx.check()
-    ctx.progress(0, 4, f"{portefeuille} · {month}: waiting for the AIRS session")
+    ctx.progress(0, 4, 'Waiting for AIRS…')
     if not _acquire_session(30):
         raise RuntimeError("AIRS is busy with another scan. Try loading this month again shortly.")
     sections: dict[str, dict] = {}
@@ -317,13 +323,13 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
                     "unclassified_names": sorted({str(r[COL_FONDS]) for r in uncertain if r.get(COL_FONDS)}),
                     "unclassified_unassigned": any(not r.get(COL_FONDS) for r in uncertain)}
 
-        tasks = [("performance", "Rendement", performance),
-                 ("opening", "Opening holdings", lambda: holdings(opening)),
-                 ("closing", "Closing holdings", lambda: holdings(end)),
-                 ("transactions", "Transacties", transactions)]
+        tasks = [("performance", "Loading returns…", performance),
+                 ("opening", "Loading portfolio…", lambda: holdings(opening)),
+                 ("closing", "Loading portfolio…", lambda: holdings(end)),
+                 ("transactions", "Checking changes…", transactions)]
         for n, (key, label, fn) in enumerate(tasks):
             ctx.check()
-            ctx.progress(n, 4, f"{portefeuille} · {month}: reading {label}")
+            ctx.progress(n, 4, label)
             try:
                 sections[key] = {"status": "ok", "data": fn()}
             except AirsNoData as exc:
@@ -349,7 +355,7 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
         "fetched_at": fetched, "report": payload,
         "performance": sections["performance"].get("data"), "performance_basis": "year_start",
     }, on_conflict="portefeuille,month").execute()
-    ctx.progress(4, 4, f"{portefeuille} · {month}: saved {successes}/4 reports")
+    ctx.progress(4, 4, 'Finishing update…')
     failures = sum(s["status"] == "error" for s in sections.values())
     if failures:
         from jobs import UserFacingJobError

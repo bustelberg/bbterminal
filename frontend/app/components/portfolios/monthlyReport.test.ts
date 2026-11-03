@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { savedContributionCalculation, type MonthlyPosition, type MonthlyReport } from './monthlyReport';
+import { savedContributionCalculation, monthlyBenchmarkMissing, type MonthlyPosition, type MonthlyReport } from './monthlyReport';
+
+it('rejects cached month reports with missing benchmarks but respects a non-applicable policy', () => {
+  const report = { month: '2026-11', months: [{ month: '2026-11', rendement: .5 }], weighted_benchmark: {}, benchmark_needs_refresh: true } as unknown as MonthlyReport;
+  expect(monthlyBenchmarkMissing(report, '2026-11')).toBe(true);
+  report.weighted_benchmark = { '2026-11': { return_pct: 0, start_date: '2026-10-30', end_date: '2026-11-02', source: 'ETF' } };
+  expect(monthlyBenchmarkMissing(report, '2026-11')).toBe(false);
+  report.weighted_benchmark = {}; report.benchmark_needs_refresh = false;
+  expect(monthlyBenchmarkMissing(report, '2026-11')).toBe(false);
+});
 
 const position: MonthlyPosition = { name: 'Euronext', isin: 'NL0006294274', status: 'bought',
   return_pct: 2.516654, start_date: '2026-03-25', end_date: '2026-03-31' };
