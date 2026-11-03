@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 from datetime import date as dt_date
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -3991,6 +3991,25 @@ async def airs_monthly_report(portefeuille: str, month: str, include_details: bo
     """Stored AIRS reports for a calendar month; opening never starts a scrape."""
     from routers._airs_monthly_report import read_report
     return await asyncio.to_thread(read_report, portefeuille, month, include_details=include_details)
+
+
+@router.get('/api/airs/accounts/{portefeuille}/weekly-returns')
+async def airs_weekly_returns(portefeuille: str, weeks: int = Query(12, ge=4, le=104)):
+    """Saved weekly AIRS quotes; opening the tab never starts an AIRS scan."""
+    from routers._airs_weekly_returns import read_returns
+    return await asyncio.to_thread(read_returns, portefeuille, weeks)
+
+
+@router.post('/api/airs/accounts/{portefeuille}/weekly-returns/job')
+async def airs_weekly_returns_job(portefeuille: str, weeks: int = Query(12, ge=4, le=104)):
+    import jobs as job_registry
+    from routers._airs_monthly_report import _account
+    from routers._airs_weekly_returns import collect_history
+    await asyncio.to_thread(_account, portefeuille)
+    label = f'{portefeuille} · Weekly price history'
+    job, reused = job_registry.start(f'airs.weekly-returns.{portefeuille}', label,
+                                    lambda ctx: collect_history(portefeuille, weeks, ctx))
+    return {'job_id': job.id, 'label': label, 'already_running': reused}
 
 
 @router.post('/api/airs/accounts/{portefeuille}/monthly-report/job')

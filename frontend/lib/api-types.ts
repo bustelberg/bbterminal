@@ -1025,6 +1025,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/weekly-returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Weekly Returns
+         * @description Saved weekly AIRS quotes; opening the tab never starts an AIRS scan.
+         */
+        get: operations["airs_weekly_returns_api_airs_accounts__portefeuille__weekly_returns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/weekly-returns/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Airs Weekly Returns Job */
+        post: operations["airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/allocation-bands": {
         parameters: {
             query?: never;
@@ -17138,6 +17175,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccountTransactions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_weekly_returns_api_airs_accounts__portefeuille__weekly_returns_get: {
+        parameters: {
+            query?: {
+                weeks?: number;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post: {
+        parameters: {
+            query?: {
+                weeks?: number;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

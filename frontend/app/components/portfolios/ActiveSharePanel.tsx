@@ -51,6 +51,7 @@ const CorrelationView = dynamic(() => import('./CorrelationView'), { loading: ri
 const VolatilityView = dynamic(() => import('./VolatilityView'), { loading: riskLoading });
 const DrawdownView = dynamic(() => import('./DrawdownView'), { loading: riskLoading });
 const ConcentrationView = dynamic(() => import('./ConcentrationView'), { loading: riskLoading });
+const WeeklyReturnsPanel = dynamic(() => import('./WeeklyReturnsPanel'), { loading: riskLoading });
 
 /**
  * One body for all six risk views.
@@ -142,10 +143,11 @@ function Tile({ label, value, tone, info, suffix }: {
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
   portfolioSource, riskProfilePolicy,
-  portefeuille,
+  portefeuille, returnsAccount,
 }: {
   holdings: ActiveShareHolding[];
   portefeuille?: string | null;
+  returnsAccount?: string | null;
   benchmark: string;
   benchmarkProfile?: string | null;
   /** The book's own name, so its date line names the thing it dates rather than saying "the book".
@@ -205,7 +207,7 @@ export default function ActiveSharePanel({
    * every open would make the cheap view as slow as the expensive one.
    */
   const [view, setView] =
-    useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
+    useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns'>('active');
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
@@ -321,7 +323,7 @@ export default function ActiveSharePanel({
                 here in one language is exactly the drift `riskCopy`'s compile-time guarantee
                 exists to prevent. */}
             {/* Tracking error is temporarily hidden; keep its implementation below. */}
-            {(['active', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
+            {(['active', 'corr', 'vol', 'dd', 'conc', 'returns'] as const).map((k) => (
               <button key={k} type="button" onClick={() => setView(k)}
                 aria-pressed={view === k}
                 className={`cursor-pointer px-3 py-1.5 font-medium whitespace-nowrap
@@ -344,6 +346,7 @@ export default function ActiveSharePanel({
       {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
           lazy load real rather than merely hidden.  Return-based views receive the policy sleeve;
           Active Share itself remains the deliberately narrower stock-sleeve measure. */}
+      {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} />}
       {view === 'te' && (
         <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           portefeuille={portefeuille}

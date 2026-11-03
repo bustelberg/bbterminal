@@ -1028,6 +1028,8 @@ def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
     ]
     if not rows:
         return 0
+    from routers._airs_weekly_returns import save_snapshot  # noqa: PLC0415
+    save_snapshot(portefeuille, as_of, rows, client=supabase)
     (
         supabase.table("airs_holding")
         .delete().eq("portefeuille", portefeuille).eq("as_of_date", as_of).execute()

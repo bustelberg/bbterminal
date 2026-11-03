@@ -1,5 +1,26 @@
 # AIRS model portfolios (/management-dashboard)
 
+## Weekly instrument returns
+
+Analyse → Risk → Returns reads saved weekly `Huidige koers` observations. The normal daily
+holdings capture atomically publishes the complete quote set to `airs_weekly_holding_snapshot`,
+retaining the latest actual AIRS date per week. This requires
+`20261103160000_airs_weekly_holding_snapshots.sql`, which also seeds real historical observations
+already stored in `airs_holding`. No extra scheduled AIRS login or vendor price feed is needed.
+
+Load history is an explicit cancellable, per-account AIRS job for missing/older weekly observations.
+It uses the shared daily-refresh lease and AIRS session lock. It tries only weekdays inside each
+requested week, preserves holiday fallback dates, and never modifies live holdings, returns or
+transactions. Authentication and download errors remain errors; a genuinely unavailable week stays
+missing. The selected 12/26/52-week display includes the current week to date and one extra opening
+observation for the first return.
+
+Returns compare the same ISIN and quoted currency in adjacent weekly snapshots. Exact AIRS name
+and currency are a labelled fallback when ISIN is absent. Accrued-interest and cash lines are
+excluded; conflicting duplicate quotes, non-positive prices and missing weeks produce no return.
+Added, sold and re-entered instruments are retained, without fabricated acquisition/exit returns.
+Quantity changes do not affect the calculation; income, FX and split adjustments are not included.
+
 ## Daily dashboard refresh
 
 `scheduled_jobs.py` declares the clocks and dependency stages. At 06:00 Amsterdam,

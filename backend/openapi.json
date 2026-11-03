@@ -21139,6 +21139,111 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/weekly-returns": {
+      "get": {
+        "description": "Saved weekly AIRS quotes; opening the tab never starts an AIRS scan.",
+        "operationId": "airs_weekly_returns_api_airs_accounts__portefeuille__weekly_returns_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "weeks",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 104,
+              "minimum": 4,
+              "title": "Weeks",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Weekly Returns",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/weekly-returns/job": {
+      "post": {
+        "operationId": "airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "weeks",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "maximum": 104,
+              "minimum": 4,
+              "title": "Weeks",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Weekly Returns Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/allocation-bands": {
       "get": {
         "description": "The allocation policy \u2014 JSON defaults plus any administrator overrides.",

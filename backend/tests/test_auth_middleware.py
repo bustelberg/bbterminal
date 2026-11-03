@@ -330,6 +330,8 @@ class TestExpandingAnAccountIsUserAccessible:
     def test_performance_month_and_background_job_lifecycle_are_open_to_users(self, monkeypatch):
         for method, path in (
             ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/monthly-report?month=2026-07'),
+            ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/weekly-returns?weeks=12'),
+            ('POST', '/api/airs/accounts/BUS_Offensief_Dyn/weekly-returns/job?weeks=12'),
             ('POST', '/api/airs/accounts/BUS_Offensief_Dyn/monthly-report/job?month=2026-07'),
             ('GET', '/api/airs/model-portfolios/1935/analysis?overview_only=true'),
             ('GET', '/api/airs/model-portfolios/1935/analysis?overview_only=false'),
@@ -344,6 +346,8 @@ class TestExpandingAnAccountIsUserAccessible:
     def test_read_access_does_not_grant_generic_writes_or_destructive_month_actions(self, monkeypatch):
         for method, path in (
             ('DELETE', '/api/airs/accounts/BUS_X/monthly-report'),
+            ('DELETE', '/api/airs/accounts/BUS_X/weekly-returns'),
+            ('POST', '/api/airs/accounts/BUS_X/weekly-returns/delete'),
             ('POST', '/api/airs/accounts/BUS_X/monthly-report/delete'),
             ('PUT', '/api/airs/accounts/BUS_X/holdings'),
             ('POST', '/api/airs/accounts/BUS_X/linkable'),

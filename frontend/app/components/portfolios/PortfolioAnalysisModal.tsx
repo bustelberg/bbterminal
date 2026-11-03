@@ -4241,6 +4241,7 @@ export default function PortfolioAnalysisModal({
           ) : <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
             benchmarkProfile={data.variant}
             portefeuille={data.book_portefeuille}
+            returnsAccount={reportAccount ?? data.book_portefeuille}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
             riskProfilePolicy={data.risk_profile_policy}
             //  The book's dates travel with its weights. The panel cannot derive them — an array
