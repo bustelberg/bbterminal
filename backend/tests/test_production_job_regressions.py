@@ -107,6 +107,31 @@ def test_scheduled_fx_sync_stops_at_completed_market_day(monkeypatch):
     assert ends == [date(2026, 11, 2)]
 
 
+@pytest.mark.parametrize('stored,newer_available', [('2026-10-30', False), ('2026-10-30', True), ('2026-11-02', False)])
+def test_strict_proxy_refresh_distinguishes_unpublished_and_unsaved_prices(monkeypatch, stored, newer_available):
+    from routers import _benchmark_etf as proxy
+    import airs_vermogen
+    from unittest.mock import Mock
+    monkeypatch.setattr(proxy, '_benchmark_id', lambda _: 1)
+    monkeypatch.setattr(proxy, '_latest', lambda _: (stored, 100))
+    monkeypatch.setattr(proxy, '_behind_the_market', lambda _: True)
+    monkeypatch.setattr(proxy, '_proxy_fetched_at', lambda _: proxy.datetime.now(proxy.timezone.utc).isoformat())
+    monkeypatch.setattr(proxy, '_stamp_fetched', lambda _: None)
+    refresh = Mock(return_value=0)
+    monkeypatch.setattr(proxy, '_refresh', refresh)
+    monkeypatch.setattr(airs_vermogen, 'latest_completed_market_date', lambda: '2026-11-02')
+    check = Mock(side_effect=RuntimeError('newer close not stored') if newer_available else None,
+                 return_value={'reason': 'Yahoo has no newer completed close'})
+    monkeypatch.setattr(price_refresh, '_unavailable_close', check)
+    if newer_available:
+        with pytest.raises(RuntimeError, match='newer close not stored'):
+            proxy.ensure_fresh('BONDS', force=True, strict=True)
+    else:
+        assert proxy.ensure_fresh('BONDS', force=True, strict=True) == (1, (stored, 100))
+    refresh.assert_called_once()
+    assert check.call_count == (1 if stored < '2026-11-02' else 0)
+
+
 def test_completed_airs_boundary_does_not_request_today(monkeypatch):
     import airs_scanner
     import airs_vermogen as vermogen

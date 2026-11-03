@@ -287,7 +287,7 @@ def ensure_fresh(label: str, *, force: bool = False, bypass_daily_guard: bool = 
     # also bounds the startup catch-up in a newly started process later on the same UTC day.
     persisted = _proxy_fetched_at(bid) if needs_refresh and not bypass_daily_guard else None
     fetched_today = bool(persisted and str(persisted)[:10] == utc_today)
-    if needs_refresh and (bypass_daily_guard or (
+    if needs_refresh and (bypass_daily_guard or (strict and stale) or (
             not _fetched_today.get(guard) and not fetched_today)):
         _fetched_today[guard] = True
         try:
@@ -309,7 +309,14 @@ def ensure_fresh(label: str, *, force: bool = False, bypass_daily_guard: bool = 
             _log.warning("[bench-etf] %s: refresh failed, serving what is stored: %s: %s",
                          ticker, type(exc).__name__, exc)
     if strict and _behind_the_market(last):
-        raise RuntimeError(f"{ticker}: stored benchmark close still trails the market")
+        from airs_vermogen import latest_completed_market_date  # noqa: PLC0415
+        from asset_pipeline.price_refresh import _unavailable_close  # noqa: PLC0415
+        expected = latest_completed_market_date()
+        if last is None:
+            raise RuntimeError(f"{ticker}: no stored benchmark close")
+        if last[0] < expected:
+            availability = _unavailable_close(ticker, last[0], expected)
+            _log.warning('[bench-etf] %s: %s', ticker, availability['reason'])
     return (bid, last) if last else None
 
 
