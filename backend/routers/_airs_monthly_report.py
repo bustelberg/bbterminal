@@ -353,4 +353,4 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
     if failures:
         from jobs import UserFacingJobError
         raise UserFacingJobError(f"Saved a partial report for {month}: {failures} AIRS report(s) failed. Open Report for details.")
-    return f"{portefeuille} · {month}: AIRS monthly report saved"
+    return 'Performance updated.'

@@ -76,7 +76,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     saved.current.delete(`${portefeuille}|${month}`);
     setBusy(true); setJobError(null);
     try {
-      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report/job?month=${month}`, `${name} · Performance ${month}`);
+      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report/job?month=${month}`, name);
       const job = await done;
       if (mounted.current && job.status === 'failed') setJobError(job.summary ?? (nl ? 'Het rapport kon niet worden voltooid.' : 'Report could not be completed.'));
     } catch (err) {
