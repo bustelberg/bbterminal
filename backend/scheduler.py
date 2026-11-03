@@ -1352,7 +1352,9 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False) ->
                                  result["expected_close"], result.get("error") or result.get("reason") or "price advanced but remains behind")
         # A request completing is not proof that prices became current. Keep the unresolved
         # instruments in the durable receipt, including on startup, without crashing startup.
-        if r["failed"] or remaining or r.get("skipped"):
+        unavailable = sum(bool(row.get('still_stale')) and row.get('status') == 'unavailable' for row in r.get('results', []))
+        r['vendor_unavailable'] = unavailable
+        if r["failed"] or remaining > unavailable or r.get("skipped"):
             _require_complete(f"Watched instrument price refresh incomplete: {detail}", r)
         if proxies_refreshed is not None:
             detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
@@ -1893,8 +1895,12 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
             # source check becomes stale. `only_due` would suppress that second path.
             outcome: dict = {"quota_deferred": quota_deferred}
             receipts[label] = outcome
-            message = fill_company_ids(log_ctx, label, keep, feeds="smart", receipt=outcome)
-            if outcome.get("failed"):
+            message = fill_company_ids(log_ctx, label, keep, feeds="smart", receipt=outcome, best_effort=True)
+            from routers._fundamental_fill import VENDOR_EMPTY_MARKER
+            reasons = outcome.get('failure_reasons') or {}
+            expected_gaps = bool(reasons) and all(VENDOR_EMPTY_MARKER in reason or 'unsubscribed region' in reason.lower()
+                                                 for reason in reasons)
+            if outcome.get("failed") and not expected_gaps:
                 failed.append(f"{label}: {message}")
             filled += outcome.get("loaded", 0)
             deferred += outcome.get("deferred", 0)
@@ -1923,7 +1929,7 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     summary = {"filled": filled, "deferred": deferred, "failed": len(failed), "errors": failed,
                "unavailable": sum(r.get("unavailable", 0) for r in receipts.values()),
                "results": receipts}
-    if failed or deferred:
+    if failed:
         _require_complete(msg, summary)
     return msg, summary
 

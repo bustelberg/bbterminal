@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from urllib.parse import quote as _urlquote
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -22,6 +23,16 @@ def utc_dt(ts: float) -> datetime:
     firstTradeDates in the 1960s — so use the cross-platform epoch+timedelta
     form everywhere in the pipeline."""
     return _EPOCH + timedelta(seconds=int(ts))
+
+
+def session_date(ts: float, meta: dict | None = None) -> str:
+    """A daily bar belongs to the exchange's calendar day, not its UTC opening date."""
+    name = (meta or {}).get('exchangeTimezoneName')
+    try:
+        zone = ZoneInfo(name) if name else timezone.utc
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        zone = timezone.utc
+    return utc_dt(ts).astimezone(zone).date().isoformat()
 
 
 def trim_leading_no_volume(bars: list[dict]) -> list[dict]:

@@ -354,7 +354,9 @@ def _recompute(portfolio_id: int, emit) -> dict:
                 f"{str(leg.get('fonds') or '')[:26]:<26} w={leg['weight']:>6.4g}%  "
                 f"{leg['start_date']} {leg['start_price_eur']:.4g} → "
                 f"{leg['end_date']} {leg['end_price_eur']:.4g}  "
-                f"{leg['return_pct']:+.2f}%  contributes {leg['contribution_pp']:+.3f}pp"))
+                f"{leg['return_pct']:+.2f}%  contributes "
+                + (f"{leg['contribution_pp']:+.3f}pp" if leg.get('contribution_pp') is not None
+                   else 'unavailable (no priced portfolio weight)')))
         elif leg["status"] != "zero_weight":
             emit("progress", message=(
                 f"    {str(leg.get('isin') or '(cash)'):<12} "

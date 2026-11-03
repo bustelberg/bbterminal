@@ -149,7 +149,8 @@ def _repair(ctx, label: str, cadence: str) -> str:
     ctx.progress(0, 0, f'Checking {label} data…')
     receipts = []
     try:
-        report = lambda message, profile: ctx.emit('diagnostic', message, profile=profile)
+        def report(message, profile):
+            return ctx.emit('diagnostic', message, profile=profile)
         before = stage('stored_data_audit', lambda: audit(label, cadence, report=report))
         ctx.emit('diagnostic', 'Verified stored chart inputs', details=before)
         changed = bool(before['statements_to_fetch'] or before['estimates_to_fetch'])

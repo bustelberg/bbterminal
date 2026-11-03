@@ -532,6 +532,25 @@ def refresh_risk_trackers() -> dict:
     return {"trackers": len(isins), **repaired}
 
 
+def _unavailable_close(symbol: str, stored: str, expected: str) -> dict:
+    """Check what the vendor offers before claiming storage failed or the price is current."""
+    from datetime import datetime, timedelta, timezone
+    from asset_pipeline import yahoo
+    raw = yahoo.chart_window(symbol, int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp()),
+                             int(time.time()), '1d')
+    if not raw:
+        raise RuntimeError('Yahoo did not return a price-availability response')
+    closes = (((raw.get('indicators') or {}).get('quote') or [{}])[0]).get('close') or []
+    days = [yahoo.session_date(stamp, raw.get('meta')) for i, stamp in enumerate(raw.get('timestamp') or [])
+            if i < len(closes) and closes[i] is not None and yahoo.is_closed_bar(stamp)]
+    available = max(days, default=None)
+    if available and available > stored:
+        raise RuntimeError(f'Yahoo offers a {available} close, but storage still ends at {stored}')
+    return {'status': 'unavailable', 'vendor_latest_close': available,
+            'reason': f'Yahoo has no newer completed close for this listing (expected comparison date {expected}). '
+                      'The stored price remains marked stale.'}
+
+
 def refresh_stale(
     held_only: bool = True,
     stale_days: int = DEFAULT_STALE_DAYS,
@@ -592,6 +611,12 @@ def refresh_stale(
                        still_stale=_days_between(latest_all, now) >= stale_days)
         if now <= was:
             outcome["reason"] = "No newer stored close after the Yahoo refresh"
+            if outcome['still_stale']:
+                try:
+                    outcome.update(_unavailable_close(sym, now, latest_all))
+                except Exception as exc:
+                    outcome.update(status='error', error=f'{type(exc).__name__}: {exc}')
+                    failed += 1
         if now > was:
             moved += 1
             if on_progress:

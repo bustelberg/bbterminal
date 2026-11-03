@@ -944,7 +944,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     def _volk() -> None:
         nonlocal holdings, as_of
         # Most recent VALUED date, not today (which AirSPMS has not valued yet).
-        as_of, vmo = _vermogen_most_recent(name, van)
+        as_of, vmo = _vermogen_most_recent(name, van, through=att_tot)
         holdings = _save_holdings(name, as_of, parse_airs_excel(vmo))
 
     def _mut() -> None:
@@ -1529,7 +1529,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         _LOCK.release()
 
 
-def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
+def _vermogen_most_recent(name: str, van: str, *, through: str | None = None) -> tuple[str, bytes]:
     """The Vermogensoverzicht for the most recent AVAILABLE valuation date, and that date.
 
      AirSPMS VALUES END-OF-DAY. So `today` has no Vermogensoverzicht until its valuation runs, and
@@ -1578,8 +1578,9 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     _expire_valuation_memo()
     last_err: Exception | None = None
     tried = 0
+    latest = min(date.today(), date.fromisoformat(through)) if through else date.today()
     for back in range(_WALK_BACK_DAYS):
-        tot = (date.today() - timedelta(days=back)).isoformat()
+        tot = (latest - timedelta(days=back)).isoformat()
         #  Both conditions, and the second is the load-bearing one — see `_UNVALUED_QUORUM`.
         if (_NEWEST_VALUED is not None and tot > _NEWEST_VALUED
                 and len(_UNVALUED_DATES.get(tot, ())) >= _UNVALUED_QUORUM):

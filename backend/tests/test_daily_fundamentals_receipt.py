@@ -19,7 +19,8 @@ def scheduled_fill(monkeypatch):
 
 def test_unavailable_receipt_does_not_fail_daily_job(scheduled_fill, monkeypatch):
     from routers import _fundamental_fill as fill
-    def run(ctx, label, ids, *, feeds, receipt):
+    def run(ctx, label, ids, *, feeds, receipt, best_effort):
+        assert best_effort
         receipt.update(loaded=0, failed=0, unavailable=2)
         return "ACWI — unavailable: outside our GuruFocus subscription"
     monkeypatch.setattr(fill, "fill_company_ids", run)
@@ -31,7 +32,7 @@ def test_unavailable_receipt_does_not_fail_daily_job(scheduled_fill, monkeypatch
 @pytest.mark.parametrize("raise_error", [False, True])
 def test_vendor_failures_keep_actual_counts_and_cause(scheduled_fill, monkeypatch, raise_error):
     from routers import _fundamental_fill as fill
-    def run(ctx, label, ids, *, feeds, receipt):
+    def run(ctx, label, ids, *, feeds, receipt, best_effort):
         receipt.update(loaded=0 if raise_error else 1, failed=1, unavailable=0,
                        failure_samples=["Company: missing statements"])
         if raise_error:
@@ -52,7 +53,7 @@ def test_unsubscribed_listings_do_not_use_quota_reserve(scheduled_fill, monkeypa
     from routers import _fundamental_fill as fill
     monkeypatch.setattr(api_usage, "remaining_budget", lambda _: {"europe": scheduler._FUNDAMENTALS_REGION_FLOOR + 2})
     monkeypatch.setattr(scheduler, "_fundamental_company_ids", lambda _: [(1, "LSE"), (2, "XAMS")])
-    def run(ctx, label, ids, *, feeds, receipt):
+    def run(ctx, label, ids, *, feeds, receipt, best_effort):
         assert ids == [1, 2]
         receipt.update(loaded=1, failed=0, unavailable=1)
         return "1 loaded, 1 unavailable"

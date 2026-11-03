@@ -24,6 +24,18 @@ _CHUNK = 500
 STORED_FIELDS: list[tuple[str, str]] = [("close", "close"), ("volume", "volume")]
 
 
+def _remove_utc_date_artifacts(analysis_id: int, window: dict) -> None:
+    """Remove only UTC dates proven absent from the vendor's exchange-date window."""
+    stamps = window.get('timestamp') or []
+    meta = window.get('meta') or {}
+    native = {yahoo.session_date(stamp, meta) for stamp in stamps}
+    obsolete = sorted({yahoo.utc_dt(stamp).date().isoformat() for stamp in stamps
+                       if yahoo.session_date(stamp, meta) != yahoo.utc_dt(stamp).date().isoformat()} - native)
+    for offset in range(0, len(obsolete), 100):
+        supabase.table('asset_price').delete().eq('analysis_id', analysis_id).in_(
+            'target_date', obsolete[offset:offset + 100]).execute()
+
+
 def stored_columns() -> list[str]:
     """The db columns currently persisted per bar (drives the 'what we store'
     messaging everywhere)."""
@@ -236,7 +248,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
             continue
         row: dict = {
             "analysis_id": analysis_id,
-            "target_date": yahoo.utc_dt(ts[i]).date().isoformat(),
+            "target_date": yahoo.session_date(ts[i], w.get('meta')),
         }
         for ykey, col in STORED_FIELDS:
             arr = series[ykey]
@@ -255,6 +267,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
             rows[i:i + _CHUNK], on_conflict="analysis_id,target_date",
         ).execute()
         stored += len(rows[i:i + _CHUNK])
+    _remove_utc_date_artifacts(analysis_id, w)
     # Drop any previously-stored current/future (partial) bar so a re-run that
     # now excludes today doesn't leave a stale partial close behind.
     today = datetime.now(timezone.utc).date().isoformat()
@@ -332,7 +345,7 @@ def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
             continue
         row: dict = {
             "analysis_id": analysis_id,
-            "target_date": yahoo.utc_dt(ts[i]).date().isoformat(),
+            "target_date": yahoo.session_date(ts[i], w.get('meta')),
         }
         for ykey, col in STORED_FIELDS:
             arr = series[ykey]
@@ -354,6 +367,7 @@ def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
         ).execute()
         stored += len(rows[i:i + _CHUNK])
 
+    _remove_utc_date_artifacts(analysis_id, w)
     today = datetime.now(timezone.utc).date().isoformat()
     supabase.table("asset_price").delete().eq("analysis_id", analysis_id).gte(
         "target_date", today).execute()

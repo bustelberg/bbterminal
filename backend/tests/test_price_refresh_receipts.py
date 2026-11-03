@@ -11,6 +11,7 @@ from tests._fake_supabase import FakeSupabase
     ("2026-08-21", 0, 1), ("2026-10-29", 1, 1), ("2026-10-30", 1, 0),
 ])
 def test_refresh_receipt_records_symbols_dates_and_remaining_gap(monkeypatch, last, expected_moved, expected_remaining):
+    monkeypatch.setattr(price_refresh, '_unavailable_close', lambda *a: {'status': 'unavailable'})
     monkeypatch.setattr(price_refresh, "find_stale", lambda *a, **kw: ([{
         "isin": "TEST", "analysis_id": 1, "yahoo_symbol": "FUND", "last_close": "2026-08-21",
     }], "2026-10-30", 1))
@@ -28,6 +29,7 @@ def test_refresh_receipt_records_symbols_dates_and_remaining_gap(monkeypatch, la
 
 
 def test_limited_refresh_counts_unattempted_instruments_as_remaining(monkeypatch):
+    monkeypatch.setattr(price_refresh, '_unavailable_close', lambda *a: {'status': 'unavailable'})
     monkeypatch.setattr(price_refresh, "find_stale", lambda *a, **kw: ([{
         "isin": str(i), "analysis_id": i, "yahoo_symbol": str(i), "last_close": "2026-08-21",
     } for i in range(3)], "2026-10-30", 3))

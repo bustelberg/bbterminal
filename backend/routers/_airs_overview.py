@@ -32,12 +32,12 @@ import logging
 import re
 
 from deps import supabase
+from management_portfolios import MANAGEMENT_GROUPS as _MANAGEMENT_GROUPS
 
 
 _log = logging.getLogger(__name__)
 
 
-from management_portfolios import MANAGEMENT_GROUPS as _MANAGEMENT_GROUPS
 _SINGLE_RISK_PROFILE_ACCOUNTS = {
     "aitopselectieoffdyn",
     "aztopselectiedyn",
