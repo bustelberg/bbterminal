@@ -11,6 +11,11 @@ import { instrumentLabel, searchInstruments, weeklyBars, type WeeklyReturns, typ
 const day = (value: string | null, nl: boolean) => value
   ? new Date(`${value}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 const percent = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+const weekStart = (target: string) => {
+  const start = new Date(`${target}T12:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
+  return start.toISOString().slice(0, 10);
+};
 
 function InstrumentPicker({ options, selected, onSelect, nl }: {
   options: InstrumentOption[]; selected?: InstrumentOption; onSelect: (instrument: InstrumentOption) => void; nl: boolean;
@@ -69,8 +74,16 @@ function InstrumentPicker({ options, selected, onSelect, nl }: {
   </div>;
 }
 
-function ReturnChart({ data, nl, scale }: { data: WeeklyReturns; nl: boolean; scale: number }) {
-  const [active, setActive] = useState<number | null>(null);
+type LinkedWeeks = {
+  hovered: string | null; onHover: (date: string | null) => void;
+  window: [string, string] | null; onWindow: (window: [string, string] | null) => void;
+};
+
+function ReturnChart({ data, nl, scale, linked }: { data: WeeklyReturns; nl: boolean; scale: number; linked: LinkedWeeks }) {
+  const drag = useRef<{ start: string; previous: [string, string] | null } | null>(null);
+  const { hovered, onHover, window, onWindow } = linked;
+  const found = data.periods.findIndex((period) => period.target_date === hovered);
+  const active = found < 0 ? null : found;
   const chart = useMemo(() => {
     const bars = weeklyBars(data.selected?.weeks ?? []);
     const limit = scale;
@@ -80,9 +93,7 @@ function ReturnChart({ data, nl, scale }: { data: WeeklyReturns; nl: boolean; sc
     const width = Math.min(18, step * .65);
     const y = (value: number) => mid - value / limit * (bottom - top) / 2;
     const weekLabel = (target: string) => {
-      const start = new Date(`${target}T12:00:00Z`);
-      start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
-      const monday = start.toISOString().slice(0, 10);
+      const monday = weekStart(target);
       return `${day(monday < data.start_date ? data.start_date : monday, nl)} – ${day(target, nl)}`;
     };
     const labels: Record<string, string> = nl ? {
@@ -101,7 +112,7 @@ function ReturnChart({ data, nl, scale }: { data: WeeklyReturns; nl: boolean; sc
         const cell = data.selected?.weeks[index];
         const title = `${weekLabel(period.target_date)} · ${value == null ? (labels[cell?.status ?? ''] ?? '—') : percent(value)}`;
         return <g key={period.target_date} tabIndex={0} aria-label={title}
-          onPointerEnter={() => setActive(index)} onFocus={() => setActive(index)} onBlur={() => setActive(null)}
+          onFocus={() => onHover(period.target_date)} onBlur={() => onHover(null)}
           className="outline-none">
           {value == null ? <circle cx={x} cy={mid} r="1.5" fill="currentColor" opacity=".3" />
           : <rect x={x - width / 2} y={value >= 0 ? y(value) : mid}
@@ -121,15 +132,53 @@ function ReturnChart({ data, nl, scale }: { data: WeeklyReturns; nl: boolean; sc
       {!bars.some((value) => value != null) && <text x="495" y="105" textAnchor="middle" fill="currentColor" fontSize="13">{nl ? 'Nog geen wekelijkse rendementen beschikbaar' : 'No weekly returns available yet'}</text>}
     </>;
     return { content, bars, labels, weekLabels: data.periods.map((period) => weekLabel(period.target_date)), left, right, step, top, bottom, mid, width, limit };
-  }, [data, nl, scale]);
+  }, [data, nl, scale, onHover]);
   const { bars, labels, left, right, step, top, bottom, mid, width, limit } = chart;
   const activePeriod = active === null ? undefined : data.periods[active];
   const activeValue = active === null ? null : bars[active];
   const x = left + step * ((active ?? 0) + .5);
   const tooltipX = Math.max(left, Math.min(right - 540, x - 270));
   const barY = mid - (activeValue ?? 0) / limit * (bottom - top) / 2;
-  return <svg viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf 1 januari 2026' : 'Weekly price changes from 1 January 2026'}`} className="w-full min-w-0 text-fg-subtle" onPointerLeave={() => setActive(null)}>
+  function dateAt(svg: SVGSVGElement, clientX: number, clientY: number, clamp = false) {
+    const matrix = svg.getScreenCTM();
+    if (!matrix || !data.periods.length) return null;
+    const point = svg.createSVGPoint(); point.x = clientX; point.y = clientY;
+    const position = point.matrixTransform(matrix.inverse());
+    if (!clamp && (position.x < left || position.x > right || position.y < top || position.y > bottom)) return null;
+    return data.periods[Math.max(0, Math.min(data.periods.length - 1, Math.floor((position.x - left) / step)))].target_date;
+  }
+  function extend(date: string) {
+    if (drag.current) onWindow(date < drag.current.start ? [date, drag.current.start] : [drag.current.start, date]);
+  }
+  const selectedIndices = window ? data.periods.flatMap((period, index) =>
+    period.target_date >= window[0] && period.target_date <= window[1] ? [index] : []) : [];
+  return <svg viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf 1 januari 2026' : 'Weekly price changes from 1 January 2026'}`} className="w-full min-w-0 touch-none select-none text-fg-subtle"
+    onPointerLeave={() => { if (!drag.current) onHover(null); }}
+    onPointerDown={(event) => {
+      if (event.button !== 0) return;
+      const date = dateAt(event.currentTarget, event.clientX, event.clientY);
+      if (!date) return;
+      event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
+      drag.current = { start: date, previous: window }; onHover(date); onWindow([date, date]);
+    }}
+    onPointerMove={(event) => {
+      const date = dateAt(event.currentTarget, event.clientX, event.clientY, !!drag.current);
+      onHover(date); if (date) extend(date);
+    }}
+    onPointerUp={(event) => {
+      if (!drag.current) return;
+      const date = dateAt(event.currentTarget, event.clientX, event.clientY, true);
+      if (date) extend(date);
+      drag.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      onHover(dateAt(event.currentTarget, event.clientX, event.clientY));
+    }}
+    onPointerCancel={() => { if (drag.current) onWindow(drag.current.previous); drag.current = null; onHover(null); }}
+    onLostPointerCapture={() => { drag.current = null; }}>
     {chart.content}
+    {!!selectedIndices.length && <rect pointerEvents="none" x={left + selectedIndices[0] * step} y={top}
+      width={selectedIndices.length * step} height={bottom - top}
+      className="fill-accent-500/15 stroke-accent-500" strokeWidth="2" />}
     {activePeriod && <g pointerEvents="none">
       <rect x={x - step / 2} y={top} width={step} height={bottom - top} fill="currentColor" opacity=".08" />
       {activeValue != null && <rect x={x - width / 2} y={Math.min(mid, barY)} width={width}
@@ -147,8 +196,8 @@ function ReturnChart({ data, nl, scale }: { data: WeeklyReturns; nl: boolean; sc
   </svg>;
 }
 
-function InstrumentReturnSlot({ portefeuille, scale, onData }: {
-  portefeuille: string; scale: number; onData: (data: WeeklyReturns | null) => void;
+function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
+  portefeuille: string; scale: number; onData: (data: WeeklyReturns | null) => void; linked: LinkedWeeks;
 }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
@@ -222,7 +271,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData }: {
       {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
     </div>
     <div className="flex min-h-0 flex-1 items-center [&>svg]:h-full [&>svg]:w-full">
-      {data ? <ReturnChart data={data} nl={nl} scale={scale} /> : <svg viewBox="0 0 960 320" className="h-full w-full text-fg-subtle" role="img"
+      {data ? <ReturnChart data={data} nl={nl} scale={scale} linked={linked} /> : <svg viewBox="0 0 960 320" className="h-full w-full text-fg-subtle" role="img"
         aria-label={nl ? 'Lege rendementsgrafiek' : 'Empty return chart'}>
         <line x1="65" x2="925" y1="142.5" y2="142.5" stroke="currentColor" opacity=".4" />
         <text x="56" y="146.5" textAnchor="end" fill="currentColor" fontSize="11">0%</text>
@@ -239,13 +288,25 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   const [lang] = useLang();
   const [first, setFirst] = useState<WeeklyReturns | null>(null);
   const [second, setSecond] = useState<WeeklyReturns | null>(null);
+  const [hovered, onHover] = useState<string | null>(null);
+  const [window, setWindow] = useState<[string, string] | null>(null);
+  const onWindow = useCallback((next: [string, string] | null) => {
+    setWindow((previous) => previous?.[0] === next?.[0] && previous?.[1] === next?.[1] ? previous : next);
+  }, []);
+  const linked = { hovered, onHover, window, onWindow };
   const onFirst = useCallback((data: WeeklyReturns | null) => setFirst(data), []);
   const onSecond = useCallback((data: WeeklyReturns | null) => setSecond(data), []);
   const scale = Math.max(1, ...[first, second].flatMap((data) =>
     weeklyBars(data?.selected?.weeks ?? []).map((value) => Math.abs(value ?? 0)))) * 1.1;
   if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
-  return <div className="grid h-full min-h-0 grid-cols-2 gap-3">
-    <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} />
-    <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onSecond} />
+  return <div className="flex h-full min-h-0 flex-col gap-2">
+    <div className="flex h-6 shrink-0 items-center justify-between gap-2 text-xs text-fg-muted">
+      <span>{window ? `${day(weekStart(window[0]) < '2026-01-01' ? '2026-01-01' : weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
+      {window && <button type="button" className="text-accent-300 hover:underline" onClick={() => onWindow(null)}>{lang === 'nl' ? 'Selectie wissen' : 'Clear selection'}</button>}
+    </div>
+    <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
+      <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} linked={linked} />
+      <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onSecond} linked={linked} />
+    </div>
   </div>;
 }
