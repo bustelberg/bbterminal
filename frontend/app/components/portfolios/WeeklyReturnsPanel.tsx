@@ -2,6 +2,7 @@
 
 import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RiskBundleContext } from './riskBundleContext';
+import { retrySeriesRead, useCoalescedRefresh } from './useCoalescedRefresh';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
@@ -222,29 +223,27 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     ? `${nl ? 'AIRS koersen' : 'AIRS prices'} · ${day(value.from, nl)} → ${day(value.to, nl)}`
     : (nl ? 'Begin- of eindkoers ontbreekt. Laad de ontbrekende geschiedenis.' : 'Opening or closing price missing. Load missing history.');
 
-  useEffect(() => {
-    if (!portefeuille || (!selectedId && hasBundle)) return;
-    const controller = new AbortController();
-    let active = true;
+  useCoalescedRefresh(key, revision, !!portefeuille && (!!selectedId || !hasBundle), async (signal) => {
     const url = `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns${selectedId ? `?instrument_id=${encodeURIComponent(selectedId)}` : ''}`;
-    void (async () => {
       try {
-        const response = await apiFetch(url, { signal: controller.signal, noReadCache: revision > 0 });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? 'Could not load weekly returns');
-        if (active) {
+        const payload = await retrySeriesRead(async () => {
+          const response = await apiFetch(url, { signal, noReadCache: true });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw Object.assign(new Error(body.detail ?? 'Could not load weekly returns'), { status: response.status });
+          if (!Array.isArray(body.periods) || !Array.isArray(body.options)
+              || (selectedId && body.selected?.id !== selectedId)) throw new TypeError('Incomplete weekly return response');
+          return body;
+        }, signal);
+        if (!signal.aborted) {
           setResult({ account: portefeuille, key, data: payload });
           onData(selectedId ? payload : null);
         }
       } catch (error) {
-        if (active) setResult((previous) => ({ account: portefeuille, key,
+        if (!signal.aborted) setResult((previous) => ({ account: portefeuille, key,
           data: previous?.key === key ? previous.data : undefined,
           error: error instanceof Error ? error.message : String(error) }));
       }
-    })();
-    return () => { active = false; controller.abort(); };
-  // The shared bundle owns the initial catalogue; selected instruments remain small live reads.
-  }, [key, portefeuille, selectedId, onData, revision, hasBundle]);
+  });
 
   function choose(instrument: InstrumentOption) {
     if (instrument.id === selectedId) return;
@@ -258,9 +257,10 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     choose(instrument);
     setBusy(true); setNotice(null);
     try {
+      let lastDone = 0;
       const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?instrument_id=${encodeURIComponent(instrument.id)}`,
         `${instrument.name} · AIRS`, undefined, (progress) => {
-          if ((progress.done ?? 0) > 0) setRevision((value) => value + 1);
+          if ((progress.done ?? 0) > lastDone) { lastDone = progress.done!; setRevision((value) => value + 1); }
         });
       const job = await done;
       invalidateReadCache('selected AIRS instrument history saved');
@@ -286,7 +286,11 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
       </button>
     </div>
     <div className="h-9 shrink-0 overflow-y-auto">
-      {result?.key === key && result.error && <p role="alert" className="text-xs text-neg-300">{result.error}</p>}
+      {result?.key === key && result.error && <div role="alert" className="flex items-center gap-2 text-xs text-neg-300"
+        title={result.error}>
+        <span>{nl ? 'Grafiek kon niet worden bijgewerkt.' : 'Chart could not be updated.'}</span>
+        <button type="button" className="underline" onClick={() => setRevision((value) => value + 1)}>{nl ? 'Opnieuw proberen' : 'Retry'}</button>
+      </div>}
       {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
     </div>
     <div className="flex min-h-0 flex-1 items-center [&>svg]:h-full [&>svg]:w-full">
