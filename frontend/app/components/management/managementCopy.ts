@@ -163,7 +163,7 @@ export type ManagementCopy = {
 };
 
 const en: ManagementCopy = {
-  overviewDates: { since: 'since', to: 'to' },
+  overviewDates: { since: 'Since', to: 'To' },
   page: {
     title: 'Management Dashboard',
     tabs: {
@@ -303,7 +303,7 @@ const en: ManagementCopy = {
  * is a rate. The two are confusable in exactly the place it matters, a column of percentages.
  */
 const nl: ManagementCopy = {
-  overviewDates: { since: 'vanaf', to: 'tot' },
+  overviewDates: { since: 'Sinds', to: 'Tot' },
   page: {
     title: 'Managementdashboard',
     tabs: {
