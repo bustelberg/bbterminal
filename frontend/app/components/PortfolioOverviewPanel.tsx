@@ -233,6 +233,8 @@ function defaultTableSort(collection: PortfolioCollection): TableSort {
 }
 
 export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
+  const currentMonth = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit' }).format(new Date());
+  const monthToDate = (row: AirsPortfolioOverview) => row.periode?.slice(0, 7) === currentMonth ? row.latest_month_pct ?? null : null;
   //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
   // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
@@ -904,7 +906,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     const dir = sortDir === 'asc' ? 1 : -1;
     const val = (r: AirsPortfolioOverview): string | number | null => (
       sortKey === 'name' ? (r.name ?? '')
-        : r.ytd_pct ?? null);
+        : sortKey === 'mtd' ? monthToDate(r) : r.ytd_pct ?? null);
     return [...base].sort((a, b) => {
       const x = val(a), y = val(b);
       if (sortKey === 'name') {
@@ -1031,8 +1033,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
           {/* Narrow fixed action/numeric columns, with the remaining width for names.
               The table scrolls within this card on small screens. */}
-          <table className="w-full min-w-[52rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[12rem]" /><col className="w-[12rem]" /></colgroup>
+          <table className="w-full min-w-[60rem] table-fixed text-[13px] whitespace-nowrap">
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[11rem]" /><col className="w-[11rem]" /><col className="w-[9rem]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1048,6 +1050,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                   title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">Since</th>
                 <th className="px-2 py-2.5 font-medium text-right"
                   title="Latest AIRS valuation date available for this portfolio.">To</th>
+                <SortTh label="Month-to-date" k="mtd" align="right"
+                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
+                  title="This month's return, reported by AIRS Rendementen. Shown only when AIRS has a value for the current month." />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1274,10 +1279,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
                         }).format(new Date(`${r.as_of}T00:00:00Z`)) : '—'}
                       </td>
+                      <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(monthToDate(r))}`}>
+                        {pct(monthToDate(r))}
+                        <Provenance source="airs_att" asOf={r.periode} fetchedAt={r.fetched_at} kind="copied"
+                          onRefresh={async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
+                          what="This month's return, as AIRS reports it."
+                          staleReason={r.periode?.slice(0, 7) !== currentMonth ? 'AIRS has not reported a return for this month yet'
+                            : r.missing_reports?.includes('att') ? 'Rendement was missing from the latest AIRS scan' : undefined} />
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={6} className="px-3 py-3 bg-inset space-y-2">
+                        <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
                             <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
                           )}
@@ -1368,7 +1381,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
  *  For an ISIN-bearing row it is EDITABLE: an overlaid `<select>` lets a user pin the Class (or
  *  pick "Auto" to revert to the calculated one). The choice is persisted per ISIN and beats the
  *  calculation forever; an overridden badge wears a ring on its dot. Cash (no ISIN) is read-only. */
-type SortKey = 'name' | 'ytd';
+type SortKey = 'name' | 'ytd' | 'mtd';
 
 /** A sortable column heading. The arrow shows the ACTIVE column only — an indicator on every
  *  header tells the reader nothing about which one is in force. */
