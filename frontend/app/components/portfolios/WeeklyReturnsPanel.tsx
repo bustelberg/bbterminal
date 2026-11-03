@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
@@ -14,61 +14,74 @@ const percent = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
 
 function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
   const [active, setActive] = useState<number | null>(null);
-  const bars = weeklyBars(data.selected?.weeks ?? []);
-  const limit = Math.max(1, ...bars.map((value) => Math.abs(value ?? 0))) * 1.1;
-  const left = 65, right = 925, top = 25, bottom = 260;
-  const mid = (top + bottom) / 2;
-  const step = (right - left) / Math.max(1, bars.length);
-  const width = Math.min(18, step * .65);
-  const y = (value: number) => mid - value / limit * (bottom - top) / 2;
-  const weekLabel = (target: string) => {
-    const start = new Date(`${target}T12:00:00Z`);
-    start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
-    const monday = start.toISOString().slice(0, 10);
-    return `${day(monday < data.start_date ? data.start_date : monday, nl)} – ${day(target, nl)}`;
-  };
+  const chart = useMemo(() => {
+    const bars = weeklyBars(data.selected?.weeks ?? []);
+    const limit = Math.max(1, ...bars.map((value) => Math.abs(value ?? 0))) * 1.1;
+    const left = 65, right = 925, top = 25, bottom = 260;
+    const mid = (top + bottom) / 2;
+    const step = (right - left) / Math.max(1, bars.length);
+    const width = Math.min(18, step * .65);
+    const y = (value: number) => mid - value / limit * (bottom - top) / 2;
+    const weekLabel = (target: string) => {
+      const start = new Date(`${target}T12:00:00Z`);
+      start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
+      const monday = start.toISOString().slice(0, 10);
+      return `${day(monday < data.start_date ? data.start_date : monday, nl)} – ${day(target, nl)}`;
+    };
+    const labels: Record<string, string> = nl ? {
+      added: 'Toegevoegd', reentered: 'Opnieuw gekocht', sold: 'Verkocht', not_held: 'Niet in bezit',
+      missing_snapshot: 'Geen koers', missing_previous: 'Vorige koers ontbreekt', missing_price: 'Geen koers',
+    } : { added: 'Added', reentered: 'Bought again', sold: 'Sold', not_held: 'Not held',
+      missing_snapshot: 'No price', missing_previous: 'Previous price missing', missing_price: 'No price' };
+    const content = <>
+      {[-limit, 0, limit].map((value) => <g key={value}>
+        <line x1={left} x2={right} y1={y(value)} y2={y(value)} stroke="currentColor" opacity={value === 0 ? .4 : .12} />
+        <text x={left - 9} y={y(value) + 4} textAnchor="end" fill="currentColor" fontSize="11">{value.toFixed(1)}%</text>
+      </g>)}
+      {bars.map((value, index) => {
+        const period = data.periods[index];
+        const x = left + step * (index + .5);
+        const cell = data.selected?.weeks[index];
+        const title = `${weekLabel(period.target_date)} · ${value == null ? (labels[cell?.status ?? ''] ?? '—') : percent(value)}`;
+        return <g key={period.target_date} tabIndex={0} aria-label={title}
+          onPointerEnter={() => setActive(index)} onFocus={() => setActive(index)} onBlur={() => setActive(null)}
+          className="outline-none">
+          {value == null ? <circle cx={x} cy={mid} r="1.5" fill="currentColor" opacity=".3" />
+          : <rect x={x - width / 2} y={value >= 0 ? y(value) : mid}
+              width={width} height={Math.max(1, Math.abs(y(value) - mid))} rx="1"
+              className={value > 0 ? 'fill-current text-pos-300' : value < 0 ? 'fill-current text-neg-300' : 'fill-current text-fg-subtle'}>
+          </rect>}
+          <rect x={x - step / 2} y={top} width={step} height={bottom - top} fill="transparent" />
+        </g>;
+      })}
+      <text x={left} y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
+      {data.periods.map((period, index) => {
+        if (!index || index > bars.length - 3 || period.target_date.slice(0, 7) === data.periods[index - 1].target_date.slice(0, 7)) return null;
+        const label = new Date(`${period.target_date}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { month: 'short' });
+        return <text key={period.target_date} x={left + step * (index + .5)} y="292" textAnchor="middle" fill="currentColor" fontSize="11">{label}</text>;
+      })}
+      <text x={right} y="292" textAnchor="end" fill="currentColor" fontSize="11">{day(data.through, nl)}</text>
+      {!bars.some((value) => value != null) && <text x="495" y="105" textAnchor="middle" fill="currentColor" fontSize="13">{nl ? 'Nog geen wekelijkse rendementen beschikbaar' : 'No weekly returns available yet'}</text>}
+    </>;
+    return { content, bars, labels, weekLabels: data.periods.map((period) => weekLabel(period.target_date)), left, right, step, top, bottom, mid, width, limit };
+  }, [data, nl]);
+  const { bars, labels, left, right, step, top, bottom, mid, width, limit } = chart;
   const activePeriod = active === null ? undefined : data.periods[active];
   const activeValue = active === null ? null : bars[active];
-  const tooltipX = Math.max(left, Math.min(right - 280, left + step * ((active ?? 0) + .5) - 140));
-  const labels: Record<string, string> = nl ? {
-    added: 'Toegevoegd', reentered: 'Opnieuw gekocht', sold: 'Verkocht', not_held: 'Niet in bezit',
-    missing_snapshot: 'Geen koers', missing_previous: 'Vorige koers ontbreekt', missing_price: 'Geen koers',
-  } : { added: 'Added', reentered: 'Bought again', sold: 'Sold', not_held: 'Not held',
-    missing_snapshot: 'No price', missing_previous: 'Previous price missing', missing_price: 'No price' };
+  const x = left + step * ((active ?? 0) + .5);
+  const tooltipX = Math.max(left, Math.min(right - 280, x - 140));
+  const barY = mid - (activeValue ?? 0) / limit * (bottom - top) / 2;
   return <svg viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf 1 januari 2026' : 'Weekly price changes from 1 January 2026'}`} className="w-full min-w-0 text-fg-subtle" onPointerLeave={() => setActive(null)}>
-    {[-limit, 0, limit].map((value) => <g key={value}>
-      <line x1={left} x2={right} y1={y(value)} y2={y(value)} stroke="currentColor" opacity={value === 0 ? .4 : .12} />
-      <text x={left - 9} y={y(value) + 4} textAnchor="end" fill="currentColor" fontSize="11">{value.toFixed(1)}%</text>
-    </g>)}
-    {bars.map((value, index) => {
-      const period = data.periods[index];
-      const x = left + step * (index + .5);
-      const cell = data.selected?.weeks[index];
-      const title = `${weekLabel(period.target_date)} · ${value == null ? (labels[cell?.status ?? ''] ?? '—') : percent(value)}`;
-      return <g key={period.target_date} tabIndex={0} aria-label={title}
-        onPointerEnter={() => setActive(index)} onFocus={() => setActive(index)} onBlur={() => setActive(null)}
-        className="outline-none">
-        {active === index && <rect x={x - step / 2} y={top} width={step} height={bottom - top} fill="currentColor" opacity=".08" />}
-        {value == null ? <circle cx={x} cy={mid} r="1.5" fill="currentColor" opacity=".3" />
-        : <rect x={x - width / 2} y={value >= 0 ? y(value) : mid}
-            width={width} height={Math.max(1, Math.abs(y(value) - mid))} rx="1"
-            stroke={active === index ? 'currentColor' : 'none'} strokeWidth="2"
-            className={value > 0 ? 'fill-current text-pos-300' : value < 0 ? 'fill-current text-neg-300' : 'fill-current text-fg-subtle'}>
-        </rect>}
-        <rect x={x - step / 2} y={top} width={step} height={bottom - top} fill="transparent" />
-      </g>;
-    })}
-    <text x={left} y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
-    {data.periods.map((period, index) => {
-      if (!index || index > bars.length - 3 || period.target_date.slice(0, 7) === data.periods[index - 1].target_date.slice(0, 7)) return null;
-      const label = new Date(`${period.target_date}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { month: 'short' });
-      return <text key={period.target_date} x={left + step * (index + .5)} y="292" textAnchor="middle" fill="currentColor" fontSize="11">{label}</text>;
-    })}
-    <text x={right} y="292" textAnchor="end" fill="currentColor" fontSize="11">{day(data.through, nl)}</text>
-    {!bars.some((value) => value != null) && <text x="495" y="105" textAnchor="middle" fill="currentColor" fontSize="13">{nl ? 'Nog geen wekelijkse rendementen beschikbaar' : 'No weekly returns available yet'}</text>}
+    {chart.content}
+    {activePeriod && <g pointerEvents="none">
+      <rect x={x - step / 2} y={top} width={step} height={bottom - top} fill="currentColor" opacity=".08" />
+      {activeValue != null && <rect x={x - width / 2} y={Math.min(mid, barY)} width={width}
+        height={Math.max(1, Math.abs(barY - mid))} rx="1" fill="none" stroke="currentColor" strokeWidth="2"
+        className={activeValue > 0 ? 'text-pos-300' : activeValue < 0 ? 'text-neg-300' : ''} />}
+    </g>}
     {activePeriod && <g role="tooltip" pointerEvents="none">
       <rect x={tooltipX} y="2" width="280" height="72" rx="8" className="fill-elevated stroke-current" strokeOpacity=".25" />
-      <text x={tooltipX + 14} y="24" fill="currentColor" fontSize="12">{weekLabel(activePeriod.target_date)}</text>
+      <text x={tooltipX + 14} y="24" fill="currentColor" fontSize="12">{chart.weekLabels[active!]}</text>
       <text x={tooltipX + 14} y="53" fontSize={activeValue == null ? 13 : 22} fontWeight="600"
         className={`fill-current ${activeValue != null && activeValue > 0 ? 'text-pos-300' : activeValue != null && activeValue < 0 ? 'text-neg-300' : ''}`}>
         {activeValue == null ? (labels[data.selected?.weeks[active!]?.status ?? ''] ?? '—') : percent(activeValue)}
