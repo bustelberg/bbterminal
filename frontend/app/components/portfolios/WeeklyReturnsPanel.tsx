@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { RiskBundleContext } from './riskBundleContext';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
@@ -200,6 +201,9 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   portefeuille: string; scale: number; onData: (data: WeeklyReturns | null) => void; linked: LinkedWeeks;
 }) {
   const [lang] = useLang();
+  const riskBundle = useContext(RiskBundleContext);
+  const hasBundle = riskBundle !== null;
+  const catalogue = riskBundle?.views['returns-catalogue'] as InstrumentOption[] | undefined;
   const nl = lang === 'nl';
   const [selection, setSelection] = useState<{ account: string; id: string } | null>(null);
   const selectedId = selection && selection.account === portefeuille ? selection.id : null;
@@ -208,7 +212,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
   const key = `${portefeuille}|${selectedId ?? ''}`;
-  const options = result && result.account === portefeuille ? result.data?.options ?? [] : [];
+  const options = result && result.account === portefeuille ? result.data?.options ?? catalogue ?? [] : catalogue ?? [];
   const chosen = options.find((item) => item.id === selectedId);
   const data = selectedId && result?.key === key ? result.data : undefined;
   const ytd = useMemo(() => periodReturn(data), [data]);
@@ -219,7 +223,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     : (nl ? 'Begin- of eindkoers ontbreekt. Laad de ontbrekende geschiedenis.' : 'Opening or closing price missing. Load missing history.');
 
   useEffect(() => {
-    if (!portefeuille) return;
+    if (!portefeuille || (!selectedId && hasBundle)) return;
     const controller = new AbortController();
     let active = true;
     const url = `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns${selectedId ? `?instrument_id=${encodeURIComponent(selectedId)}` : ''}`;
@@ -239,7 +243,8 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [key, portefeuille, selectedId, onData, revision]);
+  // The shared bundle owns the initial catalogue; selected instruments remain small live reads.
+  }, [key, portefeuille, selectedId, onData, revision, hasBundle]);
 
   function choose(instrument: InstrumentOption) {
     if (instrument.id === selectedId) return;

@@ -16322,6 +16322,56 @@
         "title": "ResolveNameResponse",
         "type": "object"
       },
+      "RiskBundleRequest": {
+        "properties": {
+          "benchmark_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Weights"
+          },
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActiveShareHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portefeuille"
+          },
+          "returns_account": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returns Account"
+          }
+        },
+        "title": "RiskBundleRequest",
+        "type": "object"
+      },
       "RiskCorrelation": {
         "properties": {
           "active_vol_pct": {
@@ -23264,6 +23314,46 @@
           }
         },
         "summary": "Airs Portfolio Exposure",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/risk-bundle": {
+      "post": {
+        "description": "Read all prepared default Risk views; never calculate on the HTTP request.",
+        "operationId": "airs_portfolio_risk_bundle_api_airs_portfolio_risk_bundle_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskBundleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Risk Bundle",
         "tags": [
           "airs"
         ]

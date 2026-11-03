@@ -28,8 +28,6 @@
  * said issuers. Same rename in Concentration and Effective positions, which fold identically.
  */
 import { Fragment, useMemo, useState } from 'react';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import InfoTip from '../InfoTip';
 import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
@@ -43,15 +41,16 @@ import { useLang } from '../../../lib/i18n';
 import LoadingDots from './LoadingDots';
 import dynamic from 'next/dynamic';
 import type { AirsWeightComponent } from './AirsWeightCalculation';
-import { riskRequestKey, useRiskResult } from './useRiskResult';
+import { useRiskBundle } from './riskBundle';
+import { RiskBundleContext } from './riskBundleContext';
+import CorrelationView from './CorrelationView';
+import VolatilityView from './VolatilityView';
+import DrawdownView from './DrawdownView';
+import ConcentrationView from './ConcentrationView';
+import WeeklyReturnsPanel from './WeeklyReturnsPanel';
 
 const riskLoading = () => <p role="status" className="text-sm text-fg-muted">Loading risk…</p>;
 const TrackingErrorView = dynamic(() => import('./TrackingErrorView'), { loading: riskLoading });
-const CorrelationView = dynamic(() => import('./CorrelationView'), { loading: riskLoading });
-const VolatilityView = dynamic(() => import('./VolatilityView'), { loading: riskLoading });
-const DrawdownView = dynamic(() => import('./DrawdownView'), { loading: riskLoading });
-const ConcentrationView = dynamic(() => import('./ConcentrationView'), { loading: riskLoading });
-const WeeklyReturnsPanel = dynamic(() => import('./WeeklyReturnsPanel'), { loading: riskLoading });
 
 /**
  * One body for all six risk views.
@@ -202,9 +201,8 @@ export default function ActiveSharePanel({
    * bets, enormous ones) — so reading either as a proxy for the other is the standard mistake,
    * and putting them one click apart under one heading is what makes the pair legible.
    *
-   *  The tracking-error side is mounted lazily. It costs a five-year daily price load for every
-   * holding plus the tracker; most opens of this panel never switch to it, and paying for it on
-   * every open would make the cheap view as slow as the expensive one.
+   * The risk measures share one prepared response. Only the selected view renders;
+   * changing views neither reloads history nor recalculates the risk measures.
    */
   const [view, setView] =
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns'>('active');
@@ -221,21 +219,14 @@ export default function ActiveSharePanel({
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=ACWI&weight_method=normalised-stocks-v8`
-    + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}&held_only=true`;
   const activeBody = JSON.stringify({
     holdings: weightedHoldings,
-    benchmark_weights: { Stocks: 100, Bonds: 0, EquityOnly: 1 },
+    benchmark_weights: riskBenchmarkWeights,
+    returns_account: returnsAccount ?? portefeuille,
   });
-  const key = riskRequestKey(activeUrl, activeBody);
-  const { data, error } = useRiskResult<ActiveShare>(key, async () => {
-    const r = await apiFetch(activeUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: activeBody,
-    });
-    const b = await r.json().catch(() => null);
-    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
-    return b as ActiveShare;
-  }, 'active-share', 'the active share could not be computed', view === 'active');
+  const bundle = useRiskBundle(activeBody, portfolioName);
+  const data = (bundle.views['active-share'] as ActiveShare | undefined) ?? null;
+  const error = bundle.error;
 
   // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
   // The four return endpoints and Concentration still need the canonical ACWI key to resolve
@@ -291,6 +282,7 @@ export default function ActiveSharePanel({
   </colgroup>;
 
   return (
+    <RiskBundleContext.Provider value={bundle}>
     <div className="relative h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
       bg-card p-4">
       {/*  THE HEADER IS `shrink-0` AND OUTSIDE THE VIEW BRANCH — which is the whole point
@@ -343,9 +335,8 @@ export default function ActiveSharePanel({
       <div className={`relative flex-1 min-h-0 pt-3 ${view === 'active' || view === 'returns'
         ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
-      {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
-          lazy load real rather than merely hidden.  Return-based views receive the policy sleeve;
-          Active Share itself remains the deliberately narrower stock-sleeve measure. */}
+      {/* Only the selected view renders; its data is already in the shared Risk bundle.
+          Returns loads a saved instrument series only after the reader selects one. */}
       {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}
       {view === 'te' && (
         <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
@@ -554,5 +545,6 @@ export default function ActiveSharePanel({
       )}
       </div>
     </div>
+    </RiskBundleContext.Provider>
   );
 }

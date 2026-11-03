@@ -92,12 +92,6 @@ def prepare_views(payload: dict, look_through: bool) -> int:
     """Prepare the exact default equity-risk requests from a saved Analyse book."""
     import re
     from routers.airs import ActiveShareHolding
-    from routers._active_share import compute_active_share
-    from routers._portfolio_concentration import compute_concentration
-    from routers._annual_portfolio_simulation import compute_simulation
-    from routers._portfolio_correlation_risk import compute_risk_correlation
-    from routers._portfolio_volatility import compute_volatility
-    from routers._portfolio_drawdown import compute_drawdown
     rows = payload.get('book_holdings') or []
     total = sum(row.get('current_value_eur') or 0 for row in rows)
     holdings = []
@@ -123,17 +117,6 @@ def prepare_views(payload: dict, look_through: bool) -> int:
             weight_pct=value / total * 100 if total > 0 else fallback_weight,
             is_fund=False, bucket=row.get('bucket'), value_eur=value, currency=row.get('currency')).model_dump())
     policy = {**payload['risk_profile_policy'], 'EquityOnly': 1} if payload.get('risk_profile_policy') else None
-    years = max(1, date.today().year - 2021 + 1)
-    history = {'start_date': '2021-01-01', 'years': years}
-    read(compute_active_share, holdings, 'ACWI', None, {'Stocks': 100, 'Bonds': 0, 'EquityOnly': 1}, held_only=True)
-    read(compute_concentration, holdings, 'ACWI', None, policy)
-    read(compute_simulation, holdings, 'ACWI', **history)
-    stock_weight = sum(row['weight_pct'] for row in holdings)
-    normalised = [{**row, 'weight_pct': row['weight_pct'] / stock_weight * 100 if stock_weight > 0 else 0} for row in holdings]
-    read(compute_risk_correlation, normalised, 'ACWI', 'weekly', benchmark_weights={'Stocks': 100, 'Bonds': 0},
-         require_complete_history=True, **history)
-    read(compute_volatility, holdings, 'ACWI', 'monthly', benchmark_weights=policy,
-         require_complete_history=True, **history)
-    read(compute_drawdown, holdings, 'ACWI', 'daily', benchmark_weights=policy,
-         require_complete_history=True, **history)
+    from routers._risk_bundle import prepare
+    prepare(holdings, policy)
     return 6

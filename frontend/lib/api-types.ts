@@ -1971,6 +1971,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolio/risk-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Risk Bundle
+         * @description Read all prepared default Risk views; never calculate on the HTTP request.
+         */
+        post: operations["airs_portfolio_risk_bundle_api_airs_portfolio_risk_bundle_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/risk-correlation": {
         parameters: {
             query?: never;
@@ -14956,6 +14976,22 @@ export interface components {
             /** Ticker */
             ticker: string;
         };
+        /** RiskBundleRequest */
+        RiskBundleRequest: {
+            /** Benchmark Weights */
+            benchmark_weights?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["ActiveShareHolding"][];
+            /** Portefeuille */
+            portefeuille?: string | null;
+            /** Returns Account */
+            returns_account?: string | null;
+        };
         /** RiskCorrelation */
         RiskCorrelation: {
             /** Active Vol Pct */
@@ -18368,6 +18404,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioExposure"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_risk_bundle_api_airs_portfolio_risk_bundle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskBundleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

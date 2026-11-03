@@ -1,5 +1,23 @@
 # AIRS model portfolios (/management-dashboard)
 
+## Prepared Risk tabs
+
+Risk opens with one `/api/airs/portfolio/risk-bundle` POST for the exact displayed
+stock sleeve and policy. It returns Active Share, Correlation, Volatility, Drawdown,
+Concentration and the Returns instrument catalogue together. The views share this
+response in React context; switching tabs makes no individual risk API requests.
+The chart components ship with the Risk panel so switching also avoids lazy chunk waits.
+Returns instrument selection/history remains a small, separate saved-series read.
+
+The existing scheduled Analyse preparation writes a complete durable bundle after all
+measures finish. The bundle key includes canonical weights, identities, policy and
+history start; source revision, calculation day and calculation-code version must match.
+Publication checks the source revision again, so mixed generations are never displayed.
+A cold request returns 202 with one deduplicated background preparation job; it never
+runs risk calculations on the HTTP read path. The client follows that job then rereads
+the complete bundle. Preparation uses saved prices only, preserving the existing
+preliminary daily-volatility fallback and unavailable-history explanations.
+
 ## Weekly instrument returns
 
 Analyse → Risk → Returns has a searchable selector across the union of instruments in saved

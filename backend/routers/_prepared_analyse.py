@@ -19,6 +19,7 @@ _FILES = tuple(sorted({
     _ROOT / 'routers' / '_active_share.py', _ROOT / 'routers' / '_asset_benchmark.py',
     *(_ROOT / 'routers').glob('_portfolio_*.py'),
     _ROOT / 'routers' / '_risk_read.py', _ROOT / 'routers' / '_tracking_error.py',
+    _ROOT / 'routers' / '_risk_bundle.py',
     _ROOT / 'routers' / '_annual_portfolio_simulation.py',
     _ROOT / 'routers' / '_risk_history_window.py', _ROOT / 'routers' / '_risk_benchmark_history.py',
     Path(__file__).resolve(),

@@ -107,7 +107,7 @@ const CACHEABLE: RegExp[] = [
    *  The body is the key, not the URL. All six POST the holdings list and differ only by it
    * plus a query string, which is exactly the case `readKey` already folds the body in for.
    */
-  /^\/api\/airs\/portfolio\/(active-share|tracking-error|risk-correlation|volatility|drawdown|concentration)$/,
+  /^\/api\/airs\/portfolio\/(risk-bundle|active-share|tracking-error|risk-correlation|volatility|drawdown|concentration)$/,
   //  A plain get, and its four selectors (benchmark, window, axis, source) live in the query —
   // so flipping the axis and back is two requests for one answer without this.
   /^\/api\/airs\/model-portfolios\/\d+\/attribution$/,

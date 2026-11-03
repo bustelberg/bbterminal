@@ -2385,6 +2385,34 @@ async def airs_portfolio_risk_data_quality(req: ActiveShareRequest, benchmark: s
         benchmark_weights=req.benchmark_weights)
 
 
+class RiskBundleRequest(ActiveShareRequest):
+    returns_account: str | None = None
+
+
+@router.post('/api/airs/portfolio/risk-bundle')
+async def airs_portfolio_risk_bundle(req: RiskBundleRequest):
+    """Read all prepared default Risk views; never calculate on the HTTP request."""
+    from routers import _risk_bundle
+    import jobs as job_registry
+    holdings = [h.model_dump() for h in req.holdings]
+    policy = req.benchmark_weights
+    saved = await asyncio.to_thread(_risk_bundle.read, holdings, policy)
+    if saved is not None:
+        if req.returns_account:
+            from routers._airs_instrument_returns import state
+            _, _, _, catalogue, _ = await asyncio.to_thread(state, req.returns_account)
+            saved = {**saved, 'views': {**saved['views'], 'returns-catalogue': catalogue}}
+        return {'ready': True, **saved}
+
+    def work(ctx):
+        _risk_bundle.prepare(holdings, policy, ctx)
+        return 'Portfolio risk is ready.'
+
+    job, _ = job_registry.start('airs.risk-bundle', _risk_bundle.identity(holdings, policy), work)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=202, content={'ready': False, 'job_id': job.id})
+
+
 @router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
 async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI",
                                       benchmark_start: str | None = None,

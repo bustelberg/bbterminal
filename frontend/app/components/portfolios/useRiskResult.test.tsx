@@ -3,6 +3,28 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { useRiskResult } from './useRiskResult';
+import { RiskBundleContext } from './riskBundleContext';
+
+it('switches prepared views without any per-tab loader calls', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const load = vi.fn(async () => ({ value: 'unexpected request' }));
+  function Probe({ view }: { view: string }) {
+    const { data } = useRiskResult<{ value: string }>(view, load, view, 'failed');
+    return <span>{data?.value}</span>;
+  }
+  const bundle = { views: { volatility: { value: 'saved volatility' }, drawdown: { value: 'saved drawdown' } }, error: null };
+  try {
+    await act(async () => root.render(<RiskBundleContext.Provider value={bundle}><Probe view="volatility" /></RiskBundleContext.Provider>));
+    expect(host.textContent).toBe('saved volatility');
+    await act(async () => root.render(<RiskBundleContext.Provider value={bundle}><Probe view="drawdown" /></RiskBundleContext.Provider>));
+    expect(host.textContent).toBe('saved drawdown');
+    await act(async () => root.render(<RiskBundleContext.Provider value={{ views: {}, error: null }}><Probe view="drawdown" /></RiskBundleContext.Provider>));
+    expect(host.textContent).toBe('');
+    expect(load).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
 
 it('automatically retries missing benchmark history rather than caching an unavailable answer', async () => {
   vi.useFakeTimers();

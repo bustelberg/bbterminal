@@ -192,6 +192,7 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     # describe the rows the reader is looking at, and a URL cannot carry 49 ISINs and their
     # weights. It computes and returns; it stores nothing. See `_active_share`.
     "/api/airs/portfolio/active-share",
+    "/api/airs/portfolio/risk-bundle",
     "/api/airs/portfolio/exposure",
     "/api/airs/portfolio/concentration",
     "/api/airs/portfolio/drawdown",

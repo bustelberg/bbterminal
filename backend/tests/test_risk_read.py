@@ -116,7 +116,7 @@ def test_shared_history_reuses_work_and_invalidates_on_source_changes(monkeypatc
         R.ALLOW_REPAIR.reset(token)
 
 
-def test_preparation_preserves_whole_book_weights_and_normalises_only_correlation(monkeypatch):
+def test_preparation_preserves_whole_book_weights_and_normalises_only_correlation(monkeypatch, cache):
     calls = []
     monkeypatch.setattr(R, 'read', lambda fn, *args, **kwargs: calls.append((fn.__name__, args, kwargs)))
     payload = {'book_holdings': [
