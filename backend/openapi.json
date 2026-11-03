@@ -6372,6 +6372,49 @@
         "title": "CertificateResultAdjustment",
         "type": "object"
       },
+      "ChartBundleRequest": {
+        "properties": {
+          "benchmark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cadence": {
+            "default": "annual",
+            "pattern": "^(annual|quarterly)$",
+            "title": "Cadence",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "own": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ChartBundleRequest",
+        "type": "object"
+      },
       "CompanyIngestResult": {
         "description": "What one company's backfill did. `feeds` names the calls actually spent.",
         "properties": {
@@ -21648,7 +21691,7 @@
     },
     "/api/airs/model-portfolios/refresh/job": {
       "post": {
-        "description": "Rebuild the valuation of every paired model portfolio as one cancellable job.\n\n``/scan/job`` deliberately only discovers models and repairs compositions that are absent.\nThat is enough to make a newly discovered account linkable, but it does not run the model\nvaluation pipeline (composition -> instruments -> FX -> prices -> recompute).  The overview's\nper-row Refresh *does* run that pipeline through ``refresh_portfolio_fully``.  Consequently a\nfleet refresh could say it had completed while a row still showed an old model return until\nits individual Refresh was pressed.\n\nKeep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already\nuses that exact batch helper, which in turn calls ``refresh_many`` and therefore the same\nmodel half as the per-row action.  This route only gives that shared operation a user-visible,\ncancellable job handle.",
+        "description": "Rebuild the valuation of every paired model portfolio as one cancellable job.\n\n``/scan/job`` deliberately only discovers models and repairs compositions that are absent.\nThat is enough to make a newly discovered account linkable, but it does not run the model\nvaluation pipeline (composition -> instruments -> FX -> prices -> recompute).  The overview's\nper-row Refresh *does* run that pipeline through ``refresh_portfolio_fully``.  Consequently a\nfleet refresh could say it had completed while a row still showed an old model return until\nits individual Refresh was pressed.\n\nKeep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already\nuses that exact batch helper. Manual refreshes also re-read the compositions, because the\npreceding repair-only scan can retain older ones. The scheduled pipeline instead reuses\nthe full composition scan it has just completed.",
         "operationId": "airs_model_portfolios_refresh_job_api_airs_model_portfolios_refresh_job_post",
         "responses": {
           "200": {
@@ -23886,6 +23929,46 @@
           }
         },
         "summary": "Airs Scan",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/sold-holdings/{isin}/refresh-price/job": {
+      "post": {
+        "operationId": "refresh_sold_holding_price_job_api_airs_sold_holdings__isin__refresh_price_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Sold Holding Price Job",
         "tags": [
           "airs"
         ]
@@ -26325,7 +26408,7 @@
     },
     "/api/asset-pipeline/search": {
       "get": {
-        "description": "Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.\n\n IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every\ncolumn \u2014 the right answer for a page whose whole job is that table, and an absurd one for a\ntwo-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten\nrows is the kind of thing that works on a laptop and not on a phone, and it would be paid on\nevery visit to `/research-dashboard`.\n\n PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar\nare offered: those are the ones a fundamentals view can actually render. Half the grid is\nbonds, unresolved ISINs and zero-bar rows \u2014 offering them would let someone pick a company and\nget an empty panel, which reads as a broken page rather than as an unpriceable instrument.\n\n THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than\nit is seeing, so a picker can say \"keep typing\" instead of implying the list is the answer.",
+        "description": "Search priced companies, one canonical execution per analysis instrument.\n\nThe RPC searches identity tables before joining price metadata, avoiding the\nfull asset grid. Its extra row reports truncation after deduplication.",
         "operationId": "search_assets_api_asset_pipeline_search_get",
         "parameters": [
           {
@@ -27623,6 +27706,58 @@
         ]
       }
     },
+    "/api/benchmarks/index/{label}/chart-snapshot": {
+      "get": {
+        "description": "One stored chart bundle; never query company inputs or calculate on a page read.",
+        "operationId": "benchmark_chart_snapshot_api_benchmarks_index__label__chart_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annual",
+              "pattern": "^(annual|quarterly)$",
+              "title": "Cadence",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Chart Snapshot",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
     "/api/benchmarks/index/{label}/fundamentals": {
       "get": {
         "description": "The twelve Long Equity measures for each of an index's constituents.\n\n A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and\nis what the table needs to render at all; this one reads fourteen metric series. Folding them\ntogether would hold the whole table behind the slower half, so the prices land first and the\nfundamentals fill in \u2014 the same progressive shape the /schedule and holdings-count surfaces use.\n\n`cadence` is `annual` (fiscal years) or `quarterly` (TRAILING TWELVE MONTHS, the basis the tab\nplots) \u2014 see `constituent_fundamentals`, which owns what each one means and why the quarterly\nspan starts three quarters late. It is a VIEW over data one GuruFocus call already brought;\nswitching it never spends quota.",
@@ -27807,6 +27942,58 @@
           }
         },
         "summary": "Ingest Index Fundamentals Job",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/index/{label}/fundamentals/repair/job": {
+      "post": {
+        "operationId": "repair_benchmark_fundamentals_job_api_benchmarks_index__label__fundamentals_repair_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annual",
+              "title": "Cadence",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Repair Benchmark Fundamentals Job",
         "tags": [
           "benchmarks"
         ]
@@ -29422,6 +29609,46 @@
           }
         },
         "summary": "Cash Return Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/chart-bundle": {
+      "post": {
+        "description": "Both growth lines and all their statistics are one atomic response.",
+        "operationId": "chart_bundle_api_earnings_chart_bundle_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChartBundleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chart Bundle",
         "tags": [
           "earnings"
         ]
@@ -32394,6 +32621,53 @@
           }
         },
         "summary": "Cancel Job"
+      }
+    },
+    "/api/jobs/{job_id}/details": {
+      "get": {
+        "operationId": "job_details_api_jobs__job_id__details_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Details"
       }
     },
     "/api/jobs/{job_id}/stream": {

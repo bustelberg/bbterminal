@@ -1305,9 +1305,9 @@ export interface paths {
          *     its individual Refresh was pressed.
          *
          *     Keep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already
-         *     uses that exact batch helper, which in turn calls ``refresh_many`` and therefore the same
-         *     model half as the per-row action.  This route only gives that shared operation a user-visible,
-         *     cancellable job handle.
+         *     uses that exact batch helper. Manual refreshes also re-read the compositions, because the
+         *     preceding repair-only scan can retain older ones. The scheduled pipeline instead reuses
+         *     the full composition scan it has just completed.
          */
         post: operations["airs_model_portfolios_refresh_job_api_airs_model_portfolios_refresh_job_post"];
         delete?: never;
@@ -2271,6 +2271,23 @@ export interface paths {
         get: operations["airs_scan_api_airs_scan_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/sold-holdings/{isin}/refresh-price/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Sold Holding Price Job */
+        post: operations["refresh_sold_holding_price_job_api_airs_sold_holdings__isin__refresh_price_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3455,21 +3472,10 @@ export interface paths {
         };
         /**
          * Search Assets
-         * @description Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.
+         * @description Search priced companies, one canonical execution per analysis instrument.
          *
-         *      IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every
-         *     column — the right answer for a page whose whole job is that table, and an absurd one for a
-         *     two-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten
-         *     rows is the kind of thing that works on a laptop and not on a phone, and it would be paid on
-         *     every visit to `/research-dashboard`.
-         *
-         *      PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar
-         *     are offered: those are the ones a fundamentals view can actually render. Half the grid is
-         *     bonds, unresolved ISINs and zero-bar rows — offering them would let someone pick a company and
-         *     get an empty panel, which reads as a broken page rather than as an unpriceable instrument.
-         *
-         *      THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than
-         *     it is seeing, so a picker can say "keep typing" instead of implying the list is the answer.
+         *     The RPC searches identity tables before joining price metadata, avoiding the
+         *     full asset grid. Its extra row reports truncation after deduplication.
          */
         get: operations["search_assets_api_asset_pipeline_search_get"];
         put?: never;
@@ -4024,6 +4030,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/index/{label}/chart-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Chart Snapshot
+         * @description One stored chart bundle; never query company inputs or calculate on a page read.
+         */
+        get: operations["benchmark_chart_snapshot_api_benchmarks_index__label__chart_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/index/{label}/fundamentals": {
         parameters: {
             query?: never;
@@ -4193,6 +4219,23 @@ export interface paths {
          *     `limit` spends the budget in tranches; 0 is everything that needs it.
          */
         post: operations["ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/fundamentals/repair/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Repair Benchmark Fundamentals Job */
+        post: operations["repair_benchmark_fundamentals_job_api_benchmarks_index__label__fundamentals_repair_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5244,6 +5287,26 @@ export interface paths {
          *     book, holdings with no company row omitted.
          */
         post: operations["cash_return_inputs_api_earnings_cash_return_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/chart-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chart Bundle
+         * @description Both growth lines and all their statistics are one atomic response.
+         */
+        post: operations["chart_bundle_api_earnings_chart_bundle_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6873,6 +6936,23 @@ export interface paths {
          *     it as already cancelled would make the row disappear while its API calls were still in flight.
          */
         post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job Details */
+        get: operations["job_details_api_jobs__job_id__details_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11105,6 +11185,18 @@ export interface components {
             result_eur: number;
             /** Unrealised Eur */
             unrealised_eur: number;
+        };
+        /** ChartBundleRequest */
+        ChartBundleRequest: {
+            benchmark?: components["schemas"]["FundamentalCoverageRequest"] | null;
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
+            /** Isin */
+            isin?: string | null;
+            own?: components["schemas"]["FundamentalCoverageRequest"] | null;
         };
         /**
          * CompanyIngestResult
@@ -18603,6 +18695,37 @@ export interface operations {
             };
         };
     };
+    refresh_sold_holding_price_job_api_airs_sold_holdings__isin__refresh_price_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     force_account_price_checks_job_api_airs_vermogen_price_checks_job_post: {
         parameters: {
             query?: never;
@@ -20857,6 +20980,39 @@ export interface operations {
             };
         };
     };
+    benchmark_chart_snapshot_api_benchmarks_index__label__chart_snapshot_get: {
+        parameters: {
+            query?: {
+                cadence?: string;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get: {
         parameters: {
             query?: {
@@ -20930,6 +21086,39 @@ export interface operations {
                 feeds?: string;
                 force?: boolean;
                 prices?: boolean;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_benchmark_fundamentals_job_api_benchmarks_index__label__fundamentals_repair_job_post: {
+        parameters: {
+            query?: {
+                cadence?: string;
             };
             header?: never;
             path: {
@@ -22145,6 +22334,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chart_bundle_api_earnings_chart_bundle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChartBundleRequest"];
             };
         };
         responses: {
@@ -24281,6 +24503,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_details_api_jobs__job_id__details_get: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
