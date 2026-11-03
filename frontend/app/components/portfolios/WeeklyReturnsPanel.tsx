@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
@@ -11,6 +11,63 @@ import { instrumentLabel, searchInstruments, weeklyBars, type WeeklyReturns, typ
 const day = (value: string | null, nl: boolean) => value
   ? new Date(`${value}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 const percent = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+
+function InstrumentPicker({ options, selected, onSelect, nl }: {
+  options: InstrumentOption[]; selected?: InstrumentOption; onSelect: (instrument: InstrumentOption) => void; nl: boolean;
+}) {
+  const listId = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const filtered = searchInstruments(options, query);
+  useEffect(() => {
+    if (open) list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+  function select(instrument: InstrumentOption) {
+    onSelect(instrument);
+    input.current?.focus();
+    setOpen(false);
+    setQuery('');
+  }
+  function show() { if (!open) { setQuery(''); setActive(0); setOpen(true); } }
+  return <div className="relative w-72 max-w-full" onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setQuery(''); }
+  }}>
+    <div className="relative flex items-center rounded-lg border border-neutral-800/40 bg-elevated focus-within:border-accent-500/60">
+      <input ref={input} role="combobox" aria-label={nl ? 'Instrument zoeken' : 'Search instruments'}
+        aria-expanded={open} aria-controls={listId} aria-autocomplete="list"
+        aria-activedescendant={open && filtered[active] ? `${listId}-${active}` : undefined}
+        autoComplete="off" value={open ? query : selected?.name ?? ''}
+        placeholder={open ? (nl ? 'Zoek op naam of ISIN…' : 'Search name or ISIN…') : (nl ? 'Kies een instrument' : 'Choose an instrument')}
+        title={selected ? instrumentLabel(selected) : undefined}
+        onFocus={show} onClick={show}
+        onChange={(event) => { setQuery(event.target.value); setActive(0); setOpen(true); }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!open) show();
+            else setActive((index) => Math.max(0, Math.min(filtered.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1))));
+          } else if (event.key === 'Enter' && open) {
+            event.preventDefault(); if (filtered[active]) select(filtered[active]);
+          } else if (event.key === 'Escape') { event.preventDefault(); setOpen(false); setQuery(''); }
+        }}
+        className="w-full min-w-0 truncate bg-transparent py-2 pl-3 pr-9 text-sm text-fg outline-none" />
+      <svg aria-hidden="true" viewBox="0 0 16 16" className="pointer-events-none absolute right-3 h-4 w-4 text-fg-muted" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m4 6 4 4 4-4" /></svg>
+    </div>
+    {open && <div ref={list} id={listId} role="listbox" aria-label={nl ? 'Instrumenten' : 'Instruments'}
+      className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full overflow-y-auto overscroll-contain rounded-lg border border-neutral-800/40 bg-elevated p-1 shadow-xl">
+      {filtered.length ? filtered.map((instrument, index) => <button key={instrument.id} type="button"
+        id={`${listId}-${index}`} data-index={index} role="option" aria-selected={instrument.id === selected?.id} tabIndex={-1}
+        onClick={() => select(instrument)}
+        className={`block w-full rounded-md px-3 py-2 text-left hover:bg-accent-500/10 ${active === index ? 'bg-accent-500/10' : ''}`}>
+        <span className={`block text-sm ${instrument.id === selected?.id ? 'text-accent-300' : 'text-fg'}`}>{instrument.name}</span>
+        <span className="block text-xs text-fg-muted">{[instrument.isin, instrument.currency].filter(Boolean).join(' · ')}</span>
+      </button>) : <p className="px-3 py-3 text-xs text-fg-muted">{nl ? 'Geen instrumenten gevonden' : 'No instruments found'}</p>}
+    </div>}
+  </div>;
+}
 
 function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
   const [active, setActive] = useState<number | null>(null);
@@ -93,10 +150,8 @@ function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
 export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: string | null }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
-  const listId = useId();
   const [selection, setSelection] = useState<{ account: string; id: string } | null>(null);
   const selectedId = selection && selection.account === portefeuille ? selection.id : null;
-  const [query, setQuery] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{ account: string; key: string; data?: WeeklyReturns; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -128,7 +183,6 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
 
   function choose(instrument: InstrumentOption) {
     if (portefeuille) setSelection({ account: portefeuille, id: instrument.id });
-    setQuery(null);
   }
 
   async function loadHistory() {
@@ -150,16 +204,8 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center gap-3">
-      <input list={listId} aria-label={nl ? 'Instrument zoeken' : 'Search instruments'} autoComplete="off"
-        value={query ?? chosen?.name ?? ''} placeholder={nl ? 'Zoek een instrument…' : 'Search an instrument…'}
-        title={chosen ? instrumentLabel(chosen) : undefined}
-        onFocus={(event) => event.currentTarget.select()}
-        onChange={(event) => { const value = event.target.value; setQuery(value); const exact = options.find((option) => instrumentLabel(option) === value); if (exact) choose(exact); }}
-        onBlur={() => setQuery(null)}
-        onKeyDown={(event) => { if (event.key === 'Enter' && query) { const found = searchInstruments(options, query); if (found.length === 1) { event.preventDefault(); choose(found[0]); } } }}
-        className="min-w-56 flex-1 rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm text-fg outline-none focus:border-accent-500/60" />
-      <datalist id={listId}>{options.map((instrument) => <option key={instrument.id} value={instrumentLabel(instrument)} />)}</datalist>
-      <button type="button" disabled={busy || !chosen || query !== null} onClick={() => void loadHistory()}
+      <InstrumentPicker options={options} selected={chosen} onSelect={choose} nl={nl} />
+      <button type="button" disabled={busy || !chosen} onClick={() => void loadHistory()}
         className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-xs font-medium text-fg-muted hover:text-accent-300 disabled:opacity-50">
         {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Ontbrekende geschiedenis laden' : 'Load missing history')}
       </button>
