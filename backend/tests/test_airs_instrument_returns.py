@@ -94,11 +94,38 @@ def test_unknown_instrument_cannot_start_a_history_load(environment):
     assert error.value.status_code == 404
 
 
-def test_older_name_only_report_is_not_misread_as_a_sale(environment):
+def test_ambiguous_name_only_report_is_not_misread_as_a_sale(environment):
     environment.tables['airs_weekly_holding_snapshot'] += [snapshot('2026-01-09', quote(None, 110, holding_name='A'))]
+    environment.tables['airs_weekly_holding_snapshot'][0]['holdings'].append(quote('OTHER', 120, holding_name='A'))
     result = returns.read('BOOK', 'A|EUR')
     assert result['selected']['weeks'][1]['price'] is None
     assert result['missing_observations'] == 3
+
+
+def test_unique_isin_replaces_the_name_only_option_and_keeps_its_saved_history(environment):
+    name = 'High Income Quality fund'
+    environment.tables['airs_weekly_holding_snapshot'] = [
+        snapshot('2026-01-16', quote('CH1369849273', 121, holding_name=name)),
+        snapshot('2026-01-02', quote(None, 100, holding_name=name)),
+        snapshot('2026-01-09', quote(None, 110, holding_name=name))]
+    environment.tables[returns.TABLE] = [{**individual('2025-12-31'),
+        'instrument_id': 'name:high income quality fund|EUR',
+        'holdings': [quote(None, 90, holding_name=name)]}]
+    result = returns.read('BOOK', 'CH1369849273|EUR')
+    assert len(result['options']) == 1
+    assert result['options'][0]['isin'] == 'CH1369849273'
+    assert [cell['return_pct'] for cell in result['selected']['weeks']] == pytest.approx([100 / 90 * 100 - 100, 10, 10])
+    assert result['missing_observations'] == 0
+    assert returns.read('BOOK', 'name:high income quality fund|EUR')['selected']['id'] == 'CH1369849273|EUR'
+
+
+def test_same_name_does_not_merge_different_isins_or_currencies(environment):
+    name = 'High Income Quality fund'
+    environment.tables['airs_weekly_holding_snapshot'] = [snapshot('2026-01-16',
+        quote('CH1369849273', holding_name=name), quote('OTHER', holding_name=name),
+        quote(None, holding_name=name), quote(None, holding_name=name, currency='USD'))]
+    result = returns.read('BOOK', 'CH1369849273|EUR')
+    assert len(result['options']) == 4
 
 
 def test_valid_complete_quote_replaces_an_older_failed_instrument_check_on_same_date(environment):

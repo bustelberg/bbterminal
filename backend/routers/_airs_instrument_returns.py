@@ -14,10 +14,19 @@ START = date(2026, 1, 1)
 TABLE = 'airs_weekly_instrument_snapshot'
 
 
+def _name(value):
+    return ' '.join(value.casefold().split())
+
+
 def _quote_for(holdings, instrument):
     quotes = _quotes(holdings)
     if instrument['id'] in quotes:
         return quotes[instrument['id']]
+    aliases = [row for row in quotes.values() if not row['isin'] and row['currency'] == instrument['currency']
+               and _name(row['name']) in instrument.get('name_aliases', [])]
+    if aliases:
+        prices = {row['price'] for row in aliases}
+        return {**instrument, 'price': aliases[0]['price'] if len(prices) == 1 else None}
     if instrument['isin'] and any(not row['isin'] and row['currency'] == instrument['currency']
                                   and row['name'].casefold() == instrument['name'].casefold()
                                   for row in quotes.values()):
@@ -62,21 +71,33 @@ def state(account, instrument_id=None):
     snapshots = _pages(supabase.table('airs_weekly_holding_snapshot').select('as_of_date,holdings')
                        .eq('portefeuille', account).lte('as_of_date', through.isoformat())
                        .order('as_of_date', desc=True))
-    catalog = {}
+    catalog, named = {}, {}
     for snapshot in snapshots:
         # Zero-quantity reporting rows also identify instruments previously held.
         metadata = [{k: v for k, v in row.items() if k not in ('quantity', 'quantity_exact', 'current_value_eur')}
                     for row in snapshot['holdings']]
         for key, row in _quotes(metadata).items():
             catalog.setdefault(key, {k: row[k] for k in ('id', 'name', 'isin', 'currency')})
+            if row['isin']:
+                named.setdefault((_name(row['name']), row['currency']), set()).add(key)
+    aliases = {}
+    for key, row in list(catalog.items()):
+        candidates = named.get((_name(row['name']), row['currency']), set())
+        if not row['isin'] and len(candidates) == 1:
+            aliases[key] = next(iter(candidates))
+            del catalog[key]
     options = sorted(catalog.values(), key=lambda row: (row['name'].casefold(), row['currency'], row['id']))
+    instrument_id = aliases.get(instrument_id, instrument_id)
     if instrument_id and instrument_id not in catalog:
         raise HTTPException(404, 'This instrument is not in the saved AIRS portfolio history')
     chosen = catalog.get(instrument_id) if instrument_id else (options[0] if options else None)
+    if chosen and chosen['isin']:
+        chosen = {**chosen, 'name_aliases': [name for (name, currency), ids in named.items()
+                                           if currency == chosen['currency'] and ids == {chosen['id']}]}
     individual = []
     if chosen:
         individual = _pages(supabase.table(TABLE).select('target_date,as_of_date,holdings,status,checked_at')
-                            .eq('portefeuille', account).eq('instrument_id', chosen['id'])
+                            .eq('portefeuille', account).in_('instrument_id', [chosen['id'], *[key for key, value in aliases.items() if value == chosen['id']]])
                             .gte('target_date', (START - timedelta(days=1)).isoformat())
                             .lte('target_date', through.isoformat()).order('target_date'))
     return through, snapshots, individual, options, chosen
@@ -126,6 +147,7 @@ def read(account, instrument_id=None):
         points, missing = observations(chosen, dates, snapshots, individual, through)
         data = _observations_matrix(account, points, through, seed=[chosen])
         selected = data['instruments'][0]
+        selected.pop('name_aliases', None)
         periods = data['periods']
         for period in periods:
             period['partial'] = week_end(date.fromisoformat(period['target_date'])) + timedelta(days=2) > through
@@ -143,6 +165,7 @@ def collect(account, instrument_id, ctx):
 
     ctx.check()
     through, snapshots, individual, _, instrument = state(account, instrument_id)
+    instrument_id = instrument['id']
     _, pending = observations(instrument, targets(through), snapshots, individual, through)
     if not pending:
         return 'No missing history to request for this instrument.'
