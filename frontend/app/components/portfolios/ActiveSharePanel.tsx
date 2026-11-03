@@ -301,7 +301,7 @@ export default function ActiveSharePanel({
       <div className="relative shrink-0 text-center">
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-fg-strong">
-            {t.subtitle(portfolioName, selectedPortfolioAsOf)}
+            {view === 'returns' ? 'AIRS · Huidige koers' : t.subtitle(portfolioName, selectedPortfolioAsOf)}
           </h4>
           {/*  A TWO-POSITION SEGMENTED CONTROL, JOINED — which is the shape that means "exactly
               one of these". The filter chips elsewhere in this modal are separate pills because
