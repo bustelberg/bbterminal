@@ -196,6 +196,7 @@ def _fx(currencies: set[str], anchor: str, emit) -> dict:
     """
     from asset_pipeline.fx import SUBUNIT  # noqa: PLC0415
     from fx_rates import fetch_history  # noqa: PLC0415
+    from airs_vermogen import latest_completed_market_date  # noqa: PLC0415
 
     # The MAJOR code: `fx_rate` has GBP and has never had `GBp` — pence is a quoting convention,
     # not a currency, and asking for the literal string returns nothing at all.
@@ -206,7 +207,9 @@ def _fx(currencies: set[str], anchor: str, emit) -> dict:
         f"(the window opens {anchor})"))
 
     out = {"checked": len(codes), "backfilled": 0, "extended": 0, "failed": 0, "currencies": {}}
-    today = date.today().isoformat()
+    # These returns use completed daily closes. Today's ECB fixing may not be
+    # published yet and is not needed to convert yesterday's closing prices.
+    required_through = latest_completed_market_date()
     for code in codes:
         lo = (supabase.table("fx_rate").select("rate_date").eq("currency_code", code)
               .order("rate_date").limit(1).execute().data or [])
@@ -215,7 +218,7 @@ def _fx(currencies: set[str], anchor: str, emit) -> dict:
         have_lo = lo[0]["rate_date"] if lo else None
         have_hi = hi[0]["rate_date"] if hi else None
         gap_back = (not have_lo) or have_lo > need_from
-        gap_fwd = (not have_hi) or have_hi < today
+        gap_fwd = (not have_hi) or have_hi < required_through
 
         if not gap_back and not gap_fwd:
             emit("progress", message=f"    {code}  {have_lo} → {have_hi}  covered")

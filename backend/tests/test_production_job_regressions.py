@@ -37,6 +37,21 @@ def test_resolved_instrument_without_yahoo_ticker_does_not_crash_refresh(monkeyp
     assert any('AIRS fund' in message for message in messages)
 
 
+def test_fx_complete_for_last_market_close_does_not_request_unpublished_fixing(monkeypatch):
+    from routers import _airs_portfolio_refresh as refresh
+    import airs_vermogen
+    import fx_rates
+    fake = FakeSupabase({'fx_rate': [
+        {'currency_code': 'USD', 'rate_date': '2025-11-01', 'rate': 1.1},
+        {'currency_code': 'USD', 'rate_date': '2026-11-02', 'rate': 1.2}]})
+    monkeypatch.setattr(refresh, 'supabase', fake)
+    monkeypatch.setattr(airs_vermogen, 'latest_completed_market_date', lambda: '2026-11-02')
+    def unexpected_fetch(*args, **kwargs):
+        pytest.fail('Completed-day FX is already stored')
+    monkeypatch.setattr(fx_rates, 'fetch_history', unexpected_fetch)
+    assert refresh._fx({'USD'}, '2026-01-01', lambda *a, **kw: None)['failed'] == 0
+
+
 def test_completed_airs_boundary_does_not_request_today(monkeypatch):
     import airs_scanner
     import airs_vermogen as vermogen
