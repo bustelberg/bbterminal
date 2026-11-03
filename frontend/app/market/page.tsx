@@ -10,21 +10,25 @@ import { API_URL } from '../../lib/apiUrl';
 import { chartTheme } from '../../lib/chartTheme';
 import type { components } from '../../lib/api-types';
 import { useLang } from '../../lib/i18n';
+import MarketPriceLevels from './MarketPriceLevels';
+import { usePriceLevels } from './usePriceLevels';
+import { priceLevel, type MarketKey } from './priceLevels';
 
 type Snapshot = components['schemas']['MarketSnapshot'];
 type Range = '1y' | '5y' | 'all';
 
 export default function MarketPage() {
   const [lang] = useLang();
+  const levels = usePriceLevels();
   return <main className="mx-auto max-w-[100rem] space-y-8 p-4 sm:p-6 lg:p-8">
     <h1 className="text-2xl font-semibold text-fg-strong">{lang === 'nl' ? 'Markt' : 'Market'}</h1>
-    <MarketSection endpoint="nasdaq" name="Nasdaq Composite" symbol="^IXIC" />
-    <MarketSection endpoint="acwi" name="iShares MSCI ACWI ETF" symbol="ACWI" />
-    <MarketSection endpoint="iwqu" name="iShares Edge MSCI World Quality Factor UCITS ETF" symbol="IWQU.L" />
+    <MarketSection endpoint="nasdaq" name="Nasdaq Composite" symbol="^IXIC" levels={levels} />
+    <MarketSection endpoint="acwi" name="iShares MSCI ACWI ETF" symbol="ACWI" levels={levels} />
+    <MarketSection endpoint="iwqu" name="iShares Edge MSCI World Quality Factor UCITS ETF" symbol="IWQU.L" levels={levels} />
   </main>;
 }
 
-function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi' | 'iwqu'; name: string; symbol: string }) {
+function MarketSection({ endpoint, name, symbol, levels }: { endpoint: MarketKey; name: string; symbol: string; levels: ReturnType<typeof usePriceLevels> }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
   const currency = endpoint === 'iwqu' ? 'EUR' : 'USD';
@@ -67,6 +71,8 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
   const number = (value: number) => value.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const day = (value: string) => new Date(`${value}T12:00:00Z`).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
   const peakVisible = points.some(point => point.date === data?.peak_date);
+  const thresholds = data ? levels.rows.filter(row => row.market === endpoint)
+    .map(row => priceLevel(data.peak, data.latest, row.drawdown_pct)).filter(level => level != null) : [];
   const button = 'cursor-pointer rounded-lg border border-neutral-800/40 px-3 py-2 text-xs font-medium hover:bg-overlay/5 disabled:cursor-wait disabled:opacity-50';
 
   return <section className="space-y-5" aria-label={name}>
@@ -106,6 +112,7 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
           <p className="mt-2 text-xs text-fg-faint">{nl ? 'Laatste stand ÷ top − 1' : 'Latest level ÷ peak − 1'}</p>
         </section>
       </div>
+      <MarketPriceLevels market={endpoint} name={name} peak={data.peak} latest={data.latest} currency={currency} levels={levels} />
       <section className="min-w-0 rounded-xl border border-neutral-800/40 bg-card p-3 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-fg-strong">{name}</h2>
@@ -125,6 +132,10 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
               <Tooltip {...chartTheme.tooltip} labelFormatter={value => day(String(value))} formatter={value => [number(Number(value)), endpoint === 'nasdaq' ? (nl ? 'Indexstand' : 'Index level') : `${nl ? 'ETF-koers' : 'ETF price'} · ${currency}`]} />
               <ReferenceLine y={data.peak} stroke={chartTheme.warn} strokeDasharray="5 4"
                 label={{ value: `${nl ? 'Top' : 'Peak'} ${number(data.peak)} · ${day(data.peak_date)}`, position: 'insideTopLeft', fill: chartTheme.warn, fontSize: 11 }} />
+              {thresholds.map(level => <ReferenceLine key={level.drawdown} y={level.target}
+                stroke={level.hit ? chartTheme.pos : chartTheme.axisTick} strokeDasharray="3 4"
+                label={{ value: `−${level.drawdown}% · ${number(level.target)}`, position: 'insideBottomRight',
+                  fill: level.hit ? chartTheme.pos : chartTheme.axisTick, fontSize: 11 }} />)}
               <Line type="linear" dataKey="close" stroke={chartTheme.accent} strokeWidth={1.8} dot={false} isAnimationActive={false} />
               {peakVisible && <ReferenceDot x={data.peak_date} y={data.peak} r={5} fill={chartTheme.warn} stroke="white" strokeWidth={2} />}
             </LineChart>
