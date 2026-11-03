@@ -65,6 +65,33 @@ def test_prepared_snapshot_identity_is_portable_between_deployments(monkeypatch,
     assert digests[0] == digests[1]
 
 
+def test_queue_pauses_for_daily_refresh_in_another_process(monkeypatch):
+    import dashboard_daily
+    import scheduler
+    from asset_pipeline import queue
+    monkeypatch.setattr(dashboard_daily, 'daily_refresh_active', lambda: True)
+    monkeypatch.setattr(scheduler, '_scheduled_futures', {})
+    def unexpected_slice(**kwargs):
+        pytest.fail('A daily refresh in another process has priority')
+    monkeypatch.setattr(queue, 'process_slice', unexpected_slice)
+    scheduler._fire_asset_ingest_queue()
+
+
+@pytest.mark.parametrize('acquired,active', [(True, False), (False, True)])
+def test_daily_queue_pause_observes_shared_lease(monkeypatch, acquired, active):
+    import dashboard_daily
+    import common.pg
+    import psycopg
+    from unittest.mock import MagicMock
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = (acquired,)
+    conn.__enter__.return_value = conn
+    monkeypatch.setattr(common.pg, '_db_url', lambda: 'test-database')
+    monkeypatch.setattr(psycopg, 'connect', lambda *a, **kw: conn)
+    assert dashboard_daily.daily_refresh_active() is active
+    assert conn.execute.call_count == (2 if acquired else 1)
+
+
 def test_completed_airs_boundary_does_not_request_today(monkeypatch):
     import airs_scanner
     import airs_vermogen as vermogen

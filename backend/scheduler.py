@@ -1184,6 +1184,9 @@ def _fire_asset_ingest_queue() -> None:
                for name, future in _scheduled_futures.items()):
             return  # Give the daily refresh exclusive priority over new queue slices.
     try:
+        from dashboard_daily import daily_refresh_active  # noqa: PLC0415
+        if daily_refresh_active():
+            return
         from asset_pipeline import queue as _q  # noqa: PLC0415
         from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
         # One tracker is the shared benchmark leg of every beta calculation.  A

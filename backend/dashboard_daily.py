@@ -16,6 +16,22 @@ from deps import supabase
 _lease_held = ContextVar("dashboard_daily_lease", default=False)
 
 
+def daily_refresh_active() -> bool:
+    """Let queue workers observe the daily refresh lease across processes."""
+    if _lease_held.get():
+        return True
+    from common.pg import _db_url
+    import psycopg
+    url = _db_url()
+    if not url:
+        return bool(os.environ.get('RAILWAY_PUBLIC_DOMAIN'))
+    with psycopg.connect(url, connect_timeout=3, autocommit=True, options='-c statement_timeout=3000') as conn:
+        acquired = conn.execute("SELECT pg_try_advisory_lock(hashtext('bbterminal.dashboard_daily'))").fetchone()[0]
+        if acquired:
+            conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.dashboard_daily'))")
+        return not acquired
+
+
 @contextmanager
 def daily_lease(job_id: str, triggered_by: str):
     """Serialize dashboard writers across replicas; nested preparation shares the lease."""
