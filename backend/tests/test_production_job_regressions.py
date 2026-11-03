@@ -24,6 +24,19 @@ def test_model_refresh_does_not_crash_on_unavailable_contribution(monkeypatch):
     assert any('no YTD' in message for message in messages)
 
 
+def test_resolved_instrument_without_yahoo_ticker_does_not_crash_refresh(monkeypatch):
+    from routers import _airs_portfolio_refresh as refresh
+    fake = FakeSupabase({'asset_execution': [
+        {'isin': 'TEST', 'analysis_id': 123, 'yahoo_symbol': None,
+         'currency': None, 'name': 'AIRS fund', 'status': 'resolved'}]})
+    monkeypatch.setattr(refresh, 'supabase', fake)
+    messages = []
+    result = refresh._instruments(['TEST'], lambda *a, **kw: messages.append(kw.get('message', '')))
+    assert result['TEST']['analysis_id'] == 123
+    assert result['TEST']['yahoo_symbol'] is None
+    assert any('AIRS fund' in message for message in messages)
+
+
 def test_completed_airs_boundary_does_not_request_today(monkeypatch):
     import airs_scanner
     import airs_vermogen as vermogen

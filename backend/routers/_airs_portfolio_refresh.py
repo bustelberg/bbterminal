@@ -155,7 +155,7 @@ def _instruments(isins: list[str], emit) -> dict[str, dict]:
         e = ex.get(isin)
         emit("progress", message=(
             f"    {isin:<14} "
-            + (f"{e['yahoo_symbol']:<12} {e.get('currency') or '?':<4} {str(e.get('name') or '')[:32]}"
+            + (f"{e.get('yahoo_symbol') or '?':<12} {e.get('currency') or '?':<4} {str(e.get('name') or '')[:32]}"
                if e and e.get("analysis_id")
                else f"NOT RESOLVED ({(e or {}).get('status') or 'not in the grid'})")))
     if missing:
