@@ -305,7 +305,7 @@ const en: RiskCopy = {
       + 'at 21:00 — which lowers the measured covariance.',
     freqNote: (f) => `f = ${f} observations per year.`,
     pricedFrom: (field, vendor) => `Prices from ${v(field)} at ${v(vendor)}.`,
-    computing: 'Computing',
+    computing: 'Loading',
     synthetic: (y, p, t) => `The selected stock sleeve at the selected AIRS weights over ${y} years `
       + `(${p} of ${t} priced).`,
     observations: 'Observations',
@@ -650,7 +650,7 @@ const nl: RiskCopy = {
       + 'positie om 21:00 — waardoor de gemeten covariantie lager uitvalt.',
     freqNote: (f) => `f = ${f} waarnemingen per jaar.`,
     pricedFrom: (field, vendor) => `Koersen uit ${v(field)} bij ${v(vendor)}.`,
-    computing: 'Berekenen',
+    computing: 'Laden',
     synthetic: (y, p, t) => `De gekozen aandelenselectie tegen de gekozen AIRS-wegingen over ${y} jaar `
       + `(${p} van ${t} geprijsd).`,
     observations: 'Waarnemingen',
