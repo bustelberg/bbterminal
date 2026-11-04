@@ -3983,12 +3983,14 @@ export default function PortfolioAnalysisModal({
         {/*  ONE BIG LINE AND A MOVING ELLIPSIS — see `AnalyseLoading` for why this modal gets
             no skeleton and no progress bar. */}
         {!data && !error && <AnalyseLoading label={copy.chrome.loading} />}
-        {!assetFilter && data?.overview_prepared_at && (
-          <p className="text-[11px] text-fg-faint">
+        {data && (
+          <p className="h-4 truncate text-[11px] leading-4 text-fg-faint">
+            {data.overview_prepared_at && <>
             {copy.lang === 'nl' ? 'Overzicht bijgewerkt op' : 'Overview prepared on'}{' '}
             {new Date(data.overview_prepared_at).toLocaleString(copy.lang === 'nl' ? 'nl-NL' : 'en-GB', {
               dateStyle: 'medium', timeStyle: 'short',
             })}
+            </>}
           </p>
         )}
 
