@@ -261,7 +261,7 @@ ${r.status}: ${body?.detail ?? ''}`);
   }
 
   return (
-    <div className="px-8 py-5 space-y-6 max-w-4xl">
+    <div className="w-full min-w-0 space-y-6 px-4 py-5 sm:px-8">
       <div>
         <h1 className="text-xl font-semibold text-fg-strong">Users</h1>
         <p className="text-sm text-fg-muted mt-1">
@@ -272,7 +272,7 @@ ${r.status}: ${body?.detail ?? ''}`);
       {/* Invite form */}
       <form
         onSubmit={createUser}
-        className="bg-card rounded-xl border border-neutral-800/40 p-4 space-y-3"
+        className="max-w-4xl bg-card rounded-xl border border-neutral-800/40 p-4 space-y-3"
       >
         <div className="text-sm font-medium text-fg-strong">Add user</div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-3 items-end">
@@ -337,6 +337,7 @@ ${r.status}: ${body?.detail ?? ''}`);
             {error}
           </div>
         )}
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
@@ -480,6 +481,7 @@ ${r.status}: ${body?.detail ?? ''}`);
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
