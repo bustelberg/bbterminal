@@ -13196,6 +13196,8 @@ export interface components {
         };
         /** ModelPortfolioAnalysis */
         ModelPortfolioAnalysis: {
+            /** Overview Prepared At */
+            overview_prepared_at?: string | null;
             /**
              * Allocation
              * @default []
@@ -13899,6 +13901,8 @@ export interface components {
         };
         /** PortfolioAnalysisAxis */
         PortfolioAnalysisAxis: {
+            /** Benchmark Snapshot As Of */
+            benchmark_snapshot_as_of?: string | null;
             /** Attributable Pct */
             attributable_pct?: number | null;
             /** Axis */
@@ -14005,6 +14009,11 @@ export interface components {
         };
         /** PortfolioAnalysisRow */
         PortfolioAnalysisRow: {
+            /**
+             * Benchmark Holdings
+             * @default []
+             */
+            benchmark_holdings?: components["schemas"]["CompositionHolding"][];
             /**
              * Benchmark Pct
              * @default 0

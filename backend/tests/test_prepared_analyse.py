@@ -24,6 +24,18 @@ def test_current_snapshot_round_trips_without_sharing_mutable_rows(store):
     assert P.read('holdings', 'test')[1]['rows'][0]['weight'] == 2
 
 
+def test_overview_stays_available_when_sources_change(store, monkeypatch):
+    key = P.holdings_key(1934, 'ACWI', False)
+    assert P.read_overview(key) is None
+    P.save('holdings', key, {'return_series': {'returns': []}, 'book_holdings': [],
+                            'details_pending': False}, 10, 'code-v1')
+    store.table('analyse_source_revision').update({'version': 11}).eq('scope', 'holdings').execute()
+    assert P.read('holdings', key)[1] is None
+    assert P.read_overview(key)['overview_prepared_at']
+    monkeypatch.setattr(P, 'code_version', lambda: 'code-v2')
+    assert P.read_overview(key)['overview_prepared_at']
+
+
 @pytest.mark.parametrize('field,value', [('source_version', 9), ('code_version', 'old'),
                                        ('calculation_day', '2000-01-01'), ('scope', 'acwi')])
 def test_mismatched_snapshots_are_not_served(store, field, value):
@@ -55,6 +67,10 @@ def test_batch_is_bounded_and_next_batch_skips_current_rows(store, monkeypatch):
     assert first['benchmarks'] == 1
     assert first['batch_exhausted']
     assert calls == [1, 1, 2, 2]
+    _, bundle = P.read('holdings', P.holdings_key(1, 'ACWI', False))
+    assert bundle['book_holdings'] == []
+    assert bundle['return_series']['returns'] == []
+    assert bundle['details_pending'] is False
     second = P.prepare(portfolio_ids=[1, 2, 3])
     assert second['holdings'] == 2
     assert second['already_current'] == 5

@@ -910,6 +910,7 @@ class PortfolioAnalysisRow(BaseModel):
     # The rows the bar is the sum of. Empty for a bucket only the benchmark holds — an unowned
     # sector is a finding, not missing data.
     holdings: list[CompositionHolding] = []
+    benchmark_holdings: list[CompositionHolding] = []
 
 
 class CompositionExcluded(BaseModel):
@@ -934,6 +935,7 @@ class CompositionExcluded(BaseModel):
 class PortfolioAnalysisAxis(BaseModel):
     axis: str                          # sector | region | currency
     rows: list[PortfolioAnalysisRow]
+    benchmark_snapshot_as_of: str | None = None
     # The denominator, in words. AIRS-backed current charts use the complete current book, matching
     # Attribution's Weight (now); model fallbacks state their visible-axis basis explicitly.
     basis: str | None = None
@@ -1689,6 +1691,26 @@ class ModelPortfolioAnalysis(BaseModel):
     # loads was responsible. Logged to the console on every open.
     timings_ms: dict[str, int] = {}
     details_pending: bool = False
+    overview_prepared_at: str | None = None
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/overview-bundle",
+            response_model=ModelPortfolioAnalysis,
+            responses={202: {"description": "The prepared overview is pending."}})
+async def airs_model_portfolio_overview_bundle(portfolio_id: int, look_through: bool = False):
+    import time
+
+    from routers import _prepared_analyse as prepared
+
+    started = time.perf_counter()
+    key = prepared.holdings_key(portfolio_id, 'ACWI', look_through)
+    payload = await asyncio.to_thread(prepared.read_overview, key)
+    if payload is None:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=202, content={'ready': False},
+                            headers={'Cache-Control': 'no-store'})
+    return {**payload, 'timings_ms': {'prepared_lookup': round((time.perf_counter() - started) * 1000)}}
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
@@ -1727,36 +1749,10 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
         portfolio_id, benchmark, basis, src, bucket_filter, look_through, include_axes,
         overview_only=overview_only, include_holding_risk=include_holding_risk)
     if src == 'book' and not bucket_filter and not include_axes:
-        from routers._airs_value_series import value_series
-        account = result.get('book_portefeuille')
-        series = (await asyncio.to_thread(value_series, account, benchmark, result.get('risk_profile_policy'), returns_only=True)
-                  if account else {'returns': [], 'reason': 'No AIRS portfolio is linked.'})
-        score = result.get('returns')
-        if score is not None and series.get('benchmark_source') == 'weighted_etf':
-            # The scorecard and chart share the benchmark sampled at the AIRS cutoff.
-            series = dict(series)
-            benchmark_ytd = series.pop('benchmark_return_pct', None)
-            portfolio_ytd = score.get('portfolio_ytd_pct')
-            components = {row['name']: row for row in series.get('benchmark_components', [])}
-            fields = {
-                'return_pct': 'benchmark_return_pct', 'ticker': 'benchmark_ticker',
-                'start_date': 'benchmark_start_date', 'start_price': 'benchmark_start_value',
-                'end_date': 'benchmark_end_date', 'end_price': 'benchmark_end_value',
-                'currency': 'benchmark_currency', 'fx_start': 'benchmark_fx_start', 'fx_end': 'benchmark_fx_end',
-            }
-            blocks = []
-            for block in score.get('block_returns') or []:
-                component = components.get(block['bucket'])
-                blocks.append({**block, **{target: (component or {}).get(field) for field, target in fields.items()}})
-            result = {**result, 'returns': {
-                **score,
-                'benchmark_ytd_pct': benchmark_ytd,
-                'benchmark_ytd_as_of': series.get('benchmark_as_of'),
-                'benchmark_source': 'weighted_etf',
-                'block_returns': blocks,
-                'ytd_excess_pct': portfolio_ytd - benchmark_ytd if portfolio_ytd is not None and benchmark_ytd is not None else None,
-            }}
-        result = {**result, 'return_series': series}
+        from routers._airs_value_series import with_return_series
+
+        if 'return_series' not in result:
+            result = await asyncio.to_thread(with_return_series, result, benchmark)
     return result
 
 

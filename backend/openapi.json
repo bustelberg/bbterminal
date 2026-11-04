@@ -13182,6 +13182,13 @@
       },
       "PortfolioAnalysisAxis": {
         "properties": {
+          "benchmark_snapshot_as_of": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Benchmark Snapshot As Of"
+          },
           "attributable_pct": {
             "anyOf": [
               {
@@ -13578,6 +13585,14 @@
       },
       "PortfolioAnalysisRow": {
         "properties": {
+          "benchmark_holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CompositionHolding"
+            },
+            "title": "Benchmark Holdings",
+            "type": "array"
+          },
           "benchmark_pct": {
             "default": 0.0,
             "title": "Benchmark Pct",

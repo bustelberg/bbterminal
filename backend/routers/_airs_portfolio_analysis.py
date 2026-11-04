@@ -734,6 +734,52 @@ def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]], labels: list
     return out
 
 
+def _benchmark_sector_holdings(items, labels, total: float) -> dict[str, list[dict]]:
+    holdings: dict[str, list[dict]] = defaultdict(list)
+    if total > 0:
+        for (weight, buckets), label in zip(items, labels):
+            holdings[buckets[0]].append({**label, "weight_pct": weight / total * 100.0})
+    return holdings
+
+
+def _acwi_sector_snapshot(labels, items, codes):
+    from index_universe.acwi.asset_membership import resolve
+    from index_universe.acwi.holdings import load_latest_acwi_holdings
+    from index_universe.acwi.identity import membership_key
+    from index_universe.acwi.reconstruction import _parse_xls_as_of
+
+    snapshot, stamp = _leg(("acwi_sector_snapshot",), load_latest_acwi_holdings)
+    parsed = _parse_xls_as_of(stamp)
+    if not parsed:
+        return None, {}
+    as_of = parsed.isoformat()
+    resolved, _ = _leg(("acwi_sector_members", as_of), lambda: resolve((snapshot, stamp)))
+    resolved_by_issuer = {membership_key(r.get("name"), as_of): r for r in resolved}
+    grid = _grid(sorted({r["isin"] for r in resolved if r.get("isin")}))
+    classified = {
+        membership_key(label.get("name"), as_of): (label.get("isin"), buckets[0])
+        for label, (_, buckets) in zip(labels, items) if label.get("name")
+    }
+    holdings = defaultdict(list)
+    for member in snapshot:
+        name = member.get("Name")
+        weight = float(str(member.get("Weight (%)") or member.get("Weight") or 0)
+                       .replace("%", "").replace(",", "."))
+        if not name or weight <= 0:
+            continue
+        issuer = membership_key(name, as_of)
+        match = resolved_by_issuer.get(issuer, {})
+        isin, sector = classified.get(issuer, (None, UNKNOWN_BUCKET))
+        if resolved_isin := match.get("isin"):
+            isin = resolved_isin
+            sector = _buckets(grid.get(isin), is_cash=False, isin=isin, codes=codes)[0]
+        display_name = (grid.get(isin) or {}).get("name") or match.get("display_name") or name
+        if display_name.isupper() and " " in display_name:
+            display_name = " ".join(word if len(word) <= 2 else word.title() for word in display_name.split())
+        holdings[sector].append({"name": display_name, "isin": isin, "weight_pct": weight})
+    return (as_of, holdings) if holdings else (None, {})
+
+
 def _book_fetched_at(portefeuille: str | None) -> str | None:
     """When WE last successfully scanned this book — the same `airs_account_roster.reports_at` the
     /management-dashboard row reads, through the same loader.
@@ -2663,6 +2709,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []
+    bench_labels = []
     bench_classified = bench_total = 0.0
     bench_foreign = 0
     for m in bench:
@@ -2677,6 +2724,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         if row and _foreign_listing(row):
             bench_foreign += 1
         bench_items.append((cap, b))
+        bench_labels.append({"isin": m.get("isin"), "name": m.get("company_name") or (row or {}).get("name")})
 
     # ── Book weighting override ─────────────────────────────────────────────────────────────
     # The model side is always built (it is the fallback). When the reader asks for book weights
@@ -2831,7 +2879,26 @@ def compute_portfolio_analysis(portfolio_id: int,
     # not each benchmark constituent's historical start-of-window price.  Avoiding that full-index
     # history scan removes thousands of price rows from the modal's critical path.
     bw = _weigh(bench_items)
+    benchmark_sectors = _benchmark_sector_holdings(bench_items, bench_labels, bench_total)
+    benchmark_sector_as_of = None
+    if include_axes and benchmark_label.upper() == "ACWI":
+        benchmark_sector_as_of, snapshot_sectors = _acwi_sector_snapshot(bench_labels, bench_items, codes)
+        if benchmark_sector_as_of:
+            benchmark_sectors = snapshot_sectors
+            bw["sector"] = {sector: sum(h["weight_pct"] for h in holdings)
+                            for sector, holdings in benchmark_sectors.items()}
     _phase("axes")
+
+    profile = _variant_bands(p.get("name"), p.get("omschrijving"))
+    if include_axes and benchmark_label.upper() == "ACWI":
+        equity_share = (profile["risk_profile_policy"] or {}).get("Stocks", 100.0) / 100.0
+        bw = {axis: {bucket: weight * equity_share for bucket, weight in weights.items()}
+              for axis, weights in bw.items()}
+        benchmark_sectors = {
+            sector: [{**holding, "weight_pct": holding["weight_pct"] * equity_share}
+                     for holding in holdings]
+            for sector, holdings in benchmark_sectors.items()
+        }
 
     #  The class return is re-derived from the enriched rows, and `_book_port_items`' OWN
     # `bucket_returns` IS DELIBERATELY DISCARDED. That one is `(Σ current + income) ÷ Σ start`,
@@ -2932,10 +2999,12 @@ def compute_portfolio_analysis(portfolio_id: int,
             # portfolio does not hold (an unowned sector the benchmark has) is an empty list, which
             # is a finding rather than missing data.
             "holdings": dd_axis.get(k, []),
+            **({"benchmark_holdings": benchmark_sectors.get(k, [])} if axis == "sector" else {}),
         } for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
         axes.append({
             "axis": axis,
+            "benchmark_snapshot_as_of": benchmark_sector_as_of if axis == "sector" else None,
             "rows": rows,
             "basis": note,
             "positions": positions,
@@ -3063,7 +3132,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         # The risk profile this model is offered at, and the allocation policy that goes with it —
         # so the chart can draw the band each class is SUPPOSED to sit in, over the bar showing
         # where it actually sits. See `_variant_bands`.
-        **_variant_bands(p.get("name"), p.get("omschrijving")),
+        **profile,
         #  Which book is "THIS" BOOK — needed the moment a Return could come from ANOTHER one. A
         # row valued by the account behind a certificate carries that account's name in
         # `own_return_book`, and without this the reader has nothing to compare it against, so
@@ -4360,6 +4429,7 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []
+    bench_labels = []
     bench_classified = bench_total = 0.0
     bench_foreign = 0
     for m in bench:
@@ -4374,8 +4444,17 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         if row and _foreign_listing(row):
             bench_foreign += 1
         bench_items.append((cap, b))
+        bench_labels.append({"isin": m.get("isin"), "name": m.get("company_name") or (row or {}).get("name")})
 
     pw, bw = _weigh(port_items), _weigh(bench_items)
+    benchmark_sectors = _benchmark_sector_holdings(bench_items, bench_labels, bench_total)
+    benchmark_sector_as_of = None
+    if benchmark_label.upper() == "ACWI":
+        benchmark_sector_as_of, snapshot_sectors = _acwi_sector_snapshot(bench_labels, bench_items, codes)
+        if benchmark_sector_as_of:
+            benchmark_sectors = snapshot_sectors
+            bw["sector"] = {sector: sum(h["weight_pct"] for h in holdings)
+                            for sector, holdings in benchmark_sectors.items()}
     dd = _axis_holdings(port_items, port_labels)
     axes = []
     for axis in ("sector", "region", "currency"):
@@ -4383,11 +4462,13 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         rows = [{"bucket": k, "portfolio_pct": pw[axis].get(k, 0.0),
                  "benchmark_pct": bw[axis].get(k, 0.0),
                  "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0),
-                 "holdings": dd[axis].get(k, [])} for k in keys]
+                 "holdings": dd[axis].get(k, []),
+                 **({"benchmark_holdings": benchmark_sectors.get(k, [])} if axis == "sector" else {})} for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
         #  One denominator on all three axes here, unlike a model portfolio: a basket has no
         # asset-class sleeve to divide by, so every leg is in every axis's total.
         axes.append({"axis": axis, "rows": rows,
+                     "benchmark_snapshot_as_of": benchmark_sector_as_of if axis == "sector" else None,
                      "basis": "Share of the whole basket, by each holding's stated weight.",
                      "positions": len(port_items)})
 

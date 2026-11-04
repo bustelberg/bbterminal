@@ -105,6 +105,19 @@ def save(scope: str, key: str, payload: dict, version: int, code: str) -> bool:
     return True
 
 
+def read_overview(key: str) -> dict | None:
+    """Serve the last published bundle while a newer revision is prepared."""
+    rows = (supabase.table('analyse_prepared_snapshot').select('payload,prepared_at')
+            .eq('cache_key', key).eq('scope', 'holdings')
+            .limit(1).execute().data or [])
+    if (not rows or not isinstance(payload := rows[0].get('payload'), dict)
+            or not isinstance(payload.get('return_series'), dict)
+            or not isinstance(payload.get('book_holdings'), list)
+            or payload.get('details_pending') is not False):
+        return None
+    return {**payload, 'overview_prepared_at': rows[0]['prepared_at']}
+
+
 def overview(payload: dict) -> dict:
     fields = ('portfolio_id', 'name', 'as_of', 'holdings_as_of', 'holdings_fetched_at',
               'book_portefeuille', 'book_note', 'benchmark', 'weight_basis', 'weight_note',
@@ -189,6 +202,8 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                 try:
                     with read_cache(key):
                         payload = analysis.compute_portfolio_analysis(pid, 'ACWI', 'book', 'book', None, look, False)
+                        from routers._airs_value_series import with_return_series
+                        payload = with_return_series(payload, 'ACWI')
                     payload = {**payload, 'details_pending': False}
                 finally:
                     analysis._INCLUDE_HOLDING_RISK.reset(token)
@@ -226,7 +241,19 @@ def run_controlled(*, busy, should_stop=None, on_step=None,
         if not locked:
             return {'skipped': 'another preparation worker holds the lock'}
         try:
-            return prepare(max_portfolios=max_portfolios, max_seconds=max_seconds, risk=True,
-                           should_stop=lambda: bool((should_stop and should_stop()) or busy()), on_step=on_step)
+            stop = lambda: bool((should_stop and should_stop()) or busy())
+            deadline = time.monotonic() + max_seconds
+            result = prepare(max_portfolios=max_portfolios, max_seconds=max_seconds,
+                             should_stop=stop, on_step=on_step)
+            # Publish overview bundles across the roster before spending the
+            # remaining batch time on optional risk views.
+            remaining = deadline - time.monotonic()
+            if remaining > 0 and not any(result.get(key) for key in (
+                'holdings', 'batch_exhausted', 'budget_exhausted', 'cancelled',
+                'unavailable', 'errors', 'changed_during_run',
+            )):
+                return prepare(max_portfolios=max_portfolios, max_seconds=remaining, risk=True,
+                               should_stop=stop, on_step=on_step)
+            return result
         finally:
             conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.analyse_prepare'))")

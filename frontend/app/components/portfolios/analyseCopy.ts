@@ -61,6 +61,13 @@ const en = {
     // measured figure in it: "Excludes 17.8% in funds, bonds and cash — no sector to place". A
     // fixed sentence beside a live one is the weaker of two, and it appeared even at 0%.
     sectorNote: 'Current weights.',
+    sectorHoldings: {
+      close: 'Close',
+      overlap: 'Held in both the portfolio and the benchmark',
+      company: 'Company',
+      empty: 'No individual holdings available for this sector.',
+      fundExposure: (weight: string) => `${weight} of the portfolio is fund or certificate exposure without individual holdings in this breakdown.`,
+    },
     addEtfs: 'Add funds',
     addEtfsTitle: 'Add the underlying sectors of supported external funds and internal TopSelectie certificates, weighted by their current share of this portfolio.',
     loadingEtfs: 'loading…',
@@ -279,6 +286,13 @@ const nl: AnalyseCopy = {
   axes: {
     sector: 'Sector', region: 'Regio', currency: 'Valuta',
     sectorNote: 'Actuele wegingen.',
+    sectorHoldings: {
+      close: 'Sluiten',
+      overlap: 'In zowel de portefeuille als de benchmark',
+      company: 'Bedrijf',
+      empty: 'Voor deze sector zijn geen individuele posities beschikbaar.',
+      fundExposure: (weight: string) => `${weight} van de portefeuille zit in fondsen of certificaten waarvan de individuele posities hier niet beschikbaar zijn.`,
+    },
     addEtfs: 'Fondsen toevoegen',
     addEtfsTitle: "Voeg de onderliggende sectoren van ondersteunde externe fondsen en interne TopSelectie-certificaten toe, gewogen naar hun actuele gewicht in deze portefeuille.",
     loadingEtfs: 'laden…',

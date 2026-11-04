@@ -277,7 +277,7 @@ function Row({ j, panel, ctx }: {
                 <p>{failure.detail}</p>
                 {failure.causes.length > 0 && (
                   <ul className="list-disc pl-4">
-                    {failure.causes.map(({ message, affected, affected_count }) => (
+                    {failure.causes.map(({ message, affected, affected_count = 0 }) => (
                       <li key={message}>
                         {message}
                         {affected && ` (${affected.join(', ')}${affected_count > affected.length ? ` +${affected_count - affected.length} more` : ''})`}

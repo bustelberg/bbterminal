@@ -196,6 +196,8 @@ def resolve(snapshot: tuple[list[dict], str] | None = None) -> tuple[list[dict],
     executions = _executions()
     by_symbol = _assets_by_symbol_from(executions)
     by_base = _by_base_ticker(executions)
+    by_listing = {(r.get("analysis_id"), (r.get("yahoo_symbol") or "").strip().upper()): r
+                  for r in executions if r.get("isin")}
     by_isin: dict[str, list[dict]] = {}
     by_name: dict[str, list[dict]] = {}
     for execution in executions:
@@ -264,10 +266,13 @@ def resolve(snapshot: tuple[list[dict], str] | None = None) -> tuple[list[dict],
         # those differ by definition — Shopify is `SHOP.TO` in the file and `SHOP` in our store —
         # and writing the constructed symbol would put a string in the table that matches no row we
         # hold, which is exactly the debugging trail a reader follows when a member looks wrong.
+        listing = by_listing.get((aid, (held_sym or "").upper()), {})
         rows.setdefault(aid, {
             "analysis_id": aid, "source": SOURCE,
             "ticker": h.get("Ticker"), "exchange": h.get("Exchange"),
             "name": h.get("Name"),
+            "isin": listing.get("isin"),
+            "display_name": listing.get("name"),
             "currency": (h.get("Market Currency") or h.get("Currency")) if held_sym == sym.upper() else None,
             "yahoo_symbol": held_sym, "source_as_of": as_of,
             "weight_pct": float(str(h.get("Weight (%)") or h.get("Weight") or 0).replace("%", "").replace(",", ".")),
@@ -303,7 +308,7 @@ def sync(label: str = ACWI_LABEL) -> dict:
         return {"status": "error", "detail": "resolved 0 assets; membership left unchanged", **stats}
 
     deps.supabase.table("index_file_membership").delete().eq("universe_id", uid).execute()
-    payload = [{**{k: v for k, v in r.items() if k not in {"name", "currency", "weight_pct"}}, "universe_id": uid} for r in rows]
+    payload = [{**{k: v for k, v in r.items() if k not in {"name", "currency", "weight_pct", "isin", "display_name"}}, "universe_id": uid} for r in rows]
     for i in range(0, len(payload), 200):        # `IN_CHUNK_SIZE` — the Cloudflare 502 guard
         deps.supabase.table("index_file_membership").insert(payload[i:i + 200]).execute()
 

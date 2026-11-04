@@ -52,9 +52,10 @@ function prefetchModelAnalysis(id: number, name: string) {
   const key = analysisRequestKey(`id:${id}`, 'ACWI', 'book', '', lookThrough);
   prefetchAnalysis(key, async () => {
     const response = await apiFetch(
-      `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=ACWI&weight_by=book&source=book&look_through=${lookThrough}&include_axes=false&overview_only=true&include_holding_risk=false`,
+      `${API_URL}/api/airs/model-portfolios/${id}/overview-bundle?look_through=${lookThrough}`,
     );
     const body = await response.json().catch(() => null);
+    if (response.status === 202) throw new Error('overview-not-prepared');
     if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
     return body;
   });

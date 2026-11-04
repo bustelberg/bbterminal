@@ -1,5 +1,6 @@
 'use client';
 
+import BenchmarkMembershipMark from './BenchmarkMembershipMark';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
@@ -716,7 +717,7 @@ function Chip({ label, value, valueClass, hint, prov }: {
 
 function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   portfolioAsOf, benchmarkCapsFrom, benchmarkCapsTo, benchmarkCapsUnstamped = 0, stale = false,
-  etfControl }: {
+  benchmarkSnapshotAsOf, benchmarkTotalTarget = 100, etfControl }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
@@ -734,6 +735,8 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   benchmarkCapsFrom?: string | null;
   benchmarkCapsTo?: string | null;
   benchmarkCapsUnstamped?: number;
+  benchmarkSnapshotAsOf?: string | null;
+  benchmarkTotalTarget?: number;
   etfControl?: {
     enabled: boolean;
     onChange: (enabled: boolean) => void;
@@ -743,10 +746,11 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   };
 }) {
   const copy = useAnalyseCopy();
-  const [selectedSector, setSelectedSector] = useState<Row | null>(null);
+  const [selectedBucket, setSelectedSector] = useState<string | null>(null);
+  const selectedSector = stale ? undefined : rows.find(row => row.bucket === selectedBucket);
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
   const axisNote = axis === 'sector' ? copy.axes.sectorNote : axis === 'region' ? copy.axes.regionNote : copy.axes.currencyNote;
-  const benchmarkDate = benchmarkCapsTo ?? benchmarkCapsFrom;
+  const benchmarkDate = benchmarkSnapshotAsOf ?? benchmarkCapsTo ?? benchmarkCapsFrom;
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
@@ -811,7 +815,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
             {benchmarkDate ? <ValueBadge>{benchmarkDate.slice(0, 10)}</ValueBadge>
               : <span className="text-fg-muted">not refreshed</span>}
           </Field>
-          {benchmarkCapsUnstamped > 0 && (
+          {!benchmarkSnapshotAsOf && benchmarkCapsUnstamped > 0 && (
             <Field label="Caps">{benchmarkCapsUnstamped} without a timestamp</Field>
           )}
           </TipCard>} />
@@ -892,7 +896,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           <span className={Math.abs(totalP - 100) > slack ? 'text-warn-300' : ''}>
             Σ {totalP.toFixed(2)}%
           </span>
-          <span className={Math.abs(totalB - 100) > slack ? 'text-warn-300' : ''}>
+          <span className={Math.abs(totalB - benchmarkTotalTarget) > slack ? 'text-warn-300' : ''}>
             Σ {totalB.toFixed(2)}%
           </span>
         </span>
@@ -907,7 +911,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           const tilt = r.diff_pct ?? (p - b);
           return (
             <button key={r.bucket} type="button"
-              onClick={() => axis === 'sector' && setSelectedSector(r)}
+              onClick={() => axis === 'sector' && !stale && setSelectedSector(r.bucket)}
               aria-label={axis === 'sector' ? `Show holdings in ${r.bucket}` : undefined}
               title={copy.allocation.chartRowTitle(r.bucket, p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
               className={`flex w-full items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left ${axis === 'sector' ? 'cursor-pointer hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500' : 'cursor-default'}`}>
@@ -947,59 +951,123 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
       </>)}
     </section>
     {selectedSector && (
-      <SectorHoldingsDialog row={selectedSector} onClose={() => setSelectedSector(null)} />
+      <SectorHoldingsDialog row={selectedSector} benchmark={benchmark} snapshotAsOf={benchmarkSnapshotAsOf}
+        portfolioAsOf={portfolioAsOf} benchmarkAsOf={benchmarkDate}
+        onClose={() => setSelectedSector(null)} />
     )}
     </>
   );
 }
 
-/** The sector bar is current portfolio exposure.  Its direct names live on the composition row;
- * fund look-through can add exposure without inventing individual constituents in that payload. */
-function SectorHoldingsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
-  const holdings = [...(row.holdings ?? [])].sort((a, b) => (b.weight_pct ?? 0) - (a.weight_pct ?? 0));
+function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, benchmarkAsOf, onClose }: {
+  row: Row; benchmark: string; snapshotAsOf?: string | null; portfolioAsOf?: string | null;
+  benchmarkAsOf?: string | null; onClose: () => void;
+}) {
+  const copy = useAnalyseCopy();
+  const holdings = row.holdings ?? [];
+  const benchmarkHoldings = row.benchmark_holdings ?? [];
   const directWeight = holdings.reduce((sum, holding) => sum + (holding.weight_pct ?? 0), 0);
-  const totalWeight = row.portfolio_pct ?? 0;
-  const lookedThroughWeight = Math.max(0, totalWeight - directWeight);
+  const lookedThroughWeight = Math.max(0, (row.portfolio_pct ?? 0) - directWeight);
+  const companies = new Map<string, {
+    name: string; via: Set<string>; portfolio?: number; benchmark?: number;
+  }>();
+  for (const [side, entries] of [['portfolio', holdings], ['benchmark', benchmarkHoldings]] as const) {
+    entries.forEach((holding, index) => {
+      const isin = holding.isin?.trim().toUpperCase();
+      const key = isin || `${side}-${index}`;
+      const company = companies.get(key) ?? { name: holding.name || '—', via: new Set<string>() };
+      for (const name of holding.via_names ?? []) company.via.add(name);
+      company[side] = (company[side] ?? 0) + (holding.weight_pct ?? 0);
+      companies.set(key, company);
+    });
+  }
+  const entries = [...companies.entries()];
+  const labels = copy.axes.sectorHoldings;
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+  });
+  const formatDate = (value?: string | null) => {
+    const date = new Date(`${value?.slice(0, 10)}T00:00:00Z`);
+    return Number.isNaN(date.getTime()) ? null : formatter.format(date).toLowerCase();
+  };
+  const snapshotDate = formatDate(snapshotAsOf);
 
   return (
-    <PanelDialog onClose={onClose} labelledBy="sector-holdings-title">
-      <div className="m-auto flex h-full w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-xl border border-neutral-800 bg-card shadow-2xl">
+    <PanelDialog onClose={onClose} labelledBy="sector-holdings-title" closeOnFrameClick>
+      <div className="m-auto flex h-full min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-800 bg-card shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-5 py-4">
-          <div>
-            <h2 id="sector-holdings-title" className="text-base font-semibold text-fg">
-              {row.bucket}
-            </h2>
-            <p className="mt-0.5 text-sm text-fg-muted">
-              {pct(totalWeight)} of the current portfolio
-            </p>
-          </div>
+          <h2 id="sector-holdings-title" className="text-base font-semibold text-fg">{row.bucket}</h2>
           <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-overlay/5 hover:text-fg">
-            Close
+            {labels.close}
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-5">
-          {holdings.length === 0 ? (
-            <p className="text-sm text-fg-muted">No directly classified portfolio holdings are in this sector.</p>
-          ) : (
-            <div className="divide-y divide-neutral-800/70">
-              {holdings.map((holding) => (
-                <div key={`${holding.isin ?? holding.name}-${holding.classified_as ?? ''}`} className="flex items-start justify-between gap-4 py-3 first:pt-0">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-fg" title={holding.name ?? holding.isin ?? undefined}>
-                      {holding.name ?? holding.isin ?? 'Unnamed holding'}
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] text-fg-faint">
-                      {[holding.isin, holding.asset_class, ...(holding.via_names ?? [])].filter(Boolean).join(' · ')}
-                    </div>
-                  </div>
-                  <span className="shrink-0 font-mono text-sm tabular-nums text-fg">{pct(holding.weight_pct ?? 0)}</span>
-                </div>
-              ))}
-            </div>
+        <div className="min-h-0 flex-1 overflow-auto px-5 pb-5">
+          {entries.some(([, company]) => company.portfolio != null && company.benchmark != null) && (
+            <p className="mb-2 flex items-center gap-1.5 pt-3 text-[11px] text-fg-faint">
+              <BenchmarkMembershipMark member label={labels.overlap} />
+              {labels.overlap}
+            </p>
           )}
+          <div className="grid grid-cols-2 items-start gap-4 pt-2">
+            {(['portfolio', 'benchmark'] as const).map(side => {
+              const weightDate = formatDate(side === 'portfolio' ? portfolioAsOf : benchmarkAsOf);
+              const weightDateLabel = weightDate
+                ? (copy.lang === 'nl' ? `Weging per ${weightDate}` : `Weight as of ${weightDate}`)
+                : (copy.lang === 'nl' ? 'Peildatum niet beschikbaar' : 'Weight date unavailable');
+              const holdings = entries.filter(([, company]) => company[side] != null)
+                .sort(([, a], [, b]) => (b[side] ?? 0) - (a[side] ?? 0));
+              return (
+                <section key={side} className="min-w-0">
+                  <h3 className="mb-1 text-[12px] font-medium text-fg-muted">
+                    {side === 'portfolio' ? copy.allocation.portfolio : benchmark}{' '}
+                    <span className="text-fg-faint">({holdings.length})</span>
+                    {side === 'benchmark' && snapshotDate && (
+                      <span className="font-normal text-fg-faint"> · Weights and memberships as of {snapshotDate}</span>
+                    )}
+                  </h3>
+                  {holdings.length ? (
+                    <table className="w-full table-fixed text-[12px]">
+                      <thead className="sticky top-0 bg-card text-[11px] uppercase tracking-wide text-fg-faint">
+                        <tr>
+                          <th scope="col" className="w-8 py-1 pr-1 text-right font-medium">#</th>
+                          <th scope="col" className="py-1 pr-2 text-left font-medium">{labels.company}</th>
+                          <th scope="col" className="w-20 py-1 pl-1 text-right font-medium">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {holdings.map(([key, company], index) => {
+                          const overlap = company.portfolio != null && company.benchmark != null;
+                          return (
+                            <tr key={key} className={`border-t border-neutral-800/20 ${overlap ? 'bg-accent-500/15' : ''}`}>
+                              <td className="py-1 pr-1 text-right font-mono tabular-nums text-fg-faint">{index + 1}</td>
+                              <th scope="row" className="py-1 pr-2 text-left font-normal" title={company.name}>
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  <BenchmarkMembershipMark member={overlap} label={labels.overlap} />
+                                  <span className={`truncate ${overlap ? 'font-medium text-fg-strong' : 'text-fg-soft'}`}>{company.name}</span>
+                                </span>
+                                {side === 'portfolio' && company.via.size > 0 && (
+                                  <span className="block truncate text-[11px] text-fg-faint">{[...company.via].join(' · ')}</span>
+                                )}
+                              </th>
+                              <td className="py-1 pl-1 text-right font-mono tabular-nums">
+                                <span className="inline-flex items-center gap-1">
+                                  {pct(company[side] ?? 0)}
+                                  <InfoTip content={weightDateLabel} />
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : <p className="py-2 text-xs text-fg-muted">{labels.empty}</p>}
+                </section>
+              );
+            })}
+          </div>
           {lookedThroughWeight > 0.005 && (
-            <p className="mt-5 rounded-lg bg-inset px-3 py-2 text-[12px] text-fg-muted">
-              {pct(lookedThroughWeight)} is fund or certificate look-through exposure. It is included in the sector bar, but its underlying names are not returned as individual portfolio holdings.
+            <p className="mt-4 rounded-lg bg-inset px-3 py-2 text-xs text-fg-muted">
+              {labels.fundExposure(pct(lookedThroughWeight))}
             </p>
           )}
         </div>
@@ -3636,20 +3704,25 @@ export default function PortfolioAnalysisModal({
   useEffect(() => {
     let cancelled = false;
     setDetailsError(false);
+    setError(null);
     const analysisKey = viewKey;
     const revision = detailsRevision;
     const chartsOnly = assetFilter === EQUITY_BUCKET && data?.benchmark === benchmark
       && loadedRevision.current === revision;
+    const preparedOverview = !isBasket && !assetFilter && benchmark === 'ACWI'
+      && source === 'book' && !includeHoldingRisk;
     const overviewOnly = !assetFilter && !data;
-    const cachedDetails = assetFilter !== EQUITY_BUCKET && holdingDetails.current?.revision === revision
+    const cachedDetails = !preparedOverview && assetFilter !== EQUITY_BUCKET && holdingDetails.current?.revision === revision
       ? holdingDetails.current.value : null;
-    const requestKey = chartsOnly ? `${analysisKey}|charts` : overviewOnly ? analysisKey
+    const requestKey = chartsOnly ? `${analysisKey}|charts` : preparedOverview || overviewOnly ? analysisKey
       : `${revision}|holdings${assetFilter === EQUITY_BUCKET ? '|axes' : ''}`;
     void (async () => {
       try {
         const analysis = cachedDetails ? Promise.resolve(cachedDetails) : loadPrefetchedAnalysis(requestKey, async () => {
           const r = isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
+            : preparedOverview
+            ? await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/overview-bundle?look_through=${lookThrough}`)
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
               + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
               + `&look_through=${lookThrough}`
@@ -3660,6 +3733,7 @@ export default function PortfolioAnalysisModal({
               + `&overview_only=${overviewOnly || chartsOnly}`
               + (assetFilter === EQUITY_BUCKET ? `&bucket=${EQUITY_BUCKET}` : ''));
           const body = await r.json().catch(() => null);
+          if (preparedOverview && r.status === 202) throw new Error('overview-not-prepared');
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
           return body as ModelPortfolioAnalysis;
         });
@@ -3695,7 +3769,9 @@ export default function PortfolioAnalysisModal({
           benchmark_caps_unstamped: b.benchmark_caps_unstamped,
         } : b);
       } catch (e) {
-        traceError('analyse', 'the composition could not be loaded', e);
+        if (!(e instanceof Error && e.message === 'overview-not-prepared')) {
+          traceError('analyse', 'the composition could not be loaded', e);
+        }
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
           reloadWaiters.current.splice(0).forEach((waiter) => waiter.reject(e));
@@ -3895,13 +3971,26 @@ export default function PortfolioAnalysisModal({
         )}
 
         {error && (
-          <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">
-            {copy.lang === 'nl' ? copy.chrome.loadError : error}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-neg-500/20 bg-neg-500/10 px-3 py-2 text-xs text-neg-300">
+            {error === 'overview-not-prepared'
+              ? (copy.lang === 'nl' ? 'Het overzicht wordt voorbereid.' : 'The overview is being prepared.')
+              : (copy.lang === 'nl' ? copy.chrome.loadError : error)}
+            <button type="button" className="shrink-0 underline" onClick={() => setReloadSeq(n => n + 1)}>
+              {copy.lang === 'nl' ? 'Opnieuw proberen' : 'Retry'}
+            </button>
           </div>
         )}
         {/*  ONE BIG LINE AND A MOVING ELLIPSIS — see `AnalyseLoading` for why this modal gets
             no skeleton and no progress bar. */}
         {!data && !error && <AnalyseLoading label={copy.chrome.loading} />}
+        {!assetFilter && data?.overview_prepared_at && (
+          <p className="text-[11px] text-fg-faint">
+            {copy.lang === 'nl' ? 'Overzicht bijgewerkt op' : 'Overview prepared on'}{' '}
+            {new Date(data.overview_prepared_at).toLocaleString(copy.lang === 'nl' ? 'nl-NL' : 'en-GB', {
+              dateStyle: 'medium', timeStyle: 'short',
+            })}
+          </p>
+        )}
 
         {data && (
           <>
@@ -4155,6 +4244,9 @@ export default function PortfolioAnalysisModal({
                       portfolioAsOf={data.holdings_as_of ?? data.as_of}
                       benchmarkCapsFrom={data.benchmark_caps_from}
                       benchmarkCapsTo={data.benchmark_caps_to}
+                      benchmarkSnapshotAsOf={a.benchmark_snapshot_as_of}
+                      benchmarkTotalTarget={(data.benchmark ?? benchmark) === 'ACWI'
+                        ? data.risk_profile_policy?.Stocks : undefined}
                       benchmarkCapsUnstamped={data.benchmark_caps_unstamped}
                       etfControl={a.axis === 'sector'
                         && (eligibleSectorEtfs.length + eligibleCertificateSectorCount) ? {

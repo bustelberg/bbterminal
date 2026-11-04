@@ -2127,9 +2127,13 @@ def _analyse_sources_busy(*, ignore_airs: bool = False) -> bool:
            for row in jobs.listing()):
         return True
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        # Scheduled work from an earlier process cannot still be running on
+        # this scheduler. A reload may leave its receipt open.
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        if _booted_at is not None:
+            cutoff = max(cutoff, _booted_at)
         return bool(supabase.table('scheduled_job_run').select('job_id').eq('status', 'running')
-                    .in_('job_id', sorted(sources)).gte('started_at', cutoff).limit(1).execute().data)
+                    .in_('job_id', sorted(sources)).gte('started_at', cutoff.isoformat()).limit(1).execute().data)
     except Exception:
         return True  # no visibility into writers: defer instead of competing with them
 
@@ -2139,7 +2143,7 @@ def _body_analyse_prepare(ctx=None) -> tuple[str, dict]:
     result = run_controlled(busy=_analyse_sources_busy,
                             should_stop=lambda: _cancel_requested(ctx), on_step=_reporter(ctx))
     if result.get('unavailable') or result.get('errors'):
-        raise RuntimeError(f'Analyse preparation unavailable; live fallback remains enabled: {result}')
+        _require_complete('Analyse preparation could not publish all requested views', result)
     return (result.get('skipped') or f"Prepared {result.get('holdings', 0)} holdings views and {result.get('benchmarks', 0)} benchmark(s)", result)
 
 
@@ -2813,7 +2817,10 @@ def register_scheduler(app) -> None:
             trigger = (IntervalTrigger(seconds=spec.interval_seconds)
                        if spec.interval_seconds is not None
                        else CronTrigger(**(spec.trigger or {})))
-            sched.add_job(fn, trigger, id=spec.id, replace_existing=True, **spec.options)
+            options = dict(spec.options)
+            if job_id == "analyse_prepare":
+                options["next_run_time"] = datetime.now(timezone.utc) + timedelta(seconds=15)
+            sched.add_job(fn, trigger, id=spec.id, replace_existing=True, **options)
         # Single daily tick at 05:00 Amsterdam that runs the
         # split pipeline's two operations IN ORDER (see `ingest.phases.pipeline`):
         #   1. price-update — re-price the held companies + refresh MTD;

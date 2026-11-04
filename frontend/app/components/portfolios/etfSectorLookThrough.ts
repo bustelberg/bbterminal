@@ -101,6 +101,7 @@ function sectorRowsByBucket(rows: SectorChartRow[]): Map<string, SectorChartRow>
     current.benchmark_pct = (current.benchmark_pct ?? 0) + (row.benchmark_pct ?? 0);
     current.diff_pct = (current.portfolio_pct ?? 0) - (current.benchmark_pct ?? 0);
     current.holdings = [...(current.holdings ?? []), ...(row.holdings ?? [])];
+    current.benchmark_holdings = [...(current.benchmark_holdings ?? []), ...(row.benchmark_holdings ?? [])];
   }
   return bySector;
 }

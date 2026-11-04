@@ -23,11 +23,12 @@
  */
 import { useEffect } from 'react';
 
-export default function PanelDialog({ onClose, children, labelledBy }: {
+export default function PanelDialog({ onClose, children, labelledBy, closeOnFrameClick = false }: {
   onClose: () => void;
   children: React.ReactNode;
   /** id of the heading inside `children`, when it has one. */
   labelledBy?: string;
+  closeOnFrameClick?: boolean;
 }) {
   /**
    *  Escape closes this one, not the modal behind it — and that is a bug fix, not a nicety.
@@ -78,7 +79,10 @@ export default function PanelDialog({ onClose, children, labelledBy }: {
           than the thing it opened from, which is the one shape the sizing above exists to avoid.
           A viewport-relative width keeps the claim true at every size. */}
       <div className="w-[76vw] h-[76vh] flex flex-col min-h-0"
-        onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (closeOnFrameClick && e.target === e.currentTarget) onClose();
+        }} role="dialog" aria-modal="true"
         aria-labelledby={labelledBy}>
         {children}
       </div>
