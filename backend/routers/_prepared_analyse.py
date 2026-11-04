@@ -241,7 +241,9 @@ def run_controlled(*, busy, should_stop=None, on_step=None,
         if not locked:
             return {'skipped': 'another preparation worker holds the lock'}
         try:
-            stop = lambda: bool((should_stop and should_stop()) or busy())
+            def stop() -> bool:
+                return bool((should_stop and should_stop()) or busy())
+
             deadline = time.monotonic() + max_seconds
             result = prepare(max_portfolios=max_portfolios, max_seconds=max_seconds,
                              should_stop=stop, on_step=on_step)
