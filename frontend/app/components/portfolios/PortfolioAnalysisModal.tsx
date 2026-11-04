@@ -31,9 +31,6 @@ import type { BookValueSeries, EtfSectorAllocationResponse, ModelPortfolioAnalys
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
-import { riskBundleBody } from './riskBundleRequest';
-import { prefetchRiskBundle } from './riskBundle';
-import { prefetchPerformanceBundle } from './monthlyReportPrefetch';
 import AnalyseLoading from './AnalyseLoading';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
@@ -41,6 +38,7 @@ import {
 } from './etfSectorLookThrough';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
+import ViaChips from './ViaChips';
 import { useAnalyseCopy, profileBenchmarkLabel } from './analyseCopy';
 import { contributionReconciliation } from './contributionReconciliation';
 import {
@@ -3226,61 +3224,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   );
 }
 
-/** WHERE the position came from — and, when there is more than one way in, HOW MUCH came each way.
- *
- *   The percentages appear only on a split row, and that is the point. Names alone cannot tell a
- *  position held entirely through a certificate from one that is 96% the book's own shares:
- *  MasterCard is €50,489 held outright against €1,991 through Star, and chipped only "Star" it
- *  read as a holding the book does not own. On a single-route row the split would restate the
- *  Weight column beside it, so it is left off — 49 of this book's 52 rows say just "direct".
- *
- *  The percentages are shares of the BOOK and add up to that row's Weight. The share of the ROW
- *  ("3.8% of this position") answers a different question and ties to nothing else on screen, so
- *  it rides in the tooltip. */
-function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['sources'] }) {
-  const copy = useAnalyseCopy();
-  const routes = sources ?? [];
-  const rowTotal = routes.reduce((s, r) => s + (r.weight_now_pct ?? 0), 0);
-  const title = routes.length
-    ? routes.map((r) => copy.row.routeTitle(r.label ?? copy.row.heldDirectly, r.weight_now_pct.toFixed(2),
-      `€${Math.round(r.value_eur).toLocaleString('en-US')}`,
-      rowTotal > 0 ? (100 * r.weight_now_pct / rowTotal).toFixed(1) : undefined))
-      .join('\n')
-    : names.join(' · ');
-
-  // More than one route in: name each and size it.
-  if (routes.length > 1) {
-    return (
-      <span className="flex flex-wrap items-center gap-1" title={title}>
-        {routes.map((r) => (
-          <span key={r.label ?? '__direct'}
-            className={`px-1.5 py-0.5 rounded-md text-[11px] whitespace-nowrap flex items-baseline gap-1 ${
-              r.label ? 'bg-accent-500/10 text-accent-400' : 'bg-overlay/5 text-fg-muted'}`}>
-            <span className="max-w-[9rem] truncate">{r.label ?? copy.holdings.direct}</span>
-            <span className="font-mono opacity-80">{num2(r.weight_now_pct)}%</span>
-          </span>
-        ))}
-      </span>
-    );
-  }
-
-  if (!names.length) return <span className="text-[11px] text-fg-faint" title={title || undefined}>{copy.holdings.direct}</span>;
-  const shown = names.slice(0, 2);
-  return (
-    <span className="flex flex-wrap items-center gap-1" title={title}>
-      {shown.map((n) => (
-        <span key={n}
-          className="px-1.5 py-0.5 rounded-md bg-accent-500/10 text-accent-400 text-[11px] whitespace-nowrap max-w-[11rem] truncate">
-          {n}
-        </span>
-      ))}
-      {names.length > shown.length && (
-        <span className="text-[11px] text-fg-faint">+{names.length - shown.length}</span>
-      )}
-    </span>
-  );
-}
-
 /** The headline tile for a NON-EQUITY sleeve: its own return + weight, no benchmark. Replaces the
  *  Return/vs-SP500/Excess/Attribution scorecard, none of which makes sense off the equity book. */
 function SleeveTile({ bucket, slices, asOf }: {
@@ -3315,7 +3258,7 @@ function SleeveTile({ bucket, slices, asOf }: {
  * an accounting contribution and cannot reconcile to the allocation legend. */
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
-function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket: string }) {
+function SleeveBreakdown({ holdings, bucket, groupCash }: { holdings: BookHolding[]; bucket: string; groupCash: boolean }) {
   const copy = useAnalyseCopy();
   // Sortable table — click a header to toggle direction. Default: weight, largest first.
   const [sortKey, setSortKey] = useState<SleeveSortKey>('weight');
@@ -3326,7 +3269,15 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
   const totalW = rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0) || 1;
   // Preserve actual portfolio weights; only the currency split below is normalised within class.
   // Contributions remain in points of the entire portfolio.
-  const items = rows.map((h) => {
+  const cashCurrencies = groupCash && bucket === CASH_BUCKET ? [...new Set(rows.map((h) => h.currency))] : [];
+  const items = cashCurrencies.length ? [{
+    name: copy.lang === 'nl' ? 'Liquiditeiten' : 'Cash',
+    currency: cashCurrencies.length === 1 ? cashCurrencies[0] : null,
+    via_names: [],
+    weight: sum(rows.map((h) => h.weight_now_pct)),
+    ret: classWeightedReturn(rows, true).pct,
+    contrib: sum(rows.map((h) => h.contribution_pct)),
+  }] : rows.map((h) => {
     const w = h.weight_now_pct ?? null;
     return { name: h.name, currency: h.currency, via_names: h.via_names ?? [], weight: w, ret: h.own_return_pct,
       contrib: h.contribution_pct ?? null };
@@ -3863,34 +3814,6 @@ export default function PortfolioAnalysisModal({
   const sleeve = selected && selected !== 'Equity' ? selected : null;
 
   const riskWeightContext = airsRiskWeightContext(data?.book_holdings ?? [], lookThrough);
-  const performanceAccount = data && !data.details_pending && loadedFor === viewKey ? reportAccount ?? data.book_portefeuille : null;
-  useEffect(() => {
-    if (!performanceAccount) return;
-    let second = 0;
-    const first = window.requestAnimationFrame(() => {
-      second = window.requestAnimationFrame(() => {
-        prefetchPerformanceBundle(performanceAccount);
-        void import('./MonthlyReportPanel').catch(() => undefined);
-      });
-    });
-    return () => { window.cancelAnimationFrame(first); window.cancelAnimationFrame(second); };
-  }, [performanceAccount, viewKey]);
-  const warmRiskBody = data && !data.details_pending && loadedFor === viewKey
-    ? riskBundleBody(airsRiskHoldings(data.book_holdings ?? [], lookThrough), data.risk_profile_policy, reportAccount ?? data.book_portefeuille)
-    : null;
-  useEffect(() => {
-    if (!warmRiskBody) return;
-    let second = 0;
-    // Let Analyse paint its visible data first. Data and Risk's UI chunk then warm in parallel.
-    const first = window.requestAnimationFrame(() => {
-      second = window.requestAnimationFrame(() => {
-        prefetchRiskBundle(warmRiskBody, name);
-        void import('./ActiveSharePanel').catch(() => undefined);
-      });
-    });
-    return () => { window.cancelAnimationFrame(first); window.cancelAnimationFrame(second); };
-  }, [warmRiskBody, name]);
-
   return (
     /*  THE BOOK'S FETCH TIME, FOR EVERY ⓘ IN HERE — this is what makes the modal and the row
        that opened it reach the SAME freshness verdict. `Provenance` needs two dates to say whose
@@ -4173,7 +4096,8 @@ export default function PortfolioAnalysisModal({
                     ? (copy.lang === 'nl' ? 'Posities laden mislukt.' : 'Could not load holdings.')
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
-              ) : <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />
+              ) : <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve}
+                groupCash={defaultLookThroughCertificates(name, reportAccount ?? data.book_portefeuille)} />
             ) : (
               /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
                  Brinson Attribution is the sole drill-down surface. */

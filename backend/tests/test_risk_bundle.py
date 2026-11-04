@@ -1,4 +1,3 @@
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -92,40 +91,51 @@ def test_other_accounts_airs_updates_do_not_invalidate_market_risk(store, monkey
     assert B.read([], None) is None
 
 
-def test_cold_http_read_enqueues_work_and_returns_without_calculating(monkeypatch):
-    import jobs
-    from routers.airs import RiskBundleRequest, airs_portfolio_risk_bundle
-    monkeypatch.setattr(B, 'read', lambda *args: None)
-    prepare = Mock(side_effect=AssertionError('calculation on HTTP path'))
+@pytest.fixture
+def risk_request(monkeypatch):
+    from routers import airs
+
+    async def to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(airs.asyncio, 'to_thread', to_thread)
+
+    def request(*, account=None, prepare=True):
+        response = airs.airs_portfolio_risk_bundle(
+            airs.RiskBundleRequest(holdings=[], returns_account=account), prepare_if_missing=prepare)
+        with pytest.raises(StopIteration) as complete:
+            response.send(None)
+        return complete.value.value
+
+    return request
+
+
+def test_cold_http_request_returns_prepared_views_and_weekly_data(monkeypatch, risk_request):
+    from routers import _airs_instrument_returns
+    monkeypatch.setattr(B, 'read', lambda *_: None)
+    prepare = Mock(return_value={'volatility': {'available': True}})
     monkeypatch.setattr(B, 'prepare', prepare)
-    start = Mock(return_value=(SimpleNamespace(id='job-id'), False))
-    monkeypatch.setattr(jobs, 'start', start)
-    response = asyncio.run(airs_portfolio_risk_bundle(RiskBundleRequest(holdings=[])))
-    assert response.status_code == 202
-    start.assert_called_once()
+    weekly = {'options': [{'id': 'A'}], 'instruments': {'A': {'periods': []}}}
+    monkeypatch.setattr(_airs_instrument_returns, 'bundle', lambda account: weekly if account == 'BOOK' else None)
+    response = risk_request(account='BOOK')
+    assert response == {'ready': True, 'views': {'volatility': {'available': True}, 'weekly-returns': weekly}}
+    prepare.assert_called_once_with([], None)
+
+
+def test_warm_http_request_uses_saved_views(monkeypatch, risk_request):
+    monkeypatch.setattr(B, 'read', lambda *_: {'views': {'volatility': {'available': True}}})
+    prepare = Mock(side_effect=AssertionError('warm reads must not prepare'))
+    monkeypatch.setattr(B, 'prepare', prepare)
+    assert risk_request()['views']['volatility']['available']
     prepare.assert_not_called()
 
 
-def test_warm_http_read_returns_all_views_without_starting_a_job(monkeypatch):
-    import jobs
-    from routers.airs import RiskBundleRequest, airs_portfolio_risk_bundle
-    monkeypatch.setattr(B, 'read', lambda *args: {'views': {'volatility': {'available': True}}})
-    start = Mock(side_effect=AssertionError('warm reads must not start work'))
-    monkeypatch.setattr(jobs, 'start', start)
-    result = asyncio.run(airs_portfolio_risk_bundle(RiskBundleRequest(holdings=[])))
-    assert result['ready'] and result['views']['volatility']['available']
-    start.assert_not_called()
-
-
-def test_read_only_poll_does_not_start_an_unwatched_job(monkeypatch):
-    import jobs
-    from routers.airs import RiskBundleRequest, airs_portfolio_risk_bundle
-    monkeypatch.setattr(B, 'read', lambda *args: None)
-    start = Mock(side_effect=AssertionError('poll must not start work'))
-    monkeypatch.setattr(jobs, 'start', start)
-    result = asyncio.run(airs_portfolio_risk_bundle(RiskBundleRequest(holdings=[]), prepare_if_missing=False))
-    assert result.status_code == 202
-    start.assert_not_called()
+def test_read_only_poll_does_not_prepare(monkeypatch, risk_request):
+    monkeypatch.setattr(B, 'read', lambda *_: None)
+    prepare = Mock(side_effect=AssertionError('poll must not prepare'))
+    monkeypatch.setattr(B, 'prepare', prepare)
+    assert risk_request(prepare=False).status_code == 202
+    prepare.assert_not_called()
 
 
 def test_waiting_for_quiet_sources_remains_cancellable(store):

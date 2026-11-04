@@ -19,7 +19,10 @@ def _name(value):
 
 
 def _quote_for(holdings, instrument):
-    quotes = _quotes(holdings)
+    return _instrument_quote(_quotes(holdings), instrument)
+
+
+def _instrument_quote(quotes, instrument):
     if instrument['id'] in quotes:
         return quotes[instrument['id']]
     aliases = [row for row in quotes.values() if not row['isin'] and row['currency'] == instrument['currency']
@@ -64,13 +67,17 @@ def _pages(query):
         offset += len(page)
 
 
-def state(account, instrument_id=None):
+def _snapshots(account):
     from routers._airs_monthly_report import _account
     _account(account)
     through = latest_date()
     snapshots = _pages(supabase.table('airs_weekly_holding_snapshot').select('as_of_date,holdings')
                        .eq('portefeuille', account).lte('as_of_date', through.isoformat())
                        .order('as_of_date', desc=True))
+    return through, snapshots
+
+
+def _catalogue(snapshots):
     catalog, named = {}, {}
     for snapshot in snapshots:
         # Zero-quantity reporting rows also identify instruments previously held.
@@ -87,13 +94,24 @@ def state(account, instrument_id=None):
             aliases[key] = next(iter(candidates))
             del catalog[key]
     options = sorted(catalog.values(), key=lambda row: (row['name'].casefold(), row['currency'], row['id']))
+    return options, catalog, aliases, named
+
+
+def _with_aliases(instrument, named):
+    if not instrument or not instrument["isin"]:
+        return instrument
+    return {**instrument, "name_aliases": [name for (name, currency), ids in named.items()
+            if currency == instrument["currency"] and ids == {instrument["id"]}]}
+
+
+def state(account, instrument_id=None):
+    through, snapshots = _snapshots(account)
+    options, catalog, aliases, named = _catalogue(snapshots)
     instrument_id = aliases.get(instrument_id, instrument_id)
     if instrument_id and instrument_id not in catalog:
         raise HTTPException(404, 'This instrument is not in the saved AIRS portfolio history')
     chosen = catalog.get(instrument_id) if instrument_id else (options[0] if options else None)
-    if chosen and chosen['isin']:
-        chosen = {**chosen, 'name_aliases': [name for (name, currency), ids in named.items()
-                                           if currency == chosen['currency'] and ids == {chosen['id']}]}
+    chosen = _with_aliases(chosen, named)
     individual = []
     if chosen:
         individual = _pages(supabase.table(TABLE).select('target_date,as_of_date,holdings,status,checked_at')
@@ -103,7 +121,7 @@ def state(account, instrument_id=None):
     return through, snapshots, individual, options, chosen
 
 
-def observations(instrument, dates, snapshots, individual, through):
+def observations(instrument, dates, snapshots, individual, through, quote_for=_quote_for):
     """Select actual observations without borrowing a different week's price."""
     out, missing = [], []
     for target in dates:
@@ -112,7 +130,7 @@ def observations(instrument, dates, snapshots, individual, through):
             actual = date.fromisoformat(str(snapshot['as_of_date'])[:10])
             limit = target if target < START else through
             if actual <= limit and week_end(actual) == week_end(target):
-                row = _quote_for(snapshot['holdings'], instrument)
+                row = quote_for(snapshot['holdings'], instrument)
                 candidates.append((actual, 2 if row and row['price'] is not None else 0, row))
         for snapshot in individual:
             requested = date.fromisoformat(str(snapshot['target_date'])[:10])
@@ -123,7 +141,7 @@ def observations(instrument, dates, snapshots, individual, through):
             if snapshot['status'] == 'observed':
                 actual = date.fromisoformat(str(snapshot['as_of_date'])[:10])
                 if actual <= (target if target < START else through):
-                    row = _quote_for(snapshot['holdings'], instrument)
+                    row = quote_for(snapshot['holdings'], instrument)
                     candidates.append((actual, 3 if row and row['price'] is not None else 1, row))
         best = max(candidates, key=lambda item: (item[0], item[1])) if candidates else None
         if best:
@@ -140,11 +158,10 @@ def observations(instrument, dates, snapshots, individual, through):
     return out, missing
 
 
-def read(account, instrument_id=None):
-    through, snapshots, individual, options, chosen = state(account, instrument_id)
+def _series(account, through, snapshots, individual, chosen, quote_for=_quote_for):
     dates = targets(through)
     if chosen and dates:
-        points, missing = observations(chosen, dates, snapshots, individual, through)
+        points, missing = observations(chosen, dates, snapshots, individual, through, quote_for)
         data = _observations_matrix(account, points, through, seed=[chosen])
         selected = data['instruments'][0]
         selected.pop('name_aliases', None)
@@ -153,8 +170,44 @@ def read(account, instrument_id=None):
             period['partial'] = week_end(date.fromisoformat(period['target_date'])) + timedelta(days=2) > through
     else:
         selected, periods, missing = None, [], []
+    return {'selected': selected, 'periods': periods, 'missing_observations': len(missing)}
+
+
+def read(account, instrument_id=None):
+    through, snapshots, individual, options, chosen = state(account, instrument_id)
     return {'portefeuille': account, 'start_date': START.isoformat(), 'through': through.isoformat(),
-            'options': options, 'selected': selected, 'periods': periods, 'missing_observations': len(missing)}
+            'options': options, **_series(account, through, snapshots, individual, chosen)}
+
+
+def bundle(account):
+    """Read the catalogue and all saved series without per-instrument database queries."""
+    from collections import defaultdict
+
+    through, snapshots = _snapshots(account)
+    options, _, aliases, named = _catalogue(snapshots)
+    individual = defaultdict(list)
+    if options:
+        rows = _pages(supabase.table(TABLE).select('instrument_id,target_date,as_of_date,holdings,status')
+                      .eq('portefeuille', account).gte('target_date', (START - timedelta(days=1)).isoformat())
+                      .lte('target_date', through.isoformat()).order('target_date').order('instrument_id'))
+        for row in rows:
+            key = row['instrument_id']
+            individual[aliases.get(key, key)].append(row)
+
+    quotes = {id(snapshot['holdings']): _quotes(snapshot['holdings']) for snapshot in snapshots}
+    for rows in individual.values():
+        for row in rows:
+            quotes[id(row['holdings'])] = _quotes(row['holdings'])
+
+    def quote_for(holdings, instrument):
+        return _instrument_quote(quotes[id(holdings)], instrument)
+
+    return {'portefeuille': account, 'start_date': START.isoformat(), 'through': through.isoformat(),
+            'options': options, 'instruments': {
+                option['id']: _series(account, through, snapshots, individual[option['id']],
+                                      _with_aliases(option, named), quote_for)
+                for option in options
+            }}
 
 
 def collect(account, instrument_id, ctx):

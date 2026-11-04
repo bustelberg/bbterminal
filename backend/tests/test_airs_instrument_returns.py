@@ -55,6 +55,16 @@ def test_catalogue_includes_old_and_closed_instruments_but_response_has_only_sel
     assert 'instruments' not in result  # No unrelated instrument return matrix.
 
 
+def test_risk_bundle_includes_the_same_series_for_every_instrument(environment):
+    environment.tables['airs_weekly_holding_snapshot'].append(snapshot('2026-01-09', quote(), quote('B', 290)))
+    environment.tables[returns.TABLE] = [individual('2025-12-31'), individual('2025-12-31', price=280, isin='B')]
+    bundled = returns.bundle('BOOK')
+    assert set(bundled['instruments']) == {'A|EUR', 'B|EUR'}
+    for instrument, series in bundled['instruments'].items():
+        single = returns.read('BOOK', instrument)
+        assert series == {key: single[key] for key in ('selected', 'periods', 'missing_observations')}
+
+
 def test_first_bar_never_uses_a_whole_week_before_january_first(environment, monkeypatch):
     monkeypatch.setattr(returns, 'latest_date', lambda: date(2026, 1, 2))
     environment.tables['airs_weekly_holding_snapshot'] = [snapshot('2025-12-26', quote(price=85)), snapshot('2026-01-02', quote())]

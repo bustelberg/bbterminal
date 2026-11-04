@@ -7,12 +7,10 @@ class BenchmarkMissing(RuntimeError):
 
 
 def ensure(account, month, ctx=None, *, repair=True):
-    from routers._airs_monthly_report import _account, month_window, _monthly_rows, _weighted_months
-    from routers._airs_portfolio_variant import portfolio_variant
-    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles
+    from routers._airs_monthly_report import _account, month_window, _monthly_rows, _weighted_months, benchmark_policy
     _account(account)
     start, end, _ = month_window(month)
-    if not _weighted_benchmark_profiles().get(portfolio_variant(account) or ''):
+    if not benchmark_policy(account):
         return {'applicable': False}
     rows = [row for row in _monthly_rows(account, int(month[:4])) if row['month'] == month]
     if not rows:

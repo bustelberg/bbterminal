@@ -94,6 +94,12 @@ def position_performance(sections: dict, start: str, end: str) -> list[dict]:
         last_record, last_error = position_boundary(after)
         if first_error or last_error:
             row['reason'] = first_error or last_error
+            if row['reason'] == 'ambiguous_position':
+                row['ambiguous_valuation_dates'] = sorted({
+                    valuation['as_of']
+                    for valuation, error in ((opening, first_error), (closing, last_error))
+                    if error == 'ambiguous_position' and valuation.get('as_of')
+                })
             continue
         row['accrued_interest_opening_eur'] = sum(r.get('value_eur') or 0 for r in before if r.get('valuation_component') == 'accrued_interest')
         row['accrued_interest_closing_eur'] = sum(r.get('value_eur') or 0 for r in after if r.get('valuation_component') == 'accrued_interest')

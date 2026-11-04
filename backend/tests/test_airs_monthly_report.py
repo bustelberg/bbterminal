@@ -63,9 +63,35 @@ def test_report_flags_missing_benchmark_separately_from_airs_refresh(monkeypatch
     assert report.read_report(account, '2026-11', include_details=False)['benchmark_needs_refresh'] is False
 
 
+def test_obligatie_topselectie_bundle_uses_only_stored_bond_quotes(monkeypatch):
+    account = 'OBTopSelectie_DYN'
+    db = FakeSupabase({'airs_performance': [
+        {'portefeuille': account, 'periode': '2026-08-31', 'rendement': .72,
+         'cumulatief_rendement': .72, 'beginvermogen': 100, 'eindvermogen': 100.72},
+        {'portefeuille': account, 'periode': '2026-09-30', 'rendement': -1.81,
+         'cumulatief_rendement': -1.1, 'beginvermogen': 100.72, 'eindvermogen': 98.9},
+    ]})
+    monkeypatch.setattr(report, 'supabase', db)
+
+    def quotes(months, ticker, currency):
+        assert (ticker, currency) == ('AGGH.AS', 'EUR')
+        return {row['month']: {'return_pct': .5 if 'anchor' in row else .25,
+                              'start_date': '2026-07-31', 'end_date': row['periode']}
+                for row in months}
+
+    monkeypatch.setattr(report, '_acwi_months', quotes)
+    year = report.read_performance(account)['years']['2026']
+    assert year['weighted_benchmark']['2026-08']['return_pct'] == .25
+    assert year['weighted_benchmark']['2026-09']['components'][0]['weight_pct'] == 100
+    assert year['summary']['benchmark_pct'] == .5
+    assert year['summary']['excess_pp'] == pytest.approx(-1.6)
+    assert not year['details']['2026-09']['benchmark_needs_refresh']
+
+
 def test_calendar_window_never_requests_unvalued_today_or_future_month():
     assert report.month_window('2026-10', date(2026, 10, 26)) == ('2026-10-01', '2026-10-23', '2026-09-30')
     assert report.month_window('2024-02', date(2026, 10, 26)) == ('2024-02-01', '2024-02-29', '2024-01-31')
+    assert report.month_window('2026-10', date(2026, 11, 4)) == ('2026-10-01', '2026-10-30', '2026-09-30')
     for month in ('2026-13', 'bad', '2027-01'):
         with pytest.raises(HTTPException) as exc:
             report.month_window(month, date(2026, 10, 26))
@@ -121,7 +147,7 @@ def test_performance_bundle_reads_all_years_and_keeps_canonical_tile_values(monk
     assert db.writes == []
 
 
-def test_performance_prepares_missing_observed_months_before_returning(monkeypatch):
+def test_performance_repairs_missing_and_stale_months_before_returning(monkeypatch):
     import dashboard_daily
 
     bundle = {"portefeuille": "BOOK", "years": {"2026": {
@@ -130,7 +156,7 @@ def test_performance_prepares_missing_observed_months_before_returning(monkeypat
         "details": {
             "2026-07": {"refresh_reason": "ambiguous_position"},
             "2026-08": {"refresh_reason": "incomplete_report"},
-            "2026-09": {"refresh_reason": None},
+            "2026-09": {"refresh_reason": "outdated_report"},
             "2026-10": {"refresh_reason": "missing_report"},
             "2026-11": {"refresh_reason": "missing_report"},
         },
@@ -155,12 +181,12 @@ def test_performance_prepares_missing_observed_months_before_returning(monkeypat
     monkeypatch.setattr(report, "collect_report", collect)
 
     result = report.prepare_performance("BOOK")
-    assert attempted == ["2026-11", "2026-08"]
+    assert attempted == ["2026-11", "2026-09", "2026-08"]
     assert downloaded == ["2026-11", "2026-07"]
-    for month in ["2026-11", "2026-08", "2026-07"]:
+    for month in ["2026-11", "2026-09", "2026-08", "2026-07"]:
         assert result["years"]["2026"]["details"][month]["snapshot"]["positions"] == [{"name": "Stock"}]
     report.prepare_performance("BOOK")
-    assert attempted == ["2026-11", "2026-08"]
+    assert attempted == ["2026-11", "2026-09", "2026-08"]
     assert downloaded == ["2026-11", "2026-07"]
 
 
@@ -295,6 +321,7 @@ def test_legacy_ambiguous_components_offer_a_dated_airs_refresh(monkeypatch):
     monkeypatch.setattr(report, 'supabase', db)
     result = report.read_report('BOOK', '2026-04')
     assert result['snapshot']['positions'][0]['reason'] == 'ambiguous_position'
+    assert result['snapshot']['positions'][0]['ambiguous_valuation_dates'] == ['2026-03-31', '2026-04-30']
     assert result['needs_refresh'] is True
     details = report.read_performance('BOOK')['years']['2026']['details']['2026-04']
     assert details['refresh_reason'] == 'ambiguous_position'

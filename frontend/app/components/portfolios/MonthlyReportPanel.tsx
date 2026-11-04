@@ -7,6 +7,7 @@ import { startJob } from '../../../lib/stores/jobs';
 import type { MonthlyPosition, PerformanceBundle } from './monthlyReport';
 import InfoTip from '../InfoTip';
 import { profileBenchmarkLabel } from './analyseCopy';
+import ViaChips from './ViaChips';
 import { invalidatePerformanceBundle, loadPerformanceBundle, readPerformanceBundle } from './monthlyReportPrefetch';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
@@ -21,6 +22,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   const [bundle, setBundle] = useState<PerformanceBundle | null>(() => portefeuille ? readPerformanceBundle(portefeuille) : null);
   const [yearSelection, setYearSelection] = useState<string | null>(null);
   const [monthSelection, setMonthSelection] = useState<string | null>(null);
+  const [lookThrough, setLookThrough] = useState(false);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +53,11 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   const detailsOpen = !!report?.details[month];
   const selectedReport = report?.details[month];
   const perf = report?.rows[month];
-  const positions = selectedReport?.snapshot?.positions;
+  const expanded = selectedReport?.snapshot?.lookthrough_positions;
+  const showConstituents = lookThrough && expanded !== undefined;
+  const positions = showConstituents ? expanded : selectedReport?.snapshot?.positions;
   const reconciliation = selectedReport?.snapshot?.reconciliation;
+  const unavailableCertificates = selectedReport?.snapshot?.lookthrough_unavailable ?? [];
   const openingWeightDate = selectedReport?.snapshot?.opening_weight_date;
 
   const openMonth = (key: string) => {
@@ -77,7 +82,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   };
   useLayoutEffect(() => {
     const element = detailsElement.current;
-    if (!detailsOpen || !element) return;
+    if (!detailsOpen || !element || showConstituents) return;
     const measure = () => {
       const height = Math.ceil(element.getBoundingClientRect().height);
       // Keep the largest loaded detail footprint, including while loading or
@@ -88,7 +93,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [detailsOpen, selectedReport]);
+  }, [detailsOpen, selectedReport, showConstituents]);
   const pct = (value?: number | null) => value == null || !Number.isFinite(value) ? '—'
     : `${new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero' }).format(value)}%`;
   const pp = (value?: number | null) => pct(value).replace('%', 'pp');
@@ -149,7 +154,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'
     ? text('Position movement needs review', 'Positiemutatie controleren')
     : reason === 'ambiguous_position'
-      ? text('AIRS valuation components unclear', 'AIRS-waarderingscomponenten onduidelijk')
+      ? text('Security value unclear in AIRS', 'Effectenwaarde onduidelijk in AIRS')
       : reason === 'identity_changed'
       ? text('Position identity needs review', 'Positie-identiteit controleren')
       : text('AIRS period data incomplete', 'AIRS-periodegegevens onvolledig');
@@ -218,20 +223,36 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
         {selectedReport?.needs_refresh && !report.warning && selectedReport.refresh_reason
           && selectedReport.refresh_reason !== 'incomplete_report' && <p className="text-xs text-warn-300">
           {selectedReport.refresh_reason === 'ambiguous_position'
-            ? text('AIRS supplied multiple valuation rows for one position. The security value could not be verified separately.', 'AIRS leverde meerdere waarderingsregels voor één positie. De waarde van het effect kon niet afzonderlijk worden vastgesteld.')
+            ? text('For the marked position, AIRS lists several amounts under the same name. The saved valuation does not show which amount is the security value and which may be accrued interest. Without a verified security value at both dates, the opening weight, return and contribution are left blank.', 'Bij de gemarkeerde positie staan meerdere bedragen onder dezelfde naam in AIRS. Uit de opgeslagen waardering blijkt niet welk bedrag de effectenwaarde is en welk bedrag mogelijk opgelopen rente is. Zonder bevestigde effectenwaarde op beide datums blijven begingewicht, rendement en bijdrage leeg.')
             : selectedReport.refresh_reason === 'outdated_report'
               ? text('The saved position report does not cover the latest valuation date for this month.', 'Het opgeslagen positierapport loopt niet tot de laatste waarderingsdatum van deze maand.')
               : selectedReport.refresh_reason === 'preparation_failed'
                 ? text('AIRS could not provide all position data for this month.', 'AIRS kon niet alle positiegegevens voor deze maand leveren.')
                 : text('No position report has been saved for this month yet.', 'Voor deze maand is nog geen positierapport opgeslagen.')}
         </p>}
-        <div className={`${box} overflow-hidden`}><h4 className="px-5 pt-4 text-sm font-medium text-fg-strong">{text('Individual positions', 'Individuele posities')}</h4>
+        <div className={`${box} overflow-hidden`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+            <h4 className="text-sm font-medium text-fg-strong">{text('Individual positions', 'Individuele posities')}</h4>
+            {expanded && <label className="flex items-center gap-2 text-xs text-fg-muted">
+              <input type="checkbox" checked={lookThrough} onChange={(event) => setLookThrough(event.target.checked)} />
+              {text('Look through certificates', 'Door certificaten heen kijken')}
+            </label>}
+          </div>
+          {showConstituents && unavailableCertificates.length > 0 && <p className="px-5 pt-2 text-xs text-fg-subtle">
+            {text('Dated holdings unavailable for', 'Geen gedateerde posities beschikbaar voor')} {unavailableCertificates.join(', ')}.
+          </p>}
           {!positions ? <p className="p-5 text-sm text-fg-subtle">{busy ? text('Reading AIRS position reports…', 'AIRS-positierapporten ophalen…') : text('Position results are not available yet.', 'De positieresultaten zijn nog niet beschikbaar.')}</p>
             : !positions.length ? <p className="p-5 text-sm text-fg-subtle">{text('No positions were found in the available AIRS reports.', 'Geen posities gevonden in de beschikbare AIRS-rapporten.')}</p>
             : <div className="overflow-auto p-3"><table className="w-full text-sm"><thead><tr>
-              {[text('Position', 'Positie'), text('Opening weight (%)', 'Begingewicht (%)'), text('Return in EUR (%)', 'Rendement in EUR (%)'), text('Contribution (pp)', 'Bijdrage (pp)'), text('Holding period', 'Periode in portefeuille')].map((label, i) => <th key={label} className={`px-3 py-3 text-xs font-medium text-fg-subtle ${i > 0 && i < 4 ? 'text-right' : 'text-left'}`}>{label}</th>)}
+              <th className="px-3 py-3 text-left text-xs font-medium text-fg-subtle">{text('Position', 'Positie')}</th>
+              {showConstituents && <th className="px-3 py-3 text-left text-xs font-medium text-fg-subtle">Via</th>}
+              {[text('Opening weight (%)', 'Begingewicht (%)'), text('Return in EUR (%)', 'Rendement in EUR (%)'), text('Contribution (pp)', 'Bijdrage (pp)'), text('Holding period', 'Periode in portefeuille')].map((label, i) => <th key={label} className={`px-3 py-3 text-xs font-medium text-fg-subtle ${i < 3 ? 'text-right' : 'text-left'}`}>{label}</th>)}
             </tr></thead><tbody>{positions.map((position, i) => <tr key={`${position.isin || position.name}-${i}`} className="border-t border-neutral-800/40">
               <td className="px-3 py-3 font-medium text-fg-muted">{position.name}{position.status === 'bought' || position.status === 'sold' ? <span className="ml-2 text-[10px] text-fg-faint">{position.status === 'bought' ? text('Bought', 'Aangekocht') : text('Sold', 'Verkocht')}</span> : null}</td>
+              {showConstituents && <td className="px-3 py-3"><ViaChips names={position.certificate ? [position.certificate] : []}
+                weights={position.via} weightTitle={position.certificate
+                  ? text(`This row: ${position.certificate}. Percentages are opening weights within each selection.`, `Deze regel: ${position.certificate}. Percentages zijn begingewichten binnen elke selectie.`)
+                  : undefined} /></td>}
               <td className="px-3 py-3 text-right font-mono tabular-nums text-fg-muted">{weight(position.opening_weight_pct)}{position.opening_weight_pct != null && openingWeightDate && <InfoTip className="ml-2" text={`${text('Opening weight · AIRS valuation', 'Begingewicht · AIRS-waardering')}\n${shortDate(openingWeightDate)}`} />}</td>
               <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.return_pct)}`}>{pct(position.return_pct)}{position.start_price_eur != null && position.end_price_eur != null && <InfoTip className="ml-2" content={<div className="space-y-2 text-xs">
                 <p className="font-medium text-fg-strong">{text('AIRS price per unit in EUR', 'AIRS-prijs per stuk in EUR')}</p>
@@ -241,17 +262,25 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
                 </tbody></table>
                 <p className="text-fg-subtle">{text('Includes currency movements; excludes income.', 'Inclusief valuta-effecten; exclusief inkomsten.')}</p>
               </div>} />}</td>
-              <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.contribution_pp)}`}>{pp(position.contribution_pp)}<InfoTip className="ml-2" wide content={contributionDetails(position)} /></td>
-              <td className="px-3 py-3 text-xs text-fg-subtle">{!position.is_cash && (position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : unavailable(position.reason))}</td>
+              <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.contribution_pp)}`}>{pp(position.contribution_pp)}{position.certificate
+                ? <InfoTip className="ml-2" text={text('AIRS reports the contribution at certificate level.', 'AIRS rapporteert de bijdrage op certificaatniveau.')} />
+                : <InfoTip className="ml-2" wide content={contributionDetails(position)} />}</td>
+              <td className="px-3 py-3 text-xs text-fg-subtle">{!position.is_cash && (position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : unavailable(position.reason))}
+                {!!position.ambiguous_valuation_dates?.length && <span className="block">{position.ambiguous_valuation_dates.map(shortDate).join(', ')}</span>}
+              </td>
             </tr>)}{reconciliation?.adjustments.map((adjustment) => <tr key={adjustment.kind} className="border-t border-neutral-800/40 text-fg-muted">
               <td className="px-3 py-3">{adjustment.kind === 'opbrengsten' ? text('Income · AIRS (not allocated to positions)', 'Inkomsten · AIRS (niet aan posities toegerekend)') : text('Accrued interest change · AIRS', 'Mutatie opgelopen rente · AIRS')}</td>
+              {showConstituents && <td />}
               <td className="px-3 py-3 text-right">—</td><td className="px-3 py-3 text-right">—</td><td className={`px-3 py-3 text-right font-mono ${tone(adjustment.contribution_pp)}`}>{pp(adjustment.contribution_pp)}</td><td />
             </tr>)}</tbody>{reconciliation && <tfoot className="border-t border-neutral-700 text-fg-strong">
               {[
                 [text('Known contributions', 'Bekende bijdragen'), pp(reconciliation.contribution_sum_pp)],
                 [name, pct(reconciliation.monthly_return_pct)],
                 [text('Unexplained difference', 'Onverklaard verschil'), pp(reconciliation.difference_pp)],
-              ].map(([label, value]) => <tr key={label}><th colSpan={3} className="px-3 py-2 text-left font-medium">{label}</th><td className="px-3 py-2 text-right font-mono">{value}</td><td /></tr>)}
+              ].map(([label, value]) => <tr key={label}><th colSpan={showConstituents ? 4 : 3} className="px-3 py-2 text-left font-medium">{label}</th><td className="px-3 py-2 text-right font-mono">{value}</td><td /></tr>)}
+              {showConstituents && <tr><td colSpan={6} className="px-3 pb-2 text-xs text-fg-subtle">
+                {text('AIRS totals use the portfolio’s direct holdings and certificate-level contributions.', 'De AIRS-totalen gebruiken directe posities en bijdragen op certificaatniveau.')}
+              </td></tr>}
             </tfoot>}</table></div>}
         </div>
       </div>}

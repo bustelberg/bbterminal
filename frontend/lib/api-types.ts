@@ -2019,7 +2019,7 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Risk Bundle
-         * @description Read all prepared default Risk views; never calculate on the HTTP request.
+         * @description Return all Risk views and saved instrument histories in one response.
          */
         post: operations["airs_portfolio_risk_bundle_api_airs_portfolio_risk_bundle_post"];
         delete?: never;

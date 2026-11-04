@@ -1,8 +1,11 @@
-"""One prepared, atomic Risk read. Expensive work runs only in preparation workers."""
+"""One atomic Risk bundle, prepared on demand or by the scheduled worker."""
 from datetime import date
 import hashlib
 import json
+import threading
 import time
+
+_PREPARATION_LOCKS = tuple(threading.Lock() for _ in range(32))
 
 
 class _SourceChanged(Exception):
@@ -104,3 +107,12 @@ def prepare(holdings, policy, ctx=None):
                 break
             _settle(ctx)
     raise UserFacingJobError('Risk data is still updating. Please try again shortly.')
+
+
+def read_or_prepare(holdings, policy):
+    saved = read(holdings, policy)
+    if saved is not None:
+        return saved
+    with _PREPARATION_LOCKS[hash(identity(holdings, policy)) % len(_PREPARATION_LOCKS)]:
+        saved = read(holdings, policy)
+        return saved if saved is not None else {'views': prepare(holdings, policy)}

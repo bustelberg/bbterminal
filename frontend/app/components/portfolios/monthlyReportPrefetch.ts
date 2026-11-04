@@ -26,7 +26,3 @@ export function loadPerformanceBundle(account: string): Promise<PerformanceBundl
     return body as PerformanceBundle;
   });
 }
-
-export function prefetchPerformanceBundle(account: string): void {
-  void loadPerformanceBundle(account).catch(() => undefined);
-}

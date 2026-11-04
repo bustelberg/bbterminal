@@ -214,7 +214,7 @@ export default function ActiveSharePanel({
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
   const activeBody = riskBundleBody(weightedHoldings, riskProfilePolicy, returnsAccount ?? portefeuille);
-  const bundle = useRiskBundle(activeBody, portfolioName);
+  const bundle = useRiskBundle(activeBody);
   const data = (bundle.views['active-share'] as ActiveShare | undefined) ?? null;
   const error = bundle.error;
 
@@ -325,8 +325,7 @@ export default function ActiveSharePanel({
       <div className={`relative flex-1 min-h-0 pt-3 ${view === 'active'
         ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
-      {/* Only the selected view renders; its data is already in the shared Risk bundle.
-          Returns loads a saved instrument series only after the reader selects one. */}
+      {/* Each view renders from the shared Risk bundle. */}
       {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}
       {view === 'te' && (
         <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}

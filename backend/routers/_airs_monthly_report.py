@@ -34,6 +34,8 @@ def month_window(month: str, today: date | None = None) -> tuple[str, str, str]:
     current = today or datetime.now(ZoneInfo("Europe/Amsterdam")).date()
     latest = date.fromisoformat(latest_completed_market_date(current))
     end = min(date(start.year, start.month, calendar.monthrange(start.year, start.month)[1]), latest)
+    while end.weekday() >= 5:
+        end -= timedelta(days=1)
     if end < start:
         raise HTTPException(422, "This month has no completed valuation date yet")
     return start.isoformat(), end.isoformat(), (start - timedelta(days=1)).isoformat()
@@ -112,20 +114,28 @@ def _acwi_months(months: list[dict], ticker: str = "ACWI", currency: str = "USD"
                                  "start_date": first[0], "end_date": last[0], "source": f"{ticker} ETF · EUR"}
         return result
     except Exception:
-        log.exception("[monthly-report] stored ACWI returns unavailable")
+        log.exception("[monthly-report] stored %s returns unavailable", ticker)
         return {}
 
 
-def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
+def benchmark_policy(portefeuille: str) -> dict[str, float] | None:
     from routers._airs_portfolio_variant import portfolio_variant
     from routers._airs_portfolio_analysis import _weighted_benchmark_profiles
+    from routers._airs_strategy_map import nickname_for
 
-    policy = _weighted_benchmark_profiles().get(portfolio_variant(portefeuille) or "")
+    if nickname_for(portefeuille) == "ObligatieTopSelectie":
+        return {"Stocks": 0, "Bonds": 100}
+    return _weighted_benchmark_profiles().get(portfolio_variant(portefeuille) or "")
+
+
+def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
+    policy = benchmark_policy(portefeuille)
     if not policy:
         return {}
     sleeves = [(weight, ticker, _acwi_months(months, ticker, currency))
                for bucket, ticker, currency in (("Stocks", "ACWI", "USD"), ("Bonds", "AGGH.AS", "EUR"))
                if (weight := policy[bucket]) > 0]
+    source = " / ".join(f"{weight:g}% {ticker}" for weight, ticker, _ in sleeves) + " · EUR"
     result = {}
     for row in months:
         key = row["month"]
@@ -135,7 +145,7 @@ def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
                            "end_date": min(series[key]["end_date"] for _, _, series in sleeves),
                            "components": [{**series[key], "ticker": ticker, "weight_pct": weight}
                                           for weight, ticker, series in sleeves],
-                           "source": f'{policy["Stocks"]:g}% ACWI / {policy["Bonds"]:g}% AGGH.AS · EUR'}
+                           "source": source}
     return result
 
 
@@ -270,9 +280,7 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True,
         summary = {"return_pct": last["cum_pct"], "benchmark_pct": benchmark.get("return_pct"),
                    "start": anchor, "end": last["date"]}
     weighted_benchmark = _weighted_months(portefeuille, months)
-    from routers._airs_portfolio_variant import portfolio_variant
-    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles
-    benchmark_expected = bool(_weighted_benchmark_profiles().get(portfolio_variant(portefeuille) or ''))
+    benchmark_expected = bool(benchmark_policy(portefeuille))
     if bundled:
         if benchmark and summary["start"][:7] == summary["end"][:7]:
             weighted_benchmark[summary["end"][:7]] = benchmark
@@ -292,13 +300,16 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True,
                     "positions": source.get("positions"),
                     "reconciliation": source.get("reconciliation"),
                     "opening_weight_date": ((source.get("sections", {}).get("opening") or {}).get("data") or {}).get("as_of"),
+                    "closing_date": ((source.get("sections", {}).get("closing") or {}).get("data") or {}).get("as_of"),
                 }
                 cutoff = end if key == month else month_window(key)[1]
                 if any(row.get("reason") == "ambiguous_position" for row in snapshot["positions"] or []):
                     refresh_reason = "ambiguous_position"
                 elif errors:
                     refresh_reason = "incomplete_report"
-                elif str(stored["datum_tot"])[:10] != cutoff:
+                elif str(stored["datum_tot"])[:10] < cutoff or (
+                    snapshot["closing_date"] and snapshot["closing_date"] < cutoff
+                ):
                     refresh_reason = "outdated_report"
                 else:
                     refresh_reason = None
@@ -355,7 +366,7 @@ class _PerformancePreparation:
         pass
 
 
-def prepare_performance(portefeuille: str) -> dict:
+def _prepare_performance(portefeuille: str) -> dict:
     """Return positions in the initial bundle, repairing missing reports before responding."""
     from dashboard_daily import prepare_month
 
@@ -366,7 +377,9 @@ def prepare_performance(portefeuille: str) -> dict:
             for year in bundle["years"].values() if not year["warning"]
             for month in reversed(year["months"])
             if year["rows"].get(month, {}).get("rendement") is not None
-            and year["details"][month]["refresh_reason"] in ("missing_report", "incomplete_report", "ambiguous_position")
+            and year["details"][month]["refresh_reason"] in (
+                "missing_report", "incomplete_report", "ambiguous_position", "outdated_report",
+            )
         }
         if not months:
             return bundle
@@ -385,6 +398,16 @@ def prepare_performance(portefeuille: str) -> dict:
             if details["refresh_reason"] in ("missing_report", "incomplete_report"):
                 details["refresh_reason"] = "preparation_failed"
         return bundle
+
+
+def prepare_performance(portefeuille: str) -> dict:
+    from management_portfolios import MANAGEMENT_GROUPS, key
+    from routers._airs_monthly_lookthrough import add_lookthrough
+
+    bundle = _prepare_performance(portefeuille)
+    if MANAGEMENT_GROUPS.get(key(portefeuille)) == "toppenberg":
+        add_lookthrough(bundle)
+    return bundle
 
 
 def collect_report(portefeuille: str, month: str, ctx) -> str:

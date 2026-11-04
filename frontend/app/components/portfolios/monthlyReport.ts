@@ -10,6 +10,9 @@ export type Sheet = { columns: string[]; rows: Record<string, unknown>[]; kinds:
   readable: boolean; activity: Activity[] };
 export type Journal = { boekdatum: string | null; fonds: string; grootboek: string; omschrijving: string; amount_eur: number };
 export type MonthlyPosition = { name: string; isin: string | null; return_pct: number | null;
+  certificate?: string;
+  via?: { label: string; weight_pct: number | null }[];
+  ambiguous_valuation_dates?: string[];
   opening_weight_pct?: number | null; contribution_pp?: number | null; is_cash?: boolean;
   contribution_calculation?: { opening_value_eur: number; closing_value_eur: number; purchases_eur: number;
     sales_eur: number; result_eur: number; portfolio_opening_capital_eur: number;
@@ -91,7 +94,8 @@ export type PerformanceBundle = {
       refresh_reason?: 'missing_report' | 'outdated_report' | 'ambiguous_position' | 'incomplete_report' | 'preparation_failed' | null;
       benchmark_needs_refresh: boolean;
       snapshot: (Pick<NonNullable<MonthlyReport['snapshot']>, 'positions' | 'reconciliation'>
-        & { opening_weight_date: string | null }) | null;
+        & { opening_weight_date: string | null; lookthrough_positions?: MonthlyPosition[];
+          lookthrough_unavailable?: string[] }) | null;
     }>;
   }>;
 };

@@ -2,8 +2,6 @@
 
 import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RiskBundleContext } from './riskBundleContext';
-import { retrySeriesRead, useCoalescedRefresh } from './useCoalescedRefresh';
-import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
 import { invalidateReadCache } from '../../../lib/readCache';
@@ -198,24 +196,30 @@ function ReturnChart({ data, nl, scale, linked }: { data: WeeklyReturns; nl: boo
   </svg>;
 }
 
+type WeeklyReturnsBundle = Pick<WeeklyReturns, 'portefeuille' | 'start_date' | 'through' | 'options'> & {
+  instruments: Record<string, Pick<WeeklyReturns, 'selected' | 'periods' | 'missing_observations'>>;
+};
+
 function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   portefeuille: string; scale: number; onData: (data: WeeklyReturns | null) => void; linked: LinkedWeeks;
 }) {
   const [lang] = useLang();
   const riskBundle = useContext(RiskBundleContext);
-  const hasBundle = riskBundle !== null;
-  const catalogue = riskBundle?.views['returns-catalogue'] as InstrumentOption[] | undefined;
+  const bundle = riskBundle?.views['weekly-returns'] as WeeklyReturnsBundle | undefined;
   const nl = lang === 'nl';
   const [selection, setSelection] = useState<{ account: string; id: string } | null>(null);
   const selectedId = selection && selection.account === portefeuille ? selection.id : null;
-  const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{ account: string; key: string; data?: WeeklyReturns; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
-  const key = `${portefeuille}|${selectedId ?? ''}`;
-  const options = result && result.account === portefeuille ? result.data?.options ?? catalogue ?? [] : catalogue ?? [];
+  const options = bundle?.options ?? [];
   const chosen = options.find((item) => item.id === selectedId);
-  const data = selectedId && result?.key === key ? result.data : undefined;
+  const data = useMemo(() => {
+    const series = selectedId && bundle?.instruments[selectedId];
+    if (!bundle || !series) return undefined;
+    return { portefeuille: bundle.portefeuille, start_date: bundle.start_date,
+      through: bundle.through, options: bundle.options, ...series };
+  }, [bundle, selectedId]);
+  useEffect(() => { onData(data ?? null); }, [data, onData]);
   const ytd = useMemo(() => periodReturn(data), [data]);
   const selectedReturn = useMemo(() => linked.window ? periodReturn(data, linked.window) : null, [data, linked.window]);
   const returnColor = (value: number | undefined) => value == null || value === 0 ? 'text-fg' : value > 0 ? 'text-pos-300' : 'text-neg-300';
@@ -223,31 +227,8 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     ? `${nl ? 'AIRS koersen' : 'AIRS prices'} · ${day(value.from, nl)} → ${day(value.to, nl)}`
     : (nl ? 'Begin- of eindkoers ontbreekt. Laad de ontbrekende geschiedenis.' : 'Opening or closing price missing. Load missing history.');
 
-  useCoalescedRefresh(key, revision, !!portefeuille && (!!selectedId || !hasBundle), async (signal) => {
-    const url = `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns${selectedId ? `?instrument_id=${encodeURIComponent(selectedId)}` : ''}`;
-      try {
-        const payload = await retrySeriesRead(async () => {
-          const response = await apiFetch(url, { signal, noReadCache: true });
-          const body = await response.json().catch(() => ({}));
-          if (!response.ok) throw Object.assign(new Error(body.detail ?? 'Could not load weekly returns'), { status: response.status });
-          if (!Array.isArray(body.periods) || !Array.isArray(body.options)
-              || (selectedId && body.selected?.id !== selectedId)) throw new TypeError('Incomplete weekly return response');
-          return body;
-        }, signal);
-        if (!signal.aborted) {
-          setResult({ account: portefeuille, key, data: payload });
-          onData(selectedId ? payload : null);
-        }
-      } catch (error) {
-        if (!signal.aborted) setResult((previous) => ({ account: portefeuille, key,
-          data: previous?.key === key ? previous.data : undefined,
-          error: error instanceof Error ? error.message : String(error) }));
-      }
-  });
-
   function choose(instrument: InstrumentOption) {
     if (instrument.id === selectedId) return;
-    onData(null);
     if (portefeuille) setSelection({ account: portefeuille, id: instrument.id });
   }
 
@@ -257,14 +238,11 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     choose(instrument);
     setBusy(true); setNotice(null);
     try {
-      let lastDone = 0;
       const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?instrument_id=${encodeURIComponent(instrument.id)}`,
-        `${instrument.name} · AIRS`, undefined, (progress) => {
-          if ((progress.done ?? 0) > lastDone) { lastDone = progress.done!; setRevision((value) => value + 1); }
-        });
+        `${instrument.name} · AIRS`);
       const job = await done;
       invalidateReadCache('selected AIRS instrument history saved');
-      setRevision((value) => value + 1);
+      riskBundle?.reload?.();
       if (job.status !== 'done') setNotice({ id: instrument.id, text: nl ? 'Niet alles kon worden geladen. Zie Details.' : 'Some history could not be loaded. See Details.' });
     } catch (error) { setNotice({ id: instrument.id, text: error instanceof Error ? error.message : String(error) }); }
     finally { setBusy(false); }
@@ -286,11 +264,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
       </button>
     </div>
     <div className="h-9 shrink-0 overflow-y-auto">
-      {result?.key === key && result.error && <div role="alert" className="flex items-center gap-2 text-xs text-neg-300"
-        title={result.error}>
-        <span>{nl ? 'Grafiek kon niet worden bijgewerkt.' : 'Chart could not be updated.'}</span>
-        <button type="button" className="underline" onClick={() => setRevision((value) => value + 1)}>{nl ? 'Opnieuw proberen' : 'Retry'}</button>
-      </div>}
+      {riskBundle?.error && <p role="alert" className="text-xs text-neg-300">{riskBundle.error}</p>}
       {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
     </div>
     <div className="flex aspect-[3/1] min-h-40 items-center [&>svg]:h-full [&>svg]:w-full">
@@ -299,7 +273,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
         <line x1="65" x2="925" y1="142.5" y2="142.5" stroke="currentColor" opacity=".4" />
         <text x="56" y="146.5" textAnchor="end" fill="currentColor" fontSize="11">0%</text>
         <text x="495" y="110" textAnchor="middle" fill="currentColor" fontSize="16">
-          {selectedId ? (nl ? 'Rendementen laden…' : 'Loading returns…') : (nl ? 'Kies een instrument' : 'Choose an instrument')}
+          {!bundle && !riskBundle?.error ? (nl ? 'Rendementen laden…' : 'Loading returns…') : (nl ? 'Kies een instrument' : 'Choose an instrument')}
         </text>
         <text x="65" y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
       </svg>}

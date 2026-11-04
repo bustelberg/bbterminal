@@ -30,6 +30,13 @@ const fixture: PerformanceBundle = {
           opening_weight_date: '2026-10-31',
           positions: [{ name: 'Sample stock', isin: null, status: 'held', return_pct: 5, contribution_pp: 1,
             start_date: '2026-10-31', end_date: '2026-11-04' }],
+          lookthrough_positions: [{ name: 'Constituent', certificate: 'Sample stock', isin: 'TEST',
+            via: [{ label: 'Sample stock', weight_pct: 1.44 }, { label: 'Another selection', weight_pct: 0.1 }],
+            status: 'held', return_pct: 2, opening_weight_pct: 3, start_date: '2026-10-31', end_date: '2026-11-04' }],
+          reconciliation: {
+            status: 'reconciled', monthly_return_pct: 0.41, contribution_sum_pp: 0.41, difference_pp: 0,
+            issues: [], adjustments: [{ kind: 'opbrengsten', contribution_pp: 0.1 }],
+          },
         } },
       },
     },
@@ -52,6 +59,28 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
   vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(fixture)));
+});
+
+it('switches to bundled certificate constituents without fetching again', async () => {
+  await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[1].click());
+  const details = host.querySelector('#monthly-report-details')!;
+  expect(details.textContent).not.toContain('Constituent');
+  const toggle = details.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  await act(async () => toggle.click());
+  expect(details.textContent).toContain('Constituent');
+  expect(details.textContent).toContain('Sample stock');
+  expect(details.querySelector('th:nth-child(2)')?.textContent).toBe('Via');
+  expect(details.textContent).toContain('Sample stock1.44%');
+  expect(details.textContent).toContain('Another selection0.10%');
+  expect(details.textContent).toContain('Income · AIRS');
+  expect(details.querySelector('tfoot')?.textContent).toContain('Known contributions');
+  expect(details.querySelector('tfoot')?.textContent).toContain('Unexplained difference');
+  expect(details.querySelector('tfoot th')?.getAttribute('colspan')).toBe('4');
+  expect(details.textContent).toContain('+2.00%');
+  await act(async () => toggle.click());
+  expect(details.textContent).not.toContain('Constituent');
+  expect(apiFetch).toHaveBeenCalledOnce();
 });
 
 afterEach(async () => {
