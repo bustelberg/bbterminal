@@ -32,11 +32,21 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Iterator
 
 _log = logging.getLogger(__name__)
+_active_run: ContextVar[RunRecord | None] = ContextVar("active_scheduled_run", default=None)
+
+
+def record_progress(done: int, total: int, message: str) -> None:
+    rec = _active_run.get()
+    if rec is not None:
+        rec.add_progress(done, total, message)
 
 
 class RunRecord:
@@ -49,6 +59,19 @@ class RunRecord:
         self.detail: str | None = None
         self.summary: dict[str, Any] | None = None
         self.ingest_run_id: int | None = None
+        self.started = self.last_event = perf_counter()
+        self.progress: deque[dict[str, Any]] = deque(maxlen=80)
+        self.progress_count = 0
+
+    def add_progress(self, done: int, total: int, message: str, **extra: Any) -> None:
+        now = perf_counter()
+        self.progress_count += 1
+        self.progress.append({
+            "at_ms": round((now - self.started) * 1000),
+            "since_previous_ms": round((now - self.last_event) * 1000),
+            "done": done, "total": total, "message": message[:300], **extra,
+        })
+        self.last_event = now
 
     def skip(self, why: str) -> None:
         """The job woke, decided there was nothing to do, and that is a healthy outcome."""
@@ -89,6 +112,8 @@ def record_run(job_id: str, triggered_by: str = "auto") -> Iterator[RunRecord]:
         _log.warning("[runlog] could not open a run row for %s: %s: %s",
                      job_id, type(e).__name__, e)
 
+    parent = _active_run.get()
+    token = _active_run.set(rec)
     try:
         yield rec
     except Exception as e:
@@ -96,9 +121,21 @@ def record_run(job_id: str, triggered_by: str = "auto") -> Iterator[RunRecord]:
         #  Type and message, truncated. The traceback is already in the log via the caller's
         # `_log.exception`; what the overview needs is one line it can render in a table cell.
         rec.detail = f"{type(e).__name__}: {str(e)[:400]}"
-        _close(rec)
         raise
-    _close(rec)
+    finally:
+        _active_run.reset(token)
+        duration = round((perf_counter() - rec.started) * 1000)
+        rec.summary = {
+            **(rec.summary or {}),
+            "profile": {
+                "duration_ms": duration,
+                "progress_events": rec.progress_count,
+                "progress": list(rec.progress),
+            },
+        }
+        _close(rec)
+        if parent is not None:
+            parent.add_progress(0, 0, job_id, duration_ms=duration, status=rec.status)
 
 
 def _close(rec: RunRecord) -> None:

@@ -244,6 +244,7 @@ def build_rows(
             # only ok/error would render them identically.
             "last_detail": (run.get("detail") or run.get("error_summary")) if run else None,
             "last_summary": run.get("summary") if run else None,
+            "last_finished_at": run.get("finished_at") if run else None,
             #  "CAN WE SEE THIS JOB **RUN**", WHICH IS NOT "is there a name to look under".
             # It read `bool(names)`, and that was the same question until `names` widened to carry
             # the job's own id for anything the gap scan can record (see the  above). A MISSED

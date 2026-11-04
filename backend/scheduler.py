@@ -493,20 +493,21 @@ JOB_BODIES: dict = {}
 
 
 def _reporter(ctx):
-    """`(done, total, message)` → the job's progress stream, or nowhere on a scheduler tick.
+    """Send progress to the run receipt and, when present, the live job stream.
 
      A REPORTER MUST NEVER BE THE REASON A SCAN FAILS — the rule `airs_vermogen._step` already
     states. The work is the scan; the line on screen is a courtesy, and a listener that raised
     would lose a refresh that had already downloaded everything.
 
-     `ctx is None` ON THE TICK, which is not a degraded mode: nobody is watching a 09:30 cron, and
-    the run record carries the outcome either way.
     """
     def step(done, total, message) -> None:
-        if ctx is None:
-            return
         try:
-            ctx.progress(int(done or 0), int(total or 0), str(message)[:300])
+            from job_runlog import record_progress
+
+            event = (int(done or 0), int(total or 0), str(message)[:300])
+            record_progress(*event)
+            if ctx is not None:
+                ctx.progress(*event)
         except Exception:  # noqa: BLE001
             _log.debug("[scheduler] progress listener raised", exc_info=True)
     return step
@@ -730,11 +731,18 @@ def job_health(now=None) -> dict:
         # accuses exactly the jobs that are behaving.
         out: list[dict] = []
         for name in evidence_names(specs):
-            out += (supabase.table("ingest_run")
-                    .select("job_name,started_at,finished_at,status,error_summary")
+            legacy = (supabase.table("ingest_run")
+                    .select("job_name,started_at,finished_at,status,error_summary,current_message,"
+                            "companies_total,companies_processed,prices_refreshed,error_count")
                     .eq("job_name", name)
                     .order("started_at", desc=True)
                     .limit(1).execute().data or [])
+            for row in legacy:
+                row["detail"] = row.get("error_summary") or row.get("current_message")
+                row["summary"] = {key: row[key] for key in (
+                    "companies_total", "companies_processed", "prices_refreshed", "error_count"
+                ) if row.get(key) is not None}
+            out.extend(legacy)
         #  Normalised onto `job_name` SO THE JOIN HAS ONE KEY SPACE. `scheduled_job_run` is keyed
         # by the APScheduler job id and `ingest_run` by a pipeline job_name.
         for spec in specs:
@@ -2233,16 +2241,20 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
                        if row.get("holdings") and is_dashboard_account(row.get('portefeuille'))),
                       key=dashboard_refresh_key)
     from routers._monthly_benchmark import ensure_daily
+    step = _reporter(ctx)
+    step(0, 0, "Preparing monthly benchmarks")
     summary['monthly_benchmarks'] = ensure_daily(accounts, ctx)
     if summary['monthly_benchmarks']['errors']:
         failures['monthly_benchmarks'] = summary['monthly_benchmarks']['errors']
     try:
+        step(0, 0, "Finalising previous-year archives")
         summary["year_end"] = finalise_previous_year(ctx, dashboard_only=True)
         if any(row["errors"] for row in summary["year_end"]):
             failures["year_end"] = summary["year_end"]
     except Exception as exc:
         failures["year_end"] = str(exc)
     try:
+        step(0, 0, "Refreshing saved price checks")
         summary["checks"] = refresh_price_checks(accounts, should_stop=stop, freshen=False,
                                                only_if_changed=True, on_step=_reporter(ctx))
         if summary["checks"].get("errors"):
@@ -2270,6 +2282,7 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
         except Exception as exc:
             failures[account] = str(exc)
     try:
+        step(0, 0, "Preparing Analyse views")
         summary["analyse"] = run_controlled(busy=lambda: _analyse_sources_busy(ignore_airs=True),
                                             should_stop=stop, on_step=_reporter(ctx),
                                             max_portfolios=max(2, len(accounts)), max_seconds=900)

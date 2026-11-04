@@ -23,6 +23,7 @@ export type JobRow = {
   registered: boolean;
   next_run_at?: string | null;
   last_run_at?: string | null;
+  last_finished_at?: string | null;
   last_status?: string | null;
   last_age_hours?: number | null;
   max_age_hours?: number | null;
@@ -45,6 +46,14 @@ export type JobsPayload = {
   checked_at: string;
   history_error?: string;
 };
+
+export function jobTiming(job: JobRow) {
+  const profile = job.last_summary?.profile;
+  if (profile && typeof profile === 'object') return profile;
+  if (!job.last_run_at || !job.last_finished_at || job.last_status === 'missed') return null;
+  const duration = Date.parse(job.last_finished_at) - Date.parse(job.last_run_at);
+  return Number.isFinite(duration) && duration >= 0 ? { duration_ms: duration } : null;
+}
 
 export function jobFailure(job: JobRow) {
   if (job.status !== 'error' && job.last_status !== 'error' && job.last_status !== 'failed') return null;
@@ -87,7 +96,10 @@ export function jobFailure(job: JobRow) {
     }
   }
 
-  collect(job.last_summary);
+  const { profile: _profile, ...summary } = job.last_summary ?? {};
+  collect(summary);
+  const profile = jobTiming(job);
+  const counts = Object.fromEntries(Object.entries(summary).filter(([, value]) => typeof value === 'number'));
   return {
     id: job.id,
     status: job.status,
@@ -100,6 +112,24 @@ export function jobFailure(job: JobRow) {
       ...(scopes.size ? { affected: [...scopes].slice(0, 5), affected_count: scopes.size } : {}),
     })),
     ...(causes.size > 12 ? { additional_causes: causes.size - 12 } : {}),
+    ...(profile ? { profile } : {}),
+    ...(Object.keys(counts).length ? { counts } : {}),
+  };
+}
+
+export function jobReport(job: JobRow) {
+  const failure = jobFailure(job);
+  if (failure) return failure;
+  if (!job.last_run_at) return null;
+  const { profile: _profile, ...results } = job.last_summary ?? {};
+  return {
+    id: job.id,
+    status: job.last_status ?? job.status,
+    last_run_at: job.last_run_at,
+    finished_at: job.last_finished_at ?? null,
+    detail: job.last_detail ?? null,
+    profile: jobTiming(job),
+    results,
   };
 }
 

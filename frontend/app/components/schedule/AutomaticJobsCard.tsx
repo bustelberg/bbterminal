@@ -7,7 +7,7 @@ import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import { jobsStore, startJob } from '../../../lib/stores/jobs';
 import InfoTip from '../InfoTip';
 import {
-  ago, headline, jobFailure, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
+  ago, headline, jobFailure, jobReport, jobTiming, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
 } from './automaticJobs';
 import { JOB_PANELS, ROW_ACTIONS } from './jobPanels';
 import { usePipelineActivity, type PipelineCtx } from './usePipelineActivity';
@@ -218,6 +218,8 @@ function Row({ j, panel, ctx }: {
   const tone = JOB_TONE[j.status] ?? JOB_TONE.unknown;
   const summary = summaryLine(j.last_summary);
   const failure = jobFailure(j);
+  const report = jobReport(j);
+  const timing = jobTiming(j);
   const expandable = Boolean(j.note || j.reason || j.last_detail || summary || panel);
   return (
     <>
@@ -261,7 +263,7 @@ function Row({ j, panel, ctx }: {
               `RunControl` would render nothing there anyway. Falling back rather than rendering
               both keeps one run control per row. */}
           <div className="flex items-center justify-end gap-2">
-            {failure && <CopyJsonButton label="Copy JSON" title={`Copy failure for ${j.label}`} payload={failure} />}
+            {report && <CopyJsonButton label="Copy JSON" title={`Copy run report for ${j.label}`} payload={report} />}
             {ROW_ACTIONS[j.id]?.(ctx) ?? <RunControl j={j} />}
           </div>
         </td>
@@ -287,6 +289,9 @@ function Row({ j, panel, ctx }: {
               </div>
             ) : j.last_detail && (
               <p className="text-[12px] text-fg-soft font-mono">{j.last_detail}</p>
+            )}
+            {timing && 'duration_ms' in timing && typeof timing.duration_ms === 'number' && (
+              <p className="text-[12px] text-fg-muted font-mono">Duration {timing.duration_ms.toLocaleString()} ms</p>
             )}
             {summary && <p className="text-[12px] text-fg-muted font-mono">{summary}</p>}
             {j.last_summary && Object.values(j.last_summary).some(value => value !== null && typeof value === 'object') && (
