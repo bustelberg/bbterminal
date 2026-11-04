@@ -12,6 +12,7 @@ import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import { tailRunToConsole } from './runConsole';
+import ScheduleActionButton from './ScheduleActionButton';
 import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
 //  The fetching moved out (step 3). This file draws; `usePipelineActivity` reads. That is what
 // lets a panel be rendered from a registry inside a table row instead of only where its own
@@ -187,7 +188,6 @@ export const ROW_ACTIONS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
       job="rebalance"
       busy={!!ctx.running('rebalance')}
       label="Rebalance now"
-      size="sm"
       title={'Re-select holdings for every scheduled strategy that is DUE, now. Prices the due '
         + 'strategies’ universe up to the deciding bar first (the close strictly before the '
         + 'rebalance date), then computes. Expand the row for the price-update and force options.'}
@@ -263,32 +263,27 @@ function useRunNow(job: string, busy: boolean, universe?: string) {
   return { run, pending };
 }
 
-function RunNowButton({ job, busy, label = 'Run now', title, size = 'md' }: {
+function RunNowButton({ job, busy, label = 'Run now', title }: {
   job: string; busy: boolean;
   /**  THE VERB, NOT A DEFAULT. Inside a section header "Run now" is unambiguous — the card it
    *  sits in names the run. In the Automatic-jobs ACTION COLUMN there is no such card and the row
    *  is `daily_pipeline`, which is price-update AND rebalance, so a bare "Run now" there would
    *  claim to fire both. */
   label?: string; title?: string;
-  /** `sm` matches `RunControl`'s button so the action column stays one size. */
-  size?: 'sm' | 'md';
 }) {
   const { run, pending } = useRunNow(job, busy);
   const disabled = pending || busy;
   return (
-    <button
+    <ScheduleActionButton
       // stopPropagation so clicking Run-now inside the CollapsibleCard header
       // doesn't also toggle the card open/closed — nor, in the jobs table, the row's disclosure.
       onClick={(e) => { e.stopPropagation(); void run(); }}
       disabled={disabled}
+      aria-busy={disabled}
       title={title}
-      className={`cursor-pointer rounded-lg bg-accent-600 hover:bg-accent-500 text-white
-                  disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${size === 'sm'
-        ? 'text-[11px] px-2 py-0.5'
-        : 'text-xs px-2.5 py-1'}`}
     >
-      {disabled ? 'Running...' : label}
-    </button>
+      {pending ? 'Starting…' : busy ? 'Running…' : label}
+    </ScheduleActionButton>
   );
 }
 

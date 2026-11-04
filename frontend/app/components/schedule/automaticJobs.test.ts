@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summaryLine } from './automaticJobs';
+import { jobFailure, summaryLine, type JobRow } from './automaticJobs';
 
 describe('scheduled job receipt summary', () => {
   it('keeps counts and simple failure reasons readable', () => {
@@ -16,4 +16,20 @@ describe('scheduled job receipt summary', () => {
     expect(line).toBe('accounts 1 entries · errors 1 entries · fx dates 2 entries');
     expect(line).not.toContain('[object Object]');
   });
+});
+
+it('copies full failure receipts even when scheduler registration overrides the run status', () => {
+  const job: JobRow = {
+    id: 'daily', label: 'Daily refresh', fills: '', cadence: '', registered: false,
+    observable: true, runnable: true, status: 'missing', reason: 'Not registered',
+    last_status: 'error', last_run_at: '2026-11-04T05:00:00Z', last_detail: 'Refresh failed',
+    last_summary: { errors: { audit: { missing: ['BOOK'] } } },
+  };
+  expect(jobFailure(job)).toEqual({
+    id: 'daily', label: 'Daily refresh', status: 'missing', last_status: 'error',
+    last_run_at: job.last_run_at, reason: 'Not registered', detail: 'Refresh failed',
+    summary: job.last_summary,
+  });
+  expect(jobFailure({ ...job, last_status: 'done' })).toBeNull();
+  expect(jobFailure({ ...job, status: 'error', last_status: 'running' })?.reason).toBe('Not registered');
 });

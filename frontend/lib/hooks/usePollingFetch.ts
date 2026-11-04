@@ -13,6 +13,7 @@ import { apiFetch } from '../apiFetch';
  * success) and the last error (cleared on the next success). A non-2xx
  * response is ignored (keeps the prior data) rather than surfaced as an
  * error. Pass `url = null` to disable.
+ * `loading` covers the first request for a URL, including a manual refresh that changes it.
  *
  * Polling PAUSES while the tab is hidden (Page Visibility API) and resumes with
  * an immediate catch-up fetch when it's shown again — so a backgrounded page
@@ -22,9 +23,10 @@ import { apiFetch } from '../apiFetch';
 export function usePollingFetch<T>(
   url: string | null,
   intervalMs: number,
-): { data: T | null; error: string | null } {
+): { data: T | null; error: string | null; loading: boolean } {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [settledUrl, setSettledUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!url) return;
@@ -39,6 +41,8 @@ export function usePollingFetch<T>(
         if (!cancelled) { setData(json); setError(null); }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setSettledUrl(url);
       }
     };
 
@@ -62,5 +66,5 @@ export function usePollingFetch<T>(
     };
   }, [url, intervalMs]);
 
-  return { data, error };
+  return { data, error, loading: url != null && url !== settledUrl };
 }

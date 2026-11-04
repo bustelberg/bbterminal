@@ -7,10 +7,11 @@ import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import { jobsStore, startJob } from '../../../lib/stores/jobs';
 import InfoTip from '../InfoTip';
 import {
-  ago, headline, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
+  ago, headline, jobFailure, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
 } from './automaticJobs';
 import { JOB_PANELS, ROW_ACTIONS } from './jobPanels';
 import { usePipelineActivity, type PipelineCtx } from './usePipelineActivity';
+import ScheduleActionButton from './ScheduleActionButton';
 
 /**
  * Every job that is supposed to run by itself, and whether it did.
@@ -49,14 +50,14 @@ export default function AutomaticJobsCard() {
   // 60s: the fastest anything here can legitimately change is a job starting, and re-reading eight
   // rows every few seconds costs more than it tells anyone. The hook also pauses while the tab is
   // hidden, so a /schedule left open in a background tab makes no requests at all.
-  const { data, error } = usePollingFetch<JobsPayload>(
+  const { data, error, loading } = usePollingFetch<JobsPayload>(
     `${API_URL}/api/admin/scheduled-jobs${nonce ? `?_=${nonce}` : ''}`, 60_000);
-  const busy = false;
   const refresh = () => setNonce(Date.now());
+  const failures = data?.jobs.map(jobFailure).filter((failure) => failure !== null) ?? [];
 
   return (
     <section className="bg-card border border-neutral-800/40 rounded-xl">
-      <div className="px-4 py-3 border-b border-neutral-800/40 flex items-start justify-between gap-3">
+      <div className="px-4 py-3 border-b border-neutral-800/40 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-fg-strong flex items-center gap-1.5">
             Automatic jobs
@@ -79,13 +80,14 @@ export default function AutomaticJobsCard() {
             </p>
           )}
         </div>
-        <button type="button" onClick={refresh} disabled={busy}
-          title="Re-read the declaration, the scheduler and the run history."
-          className="cursor-pointer shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5
-                     rounded-lg border border-neutral-700 bg-page text-fg-soft transition-colors
-                     hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-50">
-          Refresh
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <CopyJsonButton label="Copy all failed JSON"
+            payload={failures.length ? { checked_at: data?.checked_at, failures } : null} />
+          <ScheduleActionButton onClick={refresh} disabled={loading} aria-busy={loading}
+            title="Re-read the declaration, the scheduler and the run history.">
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </ScheduleActionButton>
+        </div>
       </div>
 
       {error && !data && (
@@ -132,6 +134,27 @@ export default function AutomaticJobsCard() {
   );
 }
 
+function CopyJsonButton({ label, payload, title }: { label: string; payload: object | null; title?: string }) {
+  const [feedback, setFeedback] = useState('');
+
+  async function copy() {
+    setFeedback('Copying…');
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setFeedback('Copied');
+    } catch {
+      setFeedback('Copy failed');
+    }
+  }
+
+  return (
+    <ScheduleActionButton disabled={!payload || feedback === 'Copying…'} title={title} aria-label={label}
+      onClick={(event) => { event.stopPropagation(); void copy(); }}>
+      {feedback || label}
+    </ScheduleActionButton>
+  );
+}
+
 /**
  * Run this job now, reporting into the shared toast stack where it can be cancelled.
  *
@@ -169,7 +192,7 @@ function RunControl({ j }: { j: JobRow }) {
   };
 
   return (
-    <button type="button"
+    <ScheduleActionButton
       onClick={(e) => {
         e.stopPropagation();
         void run();
@@ -179,13 +202,9 @@ function RunControl({ j }: { j: JobRow }) {
       title={busy
         ? 'This job is running. Follow progress or cancel it in the job toast.'
         : 'Run this job now, with the same body the scheduler runs. Progress appears in the toast '
-          + 'at the bottom right.'}
-      className={`cursor-pointer text-[11px] px-2 py-0.5 rounded border transition-colors
-                  disabled:opacity-50 disabled:cursor-wait ${busy
-        ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
-        : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-      {busy ? 'Running...' : 'Run now'}
-    </button>
+          + 'at the bottom right.'}>
+      {busy ? 'Running…' : 'Run now'}
+    </ScheduleActionButton>
   );
 }
 
@@ -198,6 +217,7 @@ function Row({ j, panel, ctx }: {
   const [open, setOpen] = useState(false);
   const tone = JOB_TONE[j.status] ?? JOB_TONE.unknown;
   const summary = summaryLine(j.last_summary);
+  const failure = jobFailure(j);
   const expandable = Boolean(j.note || j.reason || j.last_detail || summary || panel);
   return (
     <>
@@ -239,8 +259,11 @@ function Row({ j, panel, ctx }: {
                THE REGISTRY WINS WHERE IT HAS AN ENTRY, and the two are mutually exclusive by
               construction: `ROW_ACTIONS` exists precisely for the rows `runnable` is false on, so
               `RunControl` would render nothing there anyway. Falling back rather than rendering
-              both keeps one button per row. */}
-          {ROW_ACTIONS[j.id]?.(ctx) ?? <RunControl j={j} />}
+              both keeps one run control per row. */}
+          <div className="flex items-center justify-end gap-2">
+            {failure && <CopyJsonButton label="Copy JSON" title={`Copy failure for ${j.label}`} payload={failure} />}
+            {ROW_ACTIONS[j.id]?.(ctx) ?? <RunControl j={j} />}
+          </div>
         </td>
       </tr>
       {open && (

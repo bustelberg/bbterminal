@@ -806,6 +806,16 @@ def job_health(now=None) -> dict:
 #: is no failure to repeat, because nothing was attempted.
 _WATCHDOG_HEALS: frozenset[str] = frozenset({"overdue", "interrupted", "missed"})
 
+
+def _shutdown_interrupted(row: dict) -> bool:
+    """Recover benchmark stages whose nested receipts captured executor shutdown."""
+    return (
+        row.get("status") == "error"
+        and row.get("id") in {"benchmark_price_slice", "benchmark_fundamentals_fill"}
+        and "cannot schedule new futures after interpreter shutdown"
+        in f"{row.get('last_detail')} {row.get('last_summary')}"
+    )
+
 #: HOW THE WATCHDOG FIRES A JOB THAT HAS NO `JOB_BODIES` ENTRY.
 #:
 #:  `JOB_BODIES` MEMBERSHIP WAS DOING TWO JOBS AND THEY HAD QUIETLY DIVERGED. It decides whether
@@ -935,7 +945,7 @@ def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
                 {"checked": 0, "restarted": 0})
 
     today = _dt.now(_tz.utc).date().isoformat()
-    broken = [r for r in rows if r.get("status") in _WATCHDOG_HEALS]
+    broken = [r for r in rows if r.get("status") in _WATCHDOG_HEALS or _shutdown_interrupted(r)]
     # AIRS has exactly one automatic browser pass. Recovery may refresh stored-data stages,
     # but must not create additional AIRS sessions on restart or from the watchdog.
     broken = [r for r in broken if r["id"] not in {"airs_vermogen_refresh", "dashboard_post_airs"}]
@@ -1180,7 +1190,7 @@ def _fire_asset_ingest_queue() -> None:
     competing Yahoo traffic → no throttle-corrupted resolutions). A no-op when the
     queue is empty. Never raises into the scheduler."""
     with _scheduled_futures_lock:
-        if any(name in {"dashboard_market", "airs_vermogen_refresh", "dashboard_post_airs"} and not future.done()
+        if any(name in {"dashboard_market", "airs_vermogen_refresh", "dashboard_post_airs", "airs_price_checks"} and not future.done()
                for name, future in _scheduled_futures.items()):
             return  # Give the daily refresh exclusive priority over new queue slices.
     try:
@@ -2135,14 +2145,13 @@ def _fire_airs_price_checks() -> None:
 
 def _body_airs_price_checks(ctx=None) -> tuple[str, dict]:
     from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
-    from asset_pipeline import price_refresh, queue as ingest_queue  # noqa: PLC0415
+    from asset_pipeline import price_refresh  # noqa: PLC0415
     step = _reporter(ctx)
     step(0, 0, "Refreshing Yahoo closes and saved AIRS price checks")
     stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
     if stop and stop():
         raise _Cancelled("stopped before automatic price checks")
-    if ingest_queue.is_worker_active():
-        raise RuntimeError("Automatic price checks deferred: the Yahoo ingest queue is active")
+    _wait_for_yahoo_queue(ctx)
     # Do not rely on _freshen's per-process daily memo: noon may already have checked these
     # instruments before today's close existed. One batch also avoids the per-account fetch cap.
     prices = price_refresh.refresh_stale(isins=price_refresh.watched_isins(), stale_days=1)
@@ -2173,16 +2182,20 @@ def _fire_airs_vermogen() -> None:
     _spawn_body("airs_vermogen_refresh")
 
 
-def _body_dashboard_market(ctx=None) -> tuple[str, dict]:
+def _wait_for_yahoo_queue(ctx) -> None:
     from asset_pipeline import queue
     deadline = time.monotonic() + 900
     while queue.is_worker_active():
         if _cancel_requested(ctx):
-            raise _Cancelled("daily market refresh cancelled while waiting for Yahoo")
+            raise _Cancelled("Refresh cancelled while waiting for the Yahoo queue")
         if time.monotonic() >= deadline:
-            raise RuntimeError("Yahoo queue remained active; daily market refresh could not acquire a quiet window")
+            raise RuntimeError("Yahoo queue remained active for 15 minutes; refresh could not acquire a quiet window")
         _reporter(ctx)(0, 0, "Waiting for the existing Yahoo queue slice to settle; new slices are paused")
         time.sleep(15)
+
+
+def _body_dashboard_market(ctx=None) -> tuple[str, dict]:
+    _wait_for_yahoo_queue(ctx)
     failures = {}
     for stage in ("fx_sync", "asset_price_refresh", "benchmark_price_slice", "benchmark_fundamentals_fill"):
         if _cancel_requested(ctx):

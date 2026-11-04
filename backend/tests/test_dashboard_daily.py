@@ -10,6 +10,35 @@ import scheduler as S
 from tests._fake_supabase import FakeSupabase
 
 
+def test_price_checks_wait_for_yahoo_queue(monkeypatch):
+    from asset_pipeline import price_refresh, queue
+    from routers import _airs_price_check
+
+    activity = iter((True, False))
+    waits = []
+    monkeypatch.setattr(queue, "is_worker_active", lambda: next(activity))
+    monkeypatch.setattr(S.time, "sleep", waits.append)
+    monkeypatch.setattr(price_refresh, "watched_isins", lambda: [])
+    monkeypatch.setattr(price_refresh, "refresh_stale", lambda **kwargs: {"failed": 0})
+    monkeypatch.setattr(_airs_price_check, "refresh_price_checks", lambda **kwargs: {"saved": 1})
+
+    _, result = S._body_airs_price_checks()
+    assert waits == [15]
+    assert result["saved"] == 1
+
+
+def test_watchdog_recovers_benchmark_shutdown_receipts_only():
+    receipt = {
+        "id": "benchmark_price_slice",
+        "status": "error",
+        "last_summary": {"benchmarks": {"ACWI": {"error": "cannot schedule new futures after interpreter shutdown"}}},
+    }
+    assert S._shutdown_interrupted(receipt)
+    assert not S._shutdown_interrupted(dict(receipt, status="ok"))
+    assert not S._shutdown_interrupted(dict(receipt, id="airs_vermogen_refresh"))
+    assert not S._shutdown_interrupted(dict(receipt, last_summary={"error": "vendor unavailable"}))
+
+
 def test_market_chain_completes_independent_sources_and_reports_failure(monkeypatch):
     from asset_pipeline import queue
     monkeypatch.setattr(queue, "is_worker_active", lambda: False)

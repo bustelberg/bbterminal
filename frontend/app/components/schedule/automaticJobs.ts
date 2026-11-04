@@ -46,6 +46,20 @@ export type JobsPayload = {
   history_error?: string;
 };
 
+export function jobFailure(job: JobRow) {
+  if (job.status !== 'error' && job.last_status !== 'error' && job.last_status !== 'failed') return null;
+  return {
+    id: job.id,
+    label: job.label,
+    status: job.status,
+    last_run_at: job.last_run_at ?? null,
+    last_status: job.last_status ?? null,
+    reason: job.reason,
+    detail: job.last_detail ?? null,
+    summary: job.last_summary ?? null,
+  };
+}
+
 /**
  *  The tone is part of the claim, so it is decided once here rather than per cell.
  *
