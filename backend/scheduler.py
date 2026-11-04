@@ -2234,10 +2234,20 @@ def _body_dashboard_market(ctx=None) -> tuple[str, dict]:
 
 
 def _body_dashboard_freshness(ctx=None) -> tuple[str, dict]:
+    from collections import Counter
+
     from dashboard_daily import freshness
     result = freshness(dashboard_only=True)
     if result["incomplete"] or result["empty_roster"] or result["global_issues"]:
-        _require_complete(f"Dashboard incomplete: {result['incomplete']}/{result['checked']} portfolios; see per-portfolio receipt", result)
+        issues = Counter(issue for account in result["accounts"] for issue in set(account["issues"]))
+        reasons = list(result["global_issues"][:2])
+        if result["empty_roster"]:
+            reasons.insert(0, "No dashboard portfolios found")
+        reasons.extend(f"{issue} ({count} portfolios)" for issue, count in issues.most_common(2))
+        detail = f"Dashboard incomplete: {result['incomplete']}/{result['checked']} portfolios"
+        if reasons:
+            detail += " · " + " · ".join(reasons)
+        _require_complete(detail, result)
     return f"All {result['checked']} dashboard portfolios current", result
 
 

@@ -3943,9 +3943,9 @@ export default function PortfolioAnalysisModal({
       onClick={onClose} role="dialog" aria-modal="true">
       {/* Fixed at 80% of the viewport width AND height; the charts span the full width and the
           drill-down dock opens full-width below them. */}
-      <div className={`relative bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] p-5 ${risk || reportOpen ? 'overflow-hidden' : 'overflow-auto'}`}
+      <div className={`relative bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] p-5 [scrollbar-gutter:stable] ${risk || reportOpen ? 'overflow-hidden' : 'overflow-auto'}`}
         onClick={(e) => e.stopPropagation()}>
-        <div hidden={risk || reportOpen}>
+        <div hidden={risk || reportOpen} className="@container/analyse">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{name}</h3>
@@ -4012,7 +4012,7 @@ export default function PortfolioAnalysisModal({
                 left-alignment bought stillness by giving up the centring; the width reservation
                 below buys both, so the padding that used to hold the block off the left edge is
                 gone with it (it would now just push this right of true centre). */}
-            <div className="flex items-start justify-center gap-8 flex-wrap mb-4">
+            <div className="mb-4 grid min-w-0 grid-cols-[minmax(0,1fr)] items-start justify-items-center gap-8 @[79rem]/analyse:grid-cols-[41rem_minmax(0,1fr)]">
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
@@ -4029,11 +4029,7 @@ export default function PortfolioAnalysisModal({
                   onSelect={isBasket ? undefined : (b) => {
                     setReportOpen(false); setRisk(false); setAssetFilter(b); }} />
               )}
-              {/* Inline-size containment cannot take its width from a hidden Scorecard child.
-                  Keep the same explicit flex basis whether a sleeve is selected or not. The
-                  outer wrapping row then reserves space or stacks the tile below allocation,
-                  including at increased browser zoom, without collapsing the slot to zero. */}
-              <div className="@container/overview grid w-full min-w-0 max-w-full basis-[36rem] flex-1 items-center justify-items-center self-center">
+              <div className="@container/overview grid w-full min-w-0 items-center justify-items-center self-center">
               <div className="col-start-1 row-start-1 w-full min-w-0">
               {selected
                 ? (
