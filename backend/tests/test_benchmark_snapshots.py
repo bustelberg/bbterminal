@@ -36,6 +36,25 @@ def test_acwi_500_boundary_uses_reported_values_and_keeps_zero():
     assert result['coverage'][1]['companies'] == 499
 
 
+def test_acwi_backfill_prefers_a_missing_input_in_a_year_below_the_floor():
+    from routers._acwi_weekly import annual_priorities
+
+    rows = [{'isin': str(i), 'weight_pct': 1, 'fcf': {'2023': 1, '2024': 1},
+             'total_equity': {'2023': 2, '2024': 2},
+             'noncurrent_liabilities': {year: 1 for year in ('2023', '2024')
+                                       if (i, year) != (0, '2023') and (i, year) != (1, '2024')}}
+            for i in range(501)]
+    payloads = {path: {'rows': []} for path in snapshots.INPUTS}
+    payloads['cash-return-inputs']['rows'] = rows
+    payloads['universe-period-caps'] = {'caps': {}}
+    payloads['fundamental-blend-metrics'] = {'metrics': []}
+    snapshot = snapshots.compact('ACWI', 'annual', payloads)
+    snapshot['series']['cash-return-inputs']['croic_reported']['coverage'][0]['companies'] = 499
+    priority, coverage = annual_priorities(payloads, snapshot, {i: {'isin': str(i)} for i in range(501)})
+    assert coverage['cash-return-inputs/croic_reported']['2023'] == 499
+    assert priority[0] > priority[1]
+
+
 def test_background_warm_publishes_once_after_every_endpoint_not_during_critical_warm(monkeypatch):
     async def endpoint(body, request):
         return {'rows': []}

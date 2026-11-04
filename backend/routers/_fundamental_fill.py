@@ -389,7 +389,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                      key_ratios: bool = False,
                      force: bool = False, limit: int = 0, only_due: bool = False,
                      today: date | None = None, receipt: dict | None = None,
-                     best_effort: bool = False) -> str:
+                     best_effort: bool = False, priority: dict[int, float] | None = None) -> str:
     """Fetch the GuruFocus feeds for `ids`, reporting through the job `ctx`. Returns the summary.
 
     `best_effort` is used by automatic benchmark checks: visit every eligible company once,
@@ -510,6 +510,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     # `order_work`: least recently checked first, so a press that is cancelled or capped picks up
     # where the last one stopped instead of re-fetching the same opening slice.
     work = order_work(work)
+    if priority:
+        work.sort(key=lambda company: -priority.get(company["company_id"], 0))
     if limit:
         work = work[:limit]
 

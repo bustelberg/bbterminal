@@ -1798,6 +1798,17 @@ def _body_acwi_weekly_coverage(ctx=None) -> tuple[str, dict]:
         return message, result
 
 
+def _body_acwi_monthly_fundamentals(ctx=None) -> tuple[str, dict]:
+    from index_universe.acwi.weekly_holdings import publication_connection
+    from routers._acwi_weekly import run
+
+    with publication_connection() as conn:
+        if conn is None:
+            return 'ACWI maintenance is already running.', {'skipped': 'another replica holds the lease'}
+        return run(ctx if ctx is not None else _LogCtx(step=_reporter(ctx), label='ACWI monthly'),
+                   reserve=_FUNDAMENTALS_REGION_FLOOR, statements_only=True)
+
+
 def _bootstrap_acwi_holdings() -> None:
     """Catch up the holdings snapshot without running the weekly fundamentals job."""
     from index_universe.acwi.weekly_holdings import needs_bootstrap, publication_connection, refresh
@@ -2519,6 +2530,7 @@ def _register_bodies() -> None:
         "asset_price_refresh": _body_asset_price_refresh,
         "benchmark_fundamentals_fill": _body_benchmark_fundamentals,
         'acwi_weekly_coverage': _body_acwi_weekly_coverage,
+        'acwi_monthly_fundamentals': _body_acwi_monthly_fundamentals,
         "table_size_sample": _body_table_size_sample,
     })
     #  The same late binding, for the same reason — see `_WATCHDOG_STARTERS`. These two are the
@@ -2893,6 +2905,7 @@ def register_scheduler(app) -> None:
         # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
         _register("acwi_weekly_coverage", _fire_acwi_weekly_coverage)
+        _register("acwi_monthly_fundamentals", lambda: _spawn_body("acwi_monthly_fundamentals"))
         # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week
         # overlap and immediately repair a rescale; this Monday slice catches isolated old-bar
         # corrections that leave the recent tail untouched.

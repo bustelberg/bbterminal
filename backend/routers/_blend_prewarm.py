@@ -236,7 +236,7 @@ _BLEND_METRICS = ["price_ps", "eps_nri", "eps_nri_estimate", "revenue", "fcf_ps"
 
 
 async def _warm_one(label: str, cadence: str, gen: int,
-                    endpoints: list[tuple[str, object]] | None = None) -> int:
+                    endpoints: list[tuple[str, object]] | None = None, *, on_publish=None) -> int:
     """Rebuild one (label, cadence). Returns how many endpoints were warmed."""
     from routers.earnings import FundamentalCoverageRequest  # noqa: PLC0415
 
@@ -278,7 +278,9 @@ async def _warm_one(label: str, cadence: str, gen: int,
     if endpoints is None and _generation == gen:
         from routers._benchmark_snapshots import publish  # noqa: PLC0415
         try:
-            await asyncio.to_thread(publish, label, cadence, payloads, started_at)
+            snapshot = await asyncio.to_thread(publish, label, cadence, payloads, started_at)
+            if on_publish:
+                on_publish(payloads, snapshot)
         except Exception as exc:
             _log.warning('[benchmark-snapshot] keeping previous %s/%s result: %s', label, cadence, exc)
     return done

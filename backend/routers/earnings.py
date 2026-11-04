@@ -2560,6 +2560,7 @@ def _blend_rows(rows: list[dict], covered: list[dict],
                         # were absent from the entire chart.
                         "latest_considered": s.get("latest_members"),
                         "latest_period": s.get("latest_period"),
+                        "reporting_by_period": s.get("reporting_by_period", {}),
                         #  Why they are missing, decided where they are dropped. The card has to
                         # explain the count it prints, and the two constructions withhold members
                         # for entirely different reasons — one is a chosen survivorship filter, the

@@ -231,6 +231,16 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              'regional quota reserves, then atomically saves annual and quarterly chart bundles with statistics.',
     ),
     JobSpec(
+        id="acwi_monthly_fundamentals",
+        label="ACWI historical fundamentals backfill",
+        fills="Missing ACWI statements and annual/quarterly chart snapshots",
+        cadence="First Wednesday of each month, 03:00 Amsterdam",
+        trigger={"day": "1-7", "day_of_week": "wed", "hour": 3, "minute": 0, "timezone": "Europe/Amsterdam"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
+        max_age_hours=24 * 35,
+        note="Prioritises years below 500 usable companies, then fills more history within the regional quota reserve.",
+    ),
+    JobSpec(
         id="history_drift_check",
         label="History-drift probe",
         fills="re-fetches metric_data bars a vendor rewrote (splits, free-share attributions)",

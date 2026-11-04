@@ -104,12 +104,8 @@ def weighted_series(rows, caps, label, year_field, value_of):
     return {'points': points, 'coverage': coverage}
 
 
-def compact(label, cadence, payloads):
-    """Convert background-only constituent inputs into chart-sized series for every toggle."""
-    from routers._fundamental_blend import blend_series, quarter_bucket, year_bucket, period_end
-
-    caps = payloads['universe-period-caps'].get('caps', {})
-    specs = {
+def derived_specs():
+    return {
         'margin-inputs': ('revenue', {mode: lambda r, p, c=c: _ratio(r, p, 'fcf', 'revenue', correct=c)
                                     for mode, c in [('reported', False), ('corrected', True)]}),
         'debt-ratio-inputs': ('total_assets', {'default': _debt}),
@@ -126,6 +122,14 @@ def compact(label, cadence, payloads):
                                             for mode, c in [('reported', False), ('corrected', True)]}),
         'dividend-yield-inputs': ('price_ps', {'default': lambda r, p: _ratio(r, p, 'div_ps', 'price_ps')}),
     }
+
+
+def compact(label, cadence, payloads):
+    """Convert background-only constituent inputs into chart-sized series for every toggle."""
+    from routers._fundamental_blend import blend_series, quarter_bucket, year_bucket, period_end
+
+    caps = payloads['universe-period-caps'].get('caps', {})
+    specs = derived_specs()
     series = {}
     for path, (year_field, variants) in specs.items():
         rows = payloads[path]['rows']
@@ -141,10 +145,18 @@ def compact(label, cadence, payloads):
                         **({'min_reporting_companies': 500} if label == 'ACWI' else {})})
     capital = blend_series(members, 'annuals__Income Statement__Revenue',
                            quarter_bucket if cadence == 'quarterly' else year_bucket)
+    capital_coverage = [{'period': point['period'], 'companies': point['reporting_companies'],
+                         'weight_pct': point['covered_pct']} for point in capital['points']]
+    if label == 'ACWI':
+        shown = {point['period'] for point in capital_coverage}
+        capital_coverage.extend(
+            {'period': period, 'companies': count, 'weight_pct': capital['reporting_weight_by_period'][period]}
+            for period, count in capital.get('reporting_by_period', {}).items() if period not in shown
+        )
+        capital_coverage.sort(key=lambda point: point['period'])
     series['cash-return-inputs']['invested_capital'] = {
         'points': [[period_x(p['period']), p['value']] for p in capital['points']],
-        'coverage': [{'period': p['period'], 'companies': p['reporting_companies'], 'weight_pct': p['covered_pct']}
-                     for p in capital['points']]}
+        'coverage': capital_coverage}
     growth = dict(payloads['fundamental-blend-metrics'])
     from routers._chart_statistics import precalculate
     growth['chart_statistics'] = precalculate(growth.get('metrics', []), cadence)

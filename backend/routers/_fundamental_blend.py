@@ -731,7 +731,9 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 "aggregate": True,
                 "fund_members": sum(1 for p in prepared if p["fund"]),
                 "members": len(prepared), "latest_period": latest,
-                "latest_members": cover_n.get(latest, 0) if latest else 0}
+                "latest_members": cover_n.get(latest, 0) if latest else 0,
+                "reporting_by_period": dict(cover_n),
+                "reporting_weight_by_period": {d: round(100 * cover_w[d] / total_w, 2) for d in cover_n}}
     if kind == "level":
         #  A level series is chained from weighted **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
         # Between two drawn points the index moves by the cap-weighted average of what its
@@ -846,7 +848,9 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
     latest = max((period for period in axis if period != "LTM"), default=None)
     return {"kind": kind, "points": out, "covered_pct": round(spanned, 2),
             "members": len(prepared), "latest_period": latest,
-            "latest_members": cover_n.get(latest, 0) if latest else 0}
+            "latest_members": cover_n.get(latest, 0) if latest else 0,
+            "reporting_by_period": dict(cover_n),
+            "reporting_weight_by_period": {d: round(100 * cover_w[d] / total_w, 2) for d in cover_n}}
 
 
 def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> dict | None:
