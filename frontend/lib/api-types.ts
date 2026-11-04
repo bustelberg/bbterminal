@@ -1691,6 +1691,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/overview-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Airs Model Portfolio Overview Bundle */
+        get: operations["airs_model_portfolio_overview_bundle_api_airs_model_portfolios__portfolio_id__overview_bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
         parameters: {
             query?: never;
@@ -13196,8 +13213,6 @@ export interface components {
         };
         /** ModelPortfolioAnalysis */
         ModelPortfolioAnalysis: {
-            /** Overview Prepared At */
-            overview_prepared_at?: string | null;
             /**
              * Allocation
              * @default []
@@ -13314,6 +13329,8 @@ export interface components {
              * @default 0
              */
             opaque_pct?: number;
+            /** Overview Prepared At */
+            overview_prepared_at?: string | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
             realised?: components["schemas"]["RealisedBlock"] | null;
@@ -13901,14 +13918,14 @@ export interface components {
         };
         /** PortfolioAnalysisAxis */
         PortfolioAnalysisAxis: {
-            /** Benchmark Snapshot As Of */
-            benchmark_snapshot_as_of?: string | null;
             /** Attributable Pct */
             attributable_pct?: number | null;
             /** Axis */
             axis: string;
             /** Basis */
             basis?: string | null;
+            /** Benchmark Snapshot As Of */
+            benchmark_snapshot_as_of?: string | null;
             /**
              * Excluded
              * @default []
@@ -18134,6 +18151,46 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_overview_bundle_api_airs_model_portfolios__portfolio_id__overview_bundle_get: {
+        parameters: {
+            query?: {
+                look_through?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioAnalysis"];
+                };
+            };
+            /** @description The prepared overview is pending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

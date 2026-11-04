@@ -492,8 +492,8 @@ export default function ActiveSharePanel({
                       <span className="inline-flex flex-row-reverse items-center gap-1 whitespace-nowrap">
                       {!r.residual && <span className="font-sans">
                         <InfoTip text={r.workbook_weight_pct != null
-                          ? text(`iShares equity snapshot weight: ${r.workbook_weight_pct.toFixed(4)}%. The weight stays fixed until the next snapshot.`,
-                            `Aandelengewicht in de iShares-momentopname: ${r.workbook_weight_pct.toFixed(4)}%. Het gewicht blijft gelijk tot de volgende momentopname.`)
+                          ? text(`iShares snapshot weight: ${r.workbook_weight_pct.toFixed(4)}%. Fixed until the next snapshot.`,
+                            `iShares-weging: ${r.workbook_weight_pct.toFixed(4)}%. Vast tot de volgende momentopname.`)
                           : `${tableBenchmarkLabel}'s weight in ${r.name}.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? ((r.benchmark_pct ?? 0) < .005 ? '<0.01%' : `${(r.benchmark_pct ?? 0).toFixed(2)}%`)

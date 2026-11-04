@@ -11741,6 +11741,17 @@
             "title": "Opaque Pct",
             "type": "number"
           },
+          "overview_prepared_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overview Prepared At"
+          },
           "portfolio_id": {
             "anyOf": [
               {
@@ -13182,13 +13193,6 @@
       },
       "PortfolioAnalysisAxis": {
         "properties": {
-          "benchmark_snapshot_as_of": {
-            "anyOf": [
-              { "type": "string" },
-              { "type": "null" }
-            ],
-            "title": "Benchmark Snapshot As Of"
-          },
           "attributable_pct": {
             "anyOf": [
               {
@@ -13214,6 +13218,17 @@
               }
             ],
             "title": "Basis"
+          },
+          "benchmark_snapshot_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Snapshot As Of"
           },
           "excluded": {
             "default": [],
@@ -22774,6 +22789,61 @@
           }
         },
         "summary": "Airs Model Portfolio Monthly Yahoo Performance",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/overview-bundle": {
+      "get": {
+        "operationId": "airs_model_portfolio_overview_bundle_api_airs_model_portfolios__portfolio_id__overview_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Look Through",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPortfolioAnalysis"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "description": "The prepared overview is pending."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Overview Bundle",
         "tags": [
           "airs"
         ]

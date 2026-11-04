@@ -59,6 +59,12 @@ def annual_priorities(payloads, snapshot, companies, growth_rows=()):
     return priority, coverage
 
 
+def _annual_growth_rows(company_ids):
+    from routers.earnings import _bulk_blend_rows
+
+    return _bulk_blend_rows(company_ids, ['revenue', 'eps_nri', 'fcf_ps', 'shares'], 'annual')
+
+
 def run(ctx, *, reserve, statements_only=False):
     from deps import supabase
     from ingest.api_usage import remaining_budget, _region_for_exchange
@@ -76,8 +82,7 @@ def run(ctx, *, reserve, statements_only=False):
     ctx.progress(0, 0, 'Checking ACWI company coverage…')
     members = _members('ACWI', require_market_cap=False)
     companies = company_rows([m['company_id'] for m in members])
-    from routers.earnings import _bulk_blend_rows
-    growth_rows = _bulk_blend_rows(list(companies), ['revenue', 'eps_nri', 'fcf_ps', 'shares'], 'annual')
+    growth_rows = _annual_growth_rows(list(companies))
     priority, annual_before = {}, {}
 
     def measure(payloads, snapshot):

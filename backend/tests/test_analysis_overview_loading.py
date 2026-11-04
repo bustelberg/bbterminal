@@ -157,6 +157,7 @@ def test_first_page_never_loads_child_ledgers_prices_or_risk(monkeypatch):
 
 
 def test_stocks_charts_skip_returns_ledgers_and_holding_enrichment(monkeypatch):
+    monkeypatch.setattr(analysis, '_acwi_sector_snapshot', lambda *_: (None, {}))
     monkeypatch.setattr(analysis, 'ref_model', lambda _: {'name': 'Test', 'positions_datum': '2025-12-31'})
     monkeypatch.setattr(analysis, 'ref_positions_for', lambda _: [])
     monkeypatch.setattr(analysis, '_country_by_code', lambda: {})

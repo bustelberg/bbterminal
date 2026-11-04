@@ -269,8 +269,8 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
               </div>} />}</td>
               <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.contribution_pp)}`}>{pp(position.contribution_pp)}{position.certificate
                 ? <InfoTip className="ml-2" text={position.attribution_kind
-                  ? text('Calculated from the underlying AIRS monthly report and reconciled to the certificate result.', 'Berekend uit het onderliggende AIRS-maandrapport en aangesloten op het certificaatresultaat.')
-                  : text('An underlying contribution could not be verified for this month.', 'Een onderliggende bijdrage kon voor deze maand niet worden vastgesteld.')} />
+                  ? text('From the AIRS month report, reconciled to the certificate return.', 'Uit het AIRS-maandrapport, aangesloten op het certificaatrendement.')
+                  : text('Contribution unverified this month.', 'Bijdrage deze maand niet geverifieerd.')} />
                 : <InfoTip className="ml-2" wide content={contributionDetails(position)} />}</td>
               <td className="px-3 py-3 text-xs text-fg-subtle">{!position.is_cash && (position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : !position.attribution_kind && unavailable(position.reason))}
                 {!!position.ambiguous_valuation_dates?.length && <span className="block">{position.ambiguous_valuation_dates.map(shortDate).join(', ')}</span>}

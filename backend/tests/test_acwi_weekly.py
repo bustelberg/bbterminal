@@ -20,6 +20,8 @@ def test_weekly_retries_available_companies_preserves_quota_and_publishes_both_c
     monkeypatch.setattr(api_usage, 'remaining_budget', lambda *a: {'usa': 2004})
     monkeypatch.setattr(api_usage, '_region_for_exchange', lambda *a: 'usa')
     monkeypatch.setattr(repair, 'audit', lambda *a: {'present_companies_by_metric': {'revenue': 577}})
+    monkeypatch.setattr(weekly, '_annual_growth_rows', lambda *a: [])
+    monkeypatch.setattr(weekly, 'annual_priorities', lambda *a: ({1: 10}, {'revenue': {'2024': 499}}))
     requested = []
     def fetch(ctx, label, ids, **kw):
         requested.extend(ids)
@@ -28,8 +30,10 @@ def test_weekly_retries_available_companies_preserves_quota_and_publishes_both_c
         kw['receipt'].update(attempted=1, failed=1, loaded=0, calls=1)
     monkeypatch.setattr(fill, 'fill_company_ids', fetch)
     published = []
-    async def build(label, cadence, gen):
+    async def build(label, cadence, gen, *, on_publish=None):
         published.append(cadence)
+        if on_publish:
+            on_publish({}, {})
     monkeypatch.setattr(warm, '_warm_one', build)
     async def seed(label, cadence):
         assert not requested
@@ -43,7 +47,8 @@ def test_weekly_retries_available_companies_preserves_quota_and_publishes_both_c
     assert result['unavailable'] == 3  # Empty answer, unsupported venue, missing identity.
     assert result['recently_checked'] == 1
     assert result['quota_deferred'] == 1
-    assert published == ['annual', 'quarterly']
+    assert published == ['annual', 'annual', 'quarterly']
+    assert result['annual_chart_coverage_before'] == {'revenue': {'2024': 499}}
     assert 'charts saved' in message
 
 
