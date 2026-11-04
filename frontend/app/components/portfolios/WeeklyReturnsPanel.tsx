@@ -271,7 +271,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   }
 
   if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
-  return <div className="flex h-full min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800/30 bg-elevated/30 p-3">
+  return <div className="flex min-w-0 flex-col rounded-xl border border-neutral-800/30 bg-elevated/30 p-3">
     <div className="flex h-20 shrink-0 flex-col items-start gap-2">
       <div className="flex w-full items-start justify-between gap-2">
         <InstrumentPicker options={options} selected={chosen} onSelect={choose} nl={nl} />
@@ -293,7 +293,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
       </div>}
       {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
     </div>
-    <div className="flex min-h-0 flex-1 items-center [&>svg]:h-full [&>svg]:w-full">
+    <div className="flex aspect-[3/1] min-h-40 items-center [&>svg]:h-full [&>svg]:w-full">
       {data ? <ReturnChart data={data} nl={nl} scale={scale} linked={linked} /> : <svg viewBox="0 0 960 320" className="h-full w-full text-fg-subtle" role="img"
         aria-label={nl ? 'Lege rendementsgrafiek' : 'Empty return chart'}>
         <line x1="65" x2="925" y1="142.5" y2="142.5" stroke="currentColor" opacity=".4" />
@@ -332,14 +332,14 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   const scale = Math.max(1, ...[first, second].flatMap((data) =>
     weeklyBars(data?.selected?.weeks ?? []).map((value) => Math.abs(value ?? 0)))) * 1.1;
   if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
-  return <div className="flex h-full min-h-0 flex-col gap-2">
+  return <div className="flex min-w-0 flex-col gap-2">
     <div className="flex h-6 shrink-0 items-center justify-between gap-2 text-xs text-fg-muted">
       <span>{window ? `${day(weekStart(window[0]) < '2026-01-01' ? '2026-01-01' : weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
       {window && <button type="button" className="text-accent-300 hover:underline" onClick={() => onWindow(null)}>{lang === 'nl' ? 'Selectie wissen' : 'Clear selection'}</button>}
     </div>
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2">
+    <div className="flex min-w-0 flex-col gap-2">
       <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} linked={linked} />
-      <div className="flex h-24 w-24 self-center flex-col items-center justify-center gap-1 rounded-xl border border-neutral-800/40 bg-elevated text-center"
+      <div className="flex self-center flex-wrap items-center justify-center gap-2 rounded-xl border border-neutral-800/40 bg-elevated px-4 py-1 text-center"
         title={lang === 'nl'
           ? 'Correlatie van wekelijkse koersrendementen: −1 tegenovergesteld, 0 geen lineair verband, +1 gelijkgericht. Alleen overeenkomende koersdatums; minimaal 3 weken. Volgt de geselecteerde periode.'
           : 'Weekly price-return correlation: −1 opposite, 0 no linear relationship, +1 together. Matching price dates only; at least 3 weeks. Follows the selected period.'}>

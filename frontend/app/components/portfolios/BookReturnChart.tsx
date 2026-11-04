@@ -1,5 +1,7 @@
 'use client';
 
+import { profileBenchmarkLabel, useAnalyseCopy } from './analyseCopy';
+
 /**
  * The book's cumulative return through the year — 0% on 1 January, and what happened since.
  *
@@ -139,6 +141,8 @@ function ReturnDot({ cx, cy, fill, payload }: {
 export default function BookReturnChart(
   {
     portfolioId,
+    name,
+    variant,
     /**
      * Bumped by the modal's caller when a refresh finishes — the SAME counter the modal's own
      * payload effect takes.
@@ -150,12 +154,18 @@ export default function BookReturnChart(
     refreshSeq = 0,
     benchmark,
     benchmarkBlocks = [],
+    benchmarkYtdPct,
     policyWeights,
     series,
-  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null },
+  }: { portfolioId: number; name: string; variant?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; benchmarkYtdPct?: number | null; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null },
 ) {
+  const copy = useAnalyseCopy();
   const [loaded, setData] = useState<BookValueSeries | null>(null);
   const data = series === undefined ? loaded : series;
+  const benchmarkReturn = benchmarkYtdPct === undefined ? data?.benchmark_return_pct : benchmarkYtdPct;
+  const benchmarkName = data?.benchmark_source === 'weighted_etf'
+    ? `${profileBenchmarkLabel(copy.lang, variant)} (YTD) €`
+    : data?.benchmark ?? benchmark;
   const [err, setErr] = useState<string | null>(null);
   const weights = weightedBenchmarkWeights(benchmarkBlocks, policyWeights);
   const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
@@ -275,13 +285,13 @@ export default function BookReturnChart(
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-3">
       <div className="flex items-baseline gap-2 flex-wrap mb-1">
-        <span className="text-[11px] uppercase tracking-wider text-fg-faint">Return YTD</span>
+        <span className="text-[11px] tracking-wider text-fg-faint">{name} (YTD) €</span>
         <span className={`font-mono ${up ? 'text-pos-400' : 'text-neg-400'}`}>
           {pct(data.return_pct)}
         </span>
-        {data.benchmark_return_pct != null && (
+        {benchmarkReturn != null && (
           <span className="font-mono text-[12px]" style={{ color: chartTheme.compare }}>
-            {data.benchmark ?? benchmark} {pct(data.benchmark_return_pct)}
+            {benchmarkName} {pct(benchmarkReturn)}
           </span>
         )}
         {/*  NO VALUE CHIP AND NO SPAN LINE — removed on request (2026-09-01), and NEITHER FACT
@@ -318,7 +328,7 @@ export default function BookReturnChart(
           <YAxis domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
             width={44} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-          <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />}
+          <Tooltip content={<ReturnTooltip benchmark={benchmarkName} />}
             position={{ x: 8, y: 112 }} allowEscapeViewBox={{ y: true }}
             wrapperStyle={{ pointerEvents: 'none', zIndex: 10 }} />
           {/*  THE BASELINE IS DRAWN, not just included in the domain. "Start at 0%" is the whole

@@ -14,12 +14,12 @@ it('uses bundled chart data without another request, including refresh and unava
   const root = createRoot(host);
   const series = { returns: [], reason: 'No AIRS observations yet.' } as unknown as BookValueSeries;
   try {
-    await act(async () => root.render(<BookReturnChart portfolioId={1} benchmark="ACWI" series={series} />));
+    await act(async () => root.render(<BookReturnChart portfolioId={1} name="Bustelberg Neutraal" benchmark="ACWI" series={series} />));
     expect(host.textContent).toContain('No AIRS observations yet.');
-    await act(async () => root.render(<BookReturnChart portfolioId={1} benchmark="ACWI" refreshSeq={1}
+    await act(async () => root.render(<BookReturnChart portfolioId={1} name="Bustelberg Neutraal" benchmark="ACWI" refreshSeq={1}
       series={{ ...series, reason: 'History updated.' }} />));
     expect(host.textContent).toContain('History updated.');
-    await act(async () => root.render(<BookReturnChart portfolioId={1} benchmark="ACWI" series={null} />));
+    await act(async () => root.render(<BookReturnChart portfolioId={1} name="Bustelberg Neutraal" benchmark="ACWI" series={null} />));
     expect(host.textContent).toContain('No return available.');
     expect(apiFetch).not.toHaveBeenCalled();
   } finally {

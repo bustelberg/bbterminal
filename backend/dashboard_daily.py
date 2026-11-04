@@ -122,8 +122,8 @@ def held_company_ids() -> list[tuple[int, str]]:
     return result
 
 
-def prepare_month(account: str, today=None) -> dict:
-    """Rebuild this month's saved report without downloading any AIRS report."""
+def prepare_month(account: str, today=None, *, month: str | None = None, complete_only: bool = False) -> dict:
+    """Build a monthly report from stored AIRS sources."""
     from airs_transacties import ParsedSheet, trades, realised_results, TT, TT_BUY, TT_SELL, COL_FONDS, COL_DATE
     from routers._airs_monthly_report import month_window, _monthly_rows
     from routers._airs_monthly_positions import position_performance
@@ -133,9 +133,9 @@ def prepare_month(account: str, today=None) -> dict:
 
     today = today or datetime.now(ZoneInfo("Europe/Amsterdam")).date()
     # On the first weekend/New Year, the newest completed month can still be the previous one.
-    month = latest_completed_market_date(today)[:7]
+    month = month or latest_completed_market_date(today)[:7]
     start, end, opening = month_window(month, today)
-    if int(month[:4]) < today.year:
+    if int(month[:4]) < today.year and not complete_only:
         closed = (supabase.table("airs_year_archive").select("payload").eq("portefeuille", account)
                   .eq("year", int(month[:4])).eq("kind", "year_end").limit(1).execute().data or [])
         if closed and closed[0]["payload"].get("complete"):
@@ -162,6 +162,7 @@ def prepare_month(account: str, today=None) -> dict:
                     "as_of": mark, "requested_date": boundary,
                     "rows": [{"name": r["holding_name"], "isin": r.get("isin"), "currency": r.get("currency"),
                               "valuation_component": r.get('valuation_component'),
+                              "price_local": r.get("current_price_local"),
                               "quantity": r.get("quantity"), "value_eur": r.get("current_value_eur"),
                               "weight_pct": r.get("airs_weight")} for r in stored if str(r["as_of_date"])[:10] == mark],
                 }}
@@ -169,15 +170,22 @@ def prepare_month(account: str, today=None) -> dict:
                 previous_data = previous.get('data') or {}
                 current_data = sections[key]['data']
                 fields = ('name', 'isin', 'currency', 'quantity', 'value_eur')
-                def signature(records):
-                    return Counter(tuple(record.get(field) for field in fields) for record in records)
-                # An explicitly loaded historical export may have component labels absent
-                # from older daily snapshots. Keep them only for exactly the same valuation.
+                def identity(row):
+                    return tuple(row.get(field) for field in fields)
+
+                counts = Counter(map(identity, current_data['rows']))
+                # Carry forward source metadata only when the dated valuation matches.
+                # A saved quote on a daily row does not replace its component label.
                 if (previous.get('status') == 'ok' and previous_data.get('as_of') == mark
-                        and any(r.get('valuation_component') for r in previous_data.get('rows', []))
-                        and not any(r.get('valuation_component') for r in current_data['rows'])
-                        and signature(previous_data.get('rows', [])) == signature(current_data['rows'])):
-                    sections[key] = previous
+                        and Counter(map(identity, previous_data.get('rows', []))) == counts):
+                    previous_rows = {identity(row): row for row in previous_data.get('rows', [])}
+                    for row in current_data['rows']:
+                        key_fields = identity(row)
+                        if counts[key_fields] != 1:
+                            continue
+                        for field in ('valuation_component', 'price_local'):
+                            if row.get(field) is None:
+                                row[field] = previous_rows[key_fields].get(field)
         else:
             # An existing historical export can supply an opening before we began daily snapshots.
             previous = saved_sections.get(key)
@@ -206,6 +214,10 @@ def prepare_month(account: str, today=None) -> dict:
         }}
     else:
         sections["transactions"] = {"status": "error", "data": None, "message": "Stored transactions do not cover this month"}
+    errors = {key: value.get("message") for key, value in sections.items() if value["status"] == "error"}
+    if complete_only and (errors or not sections["transactions"]["data"]["readable"]):
+        return {"account": account, "end": end,
+                "errors": errors or {"transactions": "Stored transactions could not be read"}}
     positions = position_performance(sections, start, end)
     fetched = datetime.now(timezone.utc).isoformat()
     payload = {"start": start, "end": end, "opening_date": opening, "performance_basis": "year_start",
@@ -215,8 +227,7 @@ def prepare_month(account: str, today=None) -> dict:
         "portefeuille": account, "month": start, "datum_tot": end, "fetched_at": fetched,
         "report": payload, "performance": performance, "performance_basis": "year_start",
     }, on_conflict="portefeuille,month").execute()
-    return {"account": account, "end": end,
-            "errors": {key: value.get("message") for key, value in sections.items() if value["status"] == "error"}}
+    return {"account": account, "end": end, "errors": errors}
 
 
 def freshness(today=None, *, dashboard_only: bool = False) -> dict:

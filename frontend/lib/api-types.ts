@@ -970,6 +970,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Performance Bundle
+         * @description Return the complete Performance bundle, preparing missing AIRS reports first.
+         */
+        get: operations["airs_performance_bundle_api_airs_accounts__portefeuille__performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/return-reconciliation": {
         parameters: {
             query?: never;
@@ -17140,6 +17160,37 @@ export interface operations {
             query: {
                 month: string;
             };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_performance_bundle_api_airs_accounts__portefeuille__performance_get: {
+        parameters: {
+            query?: never;
             header?: never;
             path: {
                 portefeuille: string;

@@ -74,3 +74,24 @@ export function savedContributionCalculation(report: MonthlyReport | null, posit
     opening_date: opening.data.as_of, closing_date: closing.data.as_of,
     trades: trades.map((trade) => ({ date: trade.date, kind: trade.kind, amount_eur: trade.amount_eur! })) };
 }
+
+
+export type PerformanceBundle = {
+  portefeuille: string;
+  current_month: string;
+  available_years: number[];
+  years: Record<string, {
+    months: string[];
+    rows: Record<string, Pick<Performance, 'periode' | 'rendement'>>;
+    weighted_benchmark: NonNullable<MonthlyReport['weighted_benchmark']>;
+    summary: NonNullable<MonthlyReport['year_summary']> & { excess_pp: number | null };
+    warning: string | null;
+    details: Record<string, {
+      needs_refresh: boolean;
+      refresh_reason?: 'missing_report' | 'outdated_report' | 'ambiguous_position' | 'incomplete_report' | 'preparation_failed' | null;
+      benchmark_needs_refresh: boolean;
+      snapshot: (Pick<NonNullable<MonthlyReport['snapshot']>, 'positions' | 'reconciliation'>
+        & { opening_weight_date: string | null }) | null;
+    }>;
+  }>;
+};

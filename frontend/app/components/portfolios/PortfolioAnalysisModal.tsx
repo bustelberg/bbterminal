@@ -33,7 +33,7 @@ import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskBundleBody } from './riskBundleRequest';
 import { prefetchRiskBundle } from './riskBundle';
-import { prefetchPerformanceTiles } from './monthlyReportPrefetch';
+import { prefetchPerformanceBundle } from './monthlyReportPrefetch';
 import AnalyseLoading from './AnalyseLoading';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
@@ -41,7 +41,7 @@ import {
 } from './etfSectorLookThrough';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
-import { useAnalyseCopy } from './analyseCopy';
+import { useAnalyseCopy, profileBenchmarkLabel } from './analyseCopy';
 import { contributionReconciliation } from './contributionReconciliation';
 import {
   MoneyWeightedCashflowCalculation, moneyWeightedWorked,
@@ -151,7 +151,9 @@ function isScorecardBlock(value: unknown): value is ScorecardBlock {
 
 /** The headline band: return + excess (both sources), so the "did it earn its excess?" read is
  *  answered before scrolling. */
-function Scorecard({ returns, benchmark, onReload, fillWidth = false }: {
+function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = false }: {
+  name: string;
+  variant?: string | null;
   returns?: ModelPortfolioAnalysis['returns'];
   benchmark: string;
   fillWidth?: boolean;
@@ -316,7 +318,7 @@ function Scorecard({ returns, benchmark, onReload, fillWidth = false }: {
           an arithmetic nobody performed and invites the reader to look for a step that does not
           exist. The Strategy side genuinely IS a formula (Σ weightᵢ × returnᵢ over our own
           yfinance closes), so the two cannot share a tag. */}
-      <Chip label={copy.score.returnYtd} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
+      <Chip label={`${name} (YTD) €`} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
         prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of}
           kind={r?.source === 'book' ? undefined : 'formula'}
           what={copy.score.portfolioWhat} note={copy.score.portfolioNote}
@@ -328,7 +330,7 @@ function Scorecard({ returns, benchmark, onReload, fillWidth = false }: {
           price. Handing one object's fetch time to another is the exact hazard that provider
           documents; `fetchedAt={null}` cannot express it, because `??` treats null as "inherit". */}
       <ProvenanceFetchedAt at={undefined}>
-        <Chip label={blocks.length ? copy.score.weightedBenchmark : copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
+        <Chip label={blocks.length ? `${profileBenchmarkLabel(copy.lang, variant)} (YTD) €` : copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
           valueClass={tone(r?.benchmark_ytd_pct)}
           prov={<Provenance source={blocks.length ? 'derived' : bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind={blocks.length ? undefined : 'formula'}
             what={blocks.length ? 'Weighted stock-and-bond benchmark return for this risk profile.' : bp.what}
@@ -3867,7 +3869,7 @@ export default function PortfolioAnalysisModal({
     let second = 0;
     const first = window.requestAnimationFrame(() => {
       second = window.requestAnimationFrame(() => {
-        prefetchPerformanceTiles(performanceAccount);
+        prefetchPerformanceBundle(performanceAccount);
         void import('./MonthlyReportPanel').catch(() => undefined);
       });
     });
@@ -4030,7 +4032,7 @@ export default function PortfolioAnalysisModal({
                    Performance and Risk stay to the right of the scorecard. */
                 : (
                   <div className="grid w-full grid-cols-1 items-start gap-x-2 gap-y-3 self-center min-w-0 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] @[44rem]/overview:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
-                    <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
+                    <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} name={name} variant={data.variant}
                       onReload={() => setReloadSeq((n) => n + 1)} fillWidth />
                         <nav aria-label={copy.lang === 'nl' ? 'Verdieping' : 'Further analysis'}
                           className="col-start-1 row-start-2 flex w-max max-w-full min-h-11 items-stretch justify-self-end self-stretch gap-2 sm:col-span-5 @[44rem]/overview:col-span-1 @[44rem]/overview:col-start-6 @[44rem]/overview:row-start-1">
@@ -4068,9 +4070,10 @@ export default function PortfolioAnalysisModal({
                     {!isBasket && id != null && (
                       <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] sm:col-span-3 @[44rem]/overview:row-start-2">
                         {/* Reserve the chart footprint alongside the scorecard. */}
-                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
+                        <BookReturnChart portfolioId={id} name={name} variant={data.variant} refreshSeq={refreshSeq}
                           series={source === 'book' ? ((data.return_series as BookValueSeries | null | undefined) ?? null) : undefined}
                           benchmark={benchmark}
+                          benchmarkYtdPct={data.returns?.benchmark_source === 'weighted_etf' ? data.returns.benchmark_ytd_pct : undefined}
                           policyWeights={data.risk_profile_policy}
                           benchmarkBlocks={(data.returns?.block_returns ?? []).filter(isScorecardBlock)} />
                       </div>
@@ -4294,11 +4297,7 @@ export default function PortfolioAnalysisModal({
             ← Back to analysis
           </button>
           <div className="min-h-0 flex-1 overflow-auto">
-          <MonthlyReportPanel portefeuille={reportAccount ?? data.book_portefeuille} name={name}
-            overviewReturns={(reportAccount ?? data.book_portefeuille) === data.book_portefeuille ? {
-              portfolio: data.returns?.portfolio_ytd_pct, benchmark: data.returns?.benchmark_ytd_pct,
-              asOf: data.returns?.portfolio_as_of, from: data.returns?.ytd_from,
-            } : undefined} />
+          <MonthlyReportPanel portefeuille={reportAccount ?? data.book_portefeuille} name={name} variant={data.variant} />
           </div>
         </div>
       )}

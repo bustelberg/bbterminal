@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import calendar
 import logging
+import threading
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,7 @@ from fastapi import HTTPException
 from deps import supabase
 
 log = logging.getLogger(__name__)
+_PREPARATION_LOCKS = tuple(threading.Lock() for _ in range(32))
 
 
 def month_window(month: str, today: date | None = None) -> tuple[str, str, str]:
@@ -137,7 +139,55 @@ def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
     return result
 
 
-def read_report(portefeuille: str, month: str, *, include_details: bool = True) -> dict:
+def _enrich_snapshot(bundle, start, month, standard_months):
+    override = None
+    # Enrich older cached bundles from their saved AIRS sources, without a new scan.
+    if bundle and "positions" in bundle.get("report", {}):
+        from routers._airs_monthly_positions import position_performance
+        snapshot = bundle["report"]
+        snapshot["positions"] = position_performance(snapshot.get("sections", {}), start, str(bundle["datum_tot"])[:10])
+        from routers._airs_monthly_reconciliation import reconcile_positions
+        canonical = standard_months.get(month)
+        if canonical and str(canonical.get('periode', ''))[:10] == str(bundle['datum_tot'])[:10]:
+            snapshot['sections']['performance'] = {'status': 'ok', 'data': canonical}
+        elif snapshot.get('performance_basis') == 'year_start':
+            section = snapshot.get('sections', {}).get('performance', {})
+            canonical = section.get('data') if section.get('status') == 'ok' else None
+            override = canonical
+        else:
+            canonical = None
+        snapshot['reconciliation'] = reconcile_positions(snapshot.get('sections', {}), canonical, snapshot['positions'])
+    has_errors = bool(bundle and ("positions" not in bundle.get("report", {}) or any(s.get("status") == "error" for s in
+                      bundle.get("report", {}).get("sections", {}).values())))
+    # Earlier bundles discarded the AIRS component label. Offer a dated re-read when
+    # those source rows cannot safely be matched; a new calculation cannot recreate it.
+    if bundle:
+        has_errors = has_errors or any(row.get('reason') == 'ambiguous_position'
+                                      for row in bundle.get('report', {}).get('positions', []))
+        sections = bundle.get("report", {}).get("sections", {})
+        has_errors = has_errors or any((sections.get(key) or {}).get("status") == "no_data"
+                                      for key in ("opening", "closing"))
+        transactions = (sections.get("transactions") or {}).get("data")
+        has_errors = has_errors or (transactions is not None and not transactions.get("readable"))
+    return override, has_errors
+
+
+def _available_years(portefeuille: str, year: int) -> list[int]:
+    years = {year, datetime.now(ZoneInfo("Europe/Amsterdam")).year}
+    for table, column in (("airs_performance", "periode"), ("airs_monthly_report", "month"), ("airs_year_archive", "year")):
+        offset = 0
+        while True:
+            page = (supabase.table(table).select(column).eq("portefeuille", portefeuille)
+                    .order(column).range(offset, offset + 999).execute().data or [])
+            years.update(int(str(row[column])[:4]) for row in page if row.get(column))
+            if len(page) < 1000:
+                break
+            offset += 1000
+    return sorted(years, reverse=True)
+
+
+def read_report(portefeuille: str, month: str, *, include_details: bool = True,
+                bundled: bool = False) -> dict:
     try:
         start, end, opening = month_window(month)
     except HTTPException as exc:
@@ -152,15 +202,19 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
         start = month + "-01"
         opening = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
         end = opening
-    _account(portefeuille)
+    if not bundled:
+        _account(portefeuille)
     months = _monthly_rows(portefeuille, int(month[:4]))
     standard_months = {row['month']: row for row in months}
     annual_months = dict(standard_months)
     warning = "This month has no completed valuation date yet." if end < start else None
     try:
-        # The year strip reads only small performance observations, not twelve
-        # complete holdings/journal/transaction bundles on every month click.
-        cached = (supabase.table("airs_monthly_report").select("month,performance,performance_basis")
+        # Keep legacy month reads small. The tab bundle reads each year's
+        # stored source reports together and projects them to display data.
+        columns = "month,performance,performance_basis"
+        if bundled:
+            columns += ",report,datum_tot"
+        cached = (supabase.table("airs_monthly_report").select(columns)
                   .eq("portefeuille", portefeuille).gte("month", f"{month[:4]}-01-01")
                   .lte("month", f"{month[:4]}-12-31").order("month")
                   .execute().data or [])
@@ -175,61 +229,37 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
     by_month = {row["month"]: row for row in months}
     for stored in cached:
         key = str(stored["month"])[:7]
-        if stored.get("performance"):
+        data = stored.get("performance")
+        basis = stored.get("performance_basis")
+        if bundled and not data:
+            snapshot = stored.get("report") or {}
+            section = snapshot.get("sections", {}).get("performance", {})
+            if snapshot.get("performance_basis") == "year_start" and section.get("status") == "ok":
+                data, basis = section.get("data"), "year_start"
+        if data:
             existing = by_month.get(key)
-            data = stored["performance"]
             annual_previous = annual_months.get(key)
-            if stored.get("performance_basis") == "year_start" and (not annual_previous
+            if basis == "year_start" and (not annual_previous
                     or str(data.get("periode", "")) > str(annual_previous.get("periode", ""))):
                 annual_months[key] = {"month": key, **data}
             # Custom-start ATT reports reset opening capital; do not let their
             # returns replace months from the canonical year-start AIRS report.
-            if not existing or (stored.get("performance_basis") == "year_start"
+            if not existing or (basis == "year_start"
                                 and str(data.get("periode", "")) > str(existing.get("periode", ""))):
                 by_month[key] = {"month": key, **data}
     months = [by_month[key] for key in sorted(by_month)]
     bundle = selected[0] if selected else None
-    # Enrich older cached bundles from their saved AIRS sources, without a new scan.
-    if bundle and "positions" in bundle.get("report", {}):
-        from routers._airs_monthly_positions import position_performance
-        snapshot = bundle["report"]
-        snapshot["positions"] = position_performance(snapshot.get("sections", {}), start, str(bundle["datum_tot"])[:10])
-        from routers._airs_monthly_reconciliation import reconcile_positions
-        canonical = standard_months.get(month)
-        if canonical and str(canonical.get('periode', ''))[:10] == str(bundle['datum_tot'])[:10]:
-            snapshot['sections']['performance'] = {'status': 'ok', 'data': canonical}
-        elif snapshot.get('performance_basis') == 'year_start':
-            section = snapshot.get('sections', {}).get('performance', {})
-            canonical = section.get('data') if section.get('status') == 'ok' else None
-            if canonical:
-                by_month[month] = {'month': month, **canonical}
-                annual_months[month] = {'month': month, **canonical}
-                months = [by_month[key] for key in sorted(by_month)]
-        else:
-            canonical = None
-        snapshot['reconciliation'] = reconcile_positions(snapshot.get('sections', {}), canonical, snapshot['positions'])
-    has_errors = bool(bundle and ("positions" not in bundle.get("report", {}) or any(s.get("status") == "error" for s in
-                      bundle.get("report", {}).get("sections", {}).values())))
-    # Earlier bundles discarded the AIRS component label. Offer a dated re-read when
-    # those source rows cannot safely be matched; a new calculation cannot recreate it.
-    if bundle:
-        has_errors = has_errors or any(row.get('reason') == 'ambiguous_position'
-                                      for row in bundle.get('report', {}).get('positions', []))
-    years = {int(month[:4]), datetime.now(ZoneInfo("Europe/Amsterdam")).year}
-    for table, column in (("airs_performance", "periode"), ("airs_monthly_report", "month"), ("airs_year_archive", "year")):
-        offset = 0
-        while True:
-            page = (supabase.table(table).select(column).eq("portefeuille", portefeuille)
-                    .order(column).range(offset, offset + 999).execute().data or [])
-            years.update(int(str(row[column])[:4]) for row in page if row.get(column))
-            if len(page) < 1000:
-                break
-            offset += 1000
+    override, has_errors = _enrich_snapshot(bundle, start, month, standard_months)
+    if override:
+        by_month[month] = {"month": month, **override}
+        annual_months[month] = by_month[month]
+        months = [by_month[key] for key in sorted(by_month)]
     from routers._airs_value_series import _return_series
     points, anchor = _return_series([annual_months[key] for key in sorted(annual_months)], {}, {})
     closed = (supabase.table("airs_year_archive").select("payload").eq("portefeuille", portefeuille)
               .eq("year", int(month[:4])).eq("kind", "year_end").limit(1).execute().data or [])
     finalised = bool(closed and closed[0]["payload"].get("complete"))
+    benchmark = {}
     summary = {"return_pct": None, "benchmark_pct": None, "start": None, "end": None}
     if points and anchor:
         last = points[-1]
@@ -243,9 +273,52 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
     from routers._airs_portfolio_variant import portfolio_variant
     from routers._airs_portfolio_analysis import _weighted_benchmark_profiles
     benchmark_expected = bool(_weighted_benchmark_profiles().get(portfolio_variant(portefeuille) or ''))
+    if bundled:
+        if benchmark and summary["start"][:7] == summary["end"][:7]:
+            weighted_benchmark[summary["end"][:7]] = benchmark
+        today = datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m")
+        limit = int(today[5:]) if month[:4] == today[:4] else 12
+        keys = [f"{month[:4]}-{number:02d}" for number in range(1, limit + 1)]
+        stored_by_month = {str(row["month"])[:7]: row for row in cached if row.get("report")}
+        details = {}
+        for key in keys:
+            stored = stored_by_month.get(key)
+            snapshot = None
+            refresh_reason = "missing_report"
+            if stored:
+                _, errors = _enrich_snapshot(stored, key + "-01", key, standard_months)
+                source = stored["report"]
+                snapshot = {
+                    "positions": source.get("positions"),
+                    "reconciliation": source.get("reconciliation"),
+                    "opening_weight_date": ((source.get("sections", {}).get("opening") or {}).get("data") or {}).get("as_of"),
+                }
+                cutoff = end if key == month else month_window(key)[1]
+                if any(row.get("reason") == "ambiguous_position" for row in snapshot["positions"] or []):
+                    refresh_reason = "ambiguous_position"
+                elif errors:
+                    refresh_reason = "incomplete_report"
+                elif str(stored["datum_tot"])[:10] != cutoff:
+                    refresh_reason = "outdated_report"
+                else:
+                    refresh_reason = None
+            details[key] = {
+                "snapshot": snapshot, "needs_refresh": refresh_reason is not None, "refresh_reason": refresh_reason,
+                "benchmark_needs_refresh": benchmark_expected and key in by_month and key not in weighted_benchmark,
+            }
+        portfolio, reference = summary["return_pct"], summary["benchmark_pct"]
+        summary["excess_pp"] = (round(portfolio, 2) - round(reference, 2)
+                                if portfolio is not None and reference is not None else None)
+        return {
+            "months": keys, "rows": {key: {"periode": row.get("periode"), "rendement": row.get("rendement")}
+                                     for key, row in by_month.items()},
+            "details": details, "weighted_benchmark": weighted_benchmark,
+            "summary": {**summary, "complete": finalised}, "warning": warning,
+        }
     benchmark_missing = benchmark_expected and any(row['month'] == month for row in months) and month not in weighted_benchmark
     return {
-        "available_years": sorted(years, reverse=True), "year_summary": {**summary, "complete": finalised},
+        "available_years": _available_years(portefeuille, int(month[:4])),
+        "year_summary": {**summary, "complete": finalised},
         "portefeuille": portefeuille, "month": month, "start": start,
         "end": end, "opening_date": opening, "months": months, "weighted_benchmark": weighted_benchmark,
         "benchmark_needs_refresh": benchmark_missing,
@@ -254,6 +327,64 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
         "needs_refresh": not bundle or str(bundle["datum_tot"])[:10] != end or has_errors,
         "warning": warning,
     }
+
+
+def read_performance(portefeuille: str) -> dict:
+    _account(portefeuille)
+    today = datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m")
+    years = [year for year in _available_years(portefeuille, int(today[:4])) if year <= int(today[:4])]
+    return {
+        "portefeuille": portefeuille,
+        "current_month": today,
+        "available_years": years,
+        "years": {
+            str(year): read_report(portefeuille, today if str(year) == today[:4] else f"{year}-12",
+                                   include_details=False, bundled=True)
+            for year in years
+        },
+    }
+
+
+class _PerformancePreparation:
+    """The Performance request has no job stream; AIRS still uses the same collector."""
+
+    def check(self) -> None:
+        pass
+
+    def progress(self, done: int, total: int, message: str) -> None:
+        pass
+
+
+def prepare_performance(portefeuille: str) -> dict:
+    """Return positions in the initial bundle, repairing missing reports before responding."""
+    from dashboard_daily import prepare_month
+
+    with _PREPARATION_LOCKS[hash(portefeuille) % len(_PREPARATION_LOCKS)]:
+        bundle = read_performance(portefeuille)
+        months = {
+            month: year["details"][month]["refresh_reason"]
+            for year in bundle["years"].values() if not year["warning"]
+            for month in reversed(year["months"])
+            if year["rows"].get(month, {}).get("rendement") is not None
+            and year["details"][month]["refresh_reason"] in ("missing_report", "incomplete_report", "ambiguous_position")
+        }
+        if not months:
+            return bundle
+
+        for month, reason in months.items():
+            try:
+                # Reusing the same saved valuation cannot restore a lost AIRS component label.
+                if reason == "ambiguous_position" or prepare_month(portefeuille, month=month, complete_only=True)["errors"]:
+                    collect_report(portefeuille, month, _PerformancePreparation())
+            except Exception:
+                log.exception("[monthly-report] could not prepare %s %s", portefeuille, month)
+
+        bundle = read_performance(portefeuille)
+        for month in months:
+            details = bundle["years"][month[:4]]["details"][month]
+            if details["refresh_reason"] in ("missing_report", "incomplete_report"):
+                details["refresh_reason"] = "preparation_failed"
+        return bundle
 
 
 def collect_report(portefeuille: str, month: str, ctx) -> str:

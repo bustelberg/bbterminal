@@ -4,27 +4,29 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import { readGeneration } from '../../../lib/readCache';
-import type { MonthlyReport } from './monthlyReport';
+import type { PerformanceBundle } from './monthlyReport';
 
-export const currentPerformanceMonth = () => new Intl.DateTimeFormat('sv-SE', {
-  timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit',
-}).format(new Date());
-const key = (account: string, month: string, revision: number) => `performance-tiles|${account}|${month}|${readGeneration()}|${revision}`;
+const revisions = new Map<string, number>();
+const key = (account: string) => `performance-bundle|${account}|${readGeneration()}|${revisions.get(account) ?? 0}`;
 
-export function readPerformanceTiles(account: string, month: string, revision = 0): MonthlyReport | null {
-  return readPrefetchedAnalysis<MonthlyReport>(key(account, month, revision)) ?? null;
+export function invalidatePerformanceBundle(account: string): void {
+  revisions.set(account, (revisions.get(account) ?? 0) + 1);
 }
 
-export function loadPerformanceTiles(account: string, month: string, revision = 0): Promise<MonthlyReport> {
-  return loadPrefetchedAnalysis(key(account, month, revision), async () => {
-    const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(account)}/monthly-report?month=${month}&include_details=false`,
+export function readPerformanceBundle(account: string): PerformanceBundle | null {
+  return readPrefetchedAnalysis<PerformanceBundle>(key(account)) ?? null;
+}
+
+export function loadPerformanceBundle(account: string): Promise<PerformanceBundle> {
+  return loadPrefetchedAnalysis(key(account), async () => {
+    const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(account)}/performance`,
       { noReadCache: true, cache: 'no-store' });
     const body = await response.json();
     if (!response.ok) throw new Error(body.detail ?? `HTTP ${response.status}`);
-    return body as MonthlyReport;
+    return body as PerformanceBundle;
   });
 }
 
-export function prefetchPerformanceTiles(account: string): void {
-  void loadPerformanceTiles(account, currentPerformanceMonth()).catch(() => undefined);
+export function prefetchPerformanceBundle(account: string): void {
+  void loadPerformanceBundle(account).catch(() => undefined);
 }

@@ -240,6 +240,8 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
             "end_date": series.get("as_of"),
             "end_price": series.get("end_price"),
             "currency": series.get("currency"),
+            "fx_start": series.get("fx_start"),
+            "fx_end": series.get("fx_end"),
             "return_pct": series.get("return_pct"),
         } for name, series in sleeves.items()],
     }

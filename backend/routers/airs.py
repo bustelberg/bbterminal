@@ -1731,6 +1731,31 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
         account = result.get('book_portefeuille')
         series = (await asyncio.to_thread(value_series, account, benchmark, result.get('risk_profile_policy'), returns_only=True)
                   if account else {'returns': [], 'reason': 'No AIRS portfolio is linked.'})
+        score = result.get('returns')
+        if score is not None and series.get('benchmark_source') == 'weighted_etf':
+            # The scorecard and chart share the benchmark sampled at the AIRS cutoff.
+            series = dict(series)
+            benchmark_ytd = series.pop('benchmark_return_pct', None)
+            portfolio_ytd = score.get('portfolio_ytd_pct')
+            components = {row['name']: row for row in series.get('benchmark_components', [])}
+            fields = {
+                'return_pct': 'benchmark_return_pct', 'ticker': 'benchmark_ticker',
+                'start_date': 'benchmark_start_date', 'start_price': 'benchmark_start_value',
+                'end_date': 'benchmark_end_date', 'end_price': 'benchmark_end_value',
+                'currency': 'benchmark_currency', 'fx_start': 'benchmark_fx_start', 'fx_end': 'benchmark_fx_end',
+            }
+            blocks = []
+            for block in score.get('block_returns') or []:
+                component = components.get(block['bucket'])
+                blocks.append({**block, **{target: (component or {}).get(field) for field, target in fields.items()}})
+            result = {**result, 'returns': {
+                **score,
+                'benchmark_ytd_pct': benchmark_ytd,
+                'benchmark_ytd_as_of': series.get('benchmark_as_of'),
+                'benchmark_source': 'weighted_etf',
+                'block_returns': blocks,
+                'ytd_excess_pct': portfolio_ytd - benchmark_ytd if portfolio_ytd is not None and benchmark_ytd is not None else None,
+            }}
         result = {**result, 'return_series': series}
     return result
 
@@ -4024,6 +4049,13 @@ async def airs_vermogen_refresh(force: bool = False):
 
 class ForcePriceChecksRequest(BaseModel):
     accounts: list[str] = Field(min_length=1, max_length=200)
+
+
+@router.get('/api/airs/accounts/{portefeuille}/performance')
+async def airs_performance_bundle(portefeuille: str):
+    """Return the complete Performance bundle, preparing missing AIRS reports first."""
+    from routers._airs_monthly_report import prepare_performance
+    return await asyncio.to_thread(prepare_performance, portefeuille)
 
 
 @router.get('/api/airs/accounts/{portefeuille}/monthly-report')

@@ -21110,6 +21110,47 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/performance": {
+      "get": {
+        "description": "Return the complete Performance bundle, preparing missing AIRS reports first.",
+        "operationId": "airs_performance_bundle_api_airs_accounts__portefeuille__performance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Performance Bundle",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts/{portefeuille}/return-reconciliation": {
       "get": {
         "description": "Why this book's own YTD is not the YTD its open positions add up to.\n\nReads both sides from the loaders the other panels already use \u2014 `_year_perf` for the book,\n`account_holdings` for the positions \u2014 so the reconciliation cannot quietly disagree with\neither of the figures it is reconciling.",

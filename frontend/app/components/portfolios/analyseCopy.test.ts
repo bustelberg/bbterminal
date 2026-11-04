@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ANALYSE_COPY } from './analyseCopy';
+import { profileBenchmarkLabel, ANALYSE_COPY } from './analyseCopy';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { benchmarkProvenance } from './benchmarkSourceNote';
@@ -63,8 +63,12 @@ describe('Analyse primary-view copy', () => {
   });
 
   it('translates the weighted benchmark scorecard caption', () => {
-    expect(ANALYSE_COPY.en.score.weightedBenchmark).toBe('Weighted benchmark return (YTD) €');
-    expect(ANALYSE_COPY.nl.score.weightedBenchmark).toBe('Gewogen benchmarkrendement (YTD) €');
+    expect(profileBenchmarkLabel('en', 'Neutraal')).toBe('Neutral benchmark');
+    expect(profileBenchmarkLabel('nl', 'Neutraal')).toBe('Neutrale benchmark');
+    expect(profileBenchmarkLabel('nl', 'Offensief')).toBe('Offensieve benchmark');
+    expect(profileBenchmarkLabel('nl', 'Beperkt Offensief')).toBe('Beperkt offensieve benchmark');
+    expect(profileBenchmarkLabel('nl', 'Defensief')).toBe('Defensieve benchmark');
+    expect(profileBenchmarkLabel('nl', null)).toBe('Gewogen benchmark');
   });
 
   it('keeps primary-view prose out of the component literals', () => {

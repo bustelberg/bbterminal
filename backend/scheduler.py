@@ -2189,6 +2189,7 @@ def _body_dashboard_freshness(ctx=None) -> tuple[str, dict]:
 
 def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     from dashboard_daily import prepare_month
+    from routers._airs_monthly_report import collect_report
     from airs_history import finalise_previous_year
     from routers._airs_accounts import list_accounts
     from routers._airs_price_check import refresh_price_checks
@@ -2220,6 +2221,7 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     if stop():
         raise _Cancelled('post-AIRS price checks cancelled; completed comparisons were saved')
     summary["monthly"] = []
+    monthly_ctx = ctx if ctx is not None else _LogCtx(cancelled=stop, step=_reporter(ctx), label="Monthly AIRS reports")
     for index, account in enumerate(accounts):
         if stop():
             raise _Cancelled("post-AIRS preparation cancelled")
@@ -2228,7 +2230,12 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
             result = prepare_month(account)
             summary["monthly"].append(result)
             if result["errors"]:
-                failures[account] = result["errors"]
+                # Stored daily snapshots can lack the month-opening valuation.
+                # Fetch the dated reports after the regular AIRS scan has finished.
+                result["airs_download"] = collect_report(account, result["end"][:7], monthly_ctx)
+                result["errors"] = {}
+        except _Cancelled:
+            raise
         except Exception as exc:
             failures[account] = str(exc)
     try:

@@ -30,7 +30,7 @@ const en = {
     loadError: 'The composition could not be loaded.' },
   bucket: (name: string) => name,
   score: {
-    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, weightedBenchmark: 'Weighted benchmark return (YTD) €', excess: 'Excess',
+    versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, excess: 'Excess',
     portfolioWhat: 'What this portfolio returned year to date, in EUR.', portfolioNote: "the portfolio's return, year to date",
     /**  THE CAVEAT ONLY. `where` names AIRS Rendementen (ATT) and `note` names the field, so
      *  repeating both here was two thirds of a sentence the reader had already had — and it read
@@ -228,7 +228,7 @@ const en = {
 
 type Widen<T> = T extends (...args: infer A) => unknown ? (...args: A) => string
   : T extends string ? string : { -readonly [K in keyof T]: Widen<T[K]> };
-export type AnalyseCopy = Widen<typeof en>;
+export type AnalyseCopy = Widen<typeof en> & { lang: Lang };
 
 const nl: AnalyseCopy = {
   lang: 'nl',
@@ -256,7 +256,7 @@ const nl: AnalyseCopy = {
   bucket: (name) => (({ Stocks: 'Aandelen', Bonds: 'Obligaties', Alternatives: 'Alternatieven', Cash: 'Liquiditeiten',
     Unclassified: 'Niet geclassificeerd' } as Record<string, string>)[name] ?? name),
   score: {
-    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} (YTD) €`, weightedBenchmark: 'Gewogen benchmarkrendement (YTD) €', excess: 'Meerrendement',
+    versusReturn: (benchmark) => `vs. rendement ${benchmark} (YTD) €`, excess: 'Meerrendement',
     portfolioWhat: 'Wat deze portefeuille sinds het begin van het jaar in euro heeft gerendeerd.', portfolioNote: 'het rendement van de portefeuille sinds het begin van het jaar',
     portfolioHowBook: 'Houdt rekening met stortingen en onttrekkingen en bevat inkomsten, over het kalenderjaar — een storting vleit dit cijfer dus niet.',
     portfolioHowModel: 'Σ(gewichtᵢ × rendementᵢ) over de posities van het model. Elke positie gebruikt yfinance-slotkoersen en wordt op elke datum tegen de eigen koers naar EUR omgerekend, zodat het valuta-effect is inbegrepen. Koersrendement: dividenden zijn uitgesloten.',
@@ -433,6 +433,18 @@ const nl: AnalyseCopy = {
     .replace('Both sides are valued on the same date, so this is genuinely unexplained by the positions — a leg is missing.', 'Beide zijden zijn op dezelfde datum gewaardeerd; het verschil wordt dus werkelijk niet door de posities verklaard — er ontbreekt een component.')
     .replace('This model portfolio is not paired with an AIRS book, so there are no valued holdings to show.', 'Deze modelportefeuille is niet aan een AIRS-boek gekoppeld; er zijn daarom geen gewaardeerde posities om te tonen.'),
 };
+
+const benchmarkProfiles: Record<string, Record<Lang, string>> = {
+  Offensief: { nl: 'Offensieve benchmark', en: 'Aggressive benchmark' },
+  'Beperkt Offensief': { nl: 'Beperkt offensieve benchmark', en: 'Moderately aggressive benchmark' },
+  Neutraal: { nl: 'Neutrale benchmark', en: 'Neutral benchmark' },
+  Defensief: { nl: 'Defensieve benchmark', en: 'Defensive benchmark' },
+};
+
+export function profileBenchmarkLabel(lang: Lang, variant?: string | null): string {
+  return (variant ? benchmarkProfiles[variant]?.[lang] : undefined)
+    ?? (lang === 'nl' ? 'Gewogen benchmark' : 'Weighted benchmark');
+}
 
 export const ANALYSE_COPY: Record<Lang, AnalyseCopy> = { en, nl };
 

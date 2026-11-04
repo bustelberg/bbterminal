@@ -31,17 +31,25 @@ def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
     if not isins or any(not r.get('isin') for r in security):
         return None, 'ambiguous_position'
     first = security[0]
-    # Some AIRS exports repeat the same quantity/quote on an unlabelled
-    # supplementary valuation line. Identify the principal by its reported quote,
-    # not by value ranking. EUR avoids guessing FX; /100 supports percentage quotes.
-    price, quantity = first.get('price_local'), first.get('quantity')
-    if (currencies == {'EUR'} and _positive(price) and _positive(quantity)
-            and all(r.get('price_local') == price and r.get('quantity') == quantity for r in security)):
-        verified = [r for r in security if isinstance(r.get('value_eur'), (int, float))
-                    and any(math.isclose(r['value_eur'], quantity * price * factor, rel_tol=0, abs_tol=.011)
-                            for factor in (1, .01))]
+    # An unlabelled supplementary line can repeat the principal quantity and
+    # quote without matching that quote's valuation. A line without either
+    # quantity or quote cannot provide an independent security mark.
+    if all(str(r.get('currency') or '').strip().upper() == 'EUR' for r in security):
+        verified = []
+        for record in security:
+            price, quantity, value = (record.get(key) for key in ('price_local', 'quantity', 'value_eur'))
+            if (_positive(price) and _positive(quantity) and _positive(value)
+                    and any(math.isclose(value, quantity * price * factor, rel_tol=0, abs_tol=.011)
+                            for factor in (1, .01))):
+                verified.append(record)
         if len(verified) == 1:
-            return dict(verified[0]), None
+            principal = verified[0]
+            if all(
+                (r.get('quantity') == principal['quantity'] and r.get('price_local') == principal['price_local'])
+                or (r.get('quantity') in (None, 0) and r.get('price_local') in (None, 0))
+                for r in security
+            ):
+                return dict(principal), None
     for record in security:
         value, quantity = record.get('value_eur'), record.get('quantity')
         if not _positive(quantity) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
@@ -53,12 +61,15 @@ def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
             'quantity': sum(r['quantity'] for r in security)}, None
 
 
-def position_performance(sections: dict, start: str, end: str) -> list[dict]:
-    def data(key):
-        section = sections.get(key) or {}
-        return section.get("data") if section.get("status") == "ok" else None
+def section_data(sections: dict, key: str) -> dict | None:
+    section = sections.get(key) or {}
+    if key == "transactions" and section.get("status") == "no_data":
+        return {"readable": True, "activity": []}
+    return section.get("data") if section.get("status") == "ok" else None
 
-    opening, closing, transactions = data("opening"), data("closing"), data("transactions")
+
+def position_performance(sections: dict, start: str, end: str) -> list[dict]:
+    opening, closing, transactions = (section_data(sections, key) for key in ("opening", "closing", "transactions"))
     # Both boundaries are required even for newly bought/sold rows: otherwise
     # absent holdings could simply be a failed report, not an entry or exit.
     opening_rows = (opening or {}).get("rows") or []

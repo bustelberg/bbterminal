@@ -228,6 +228,31 @@ def test_post_airs_keeps_nested_audit_receipt_and_logs_root_cause(monkeypatch, c
     assert "missing close" in caplog.text
 
 
+def test_post_airs_downloads_month_when_daily_snapshots_are_incomplete(monkeypatch):
+    import airs_history
+    from routers import _airs_accounts, _airs_monthly_report, _airs_price_check, _monthly_benchmark, _prepared_analyse
+
+    account = "BUS_Neutraal_Dyn"
+    monkeypatch.setattr(_airs_accounts, "list_accounts", lambda: [{"portefeuille": account, "holdings": 1}])
+    monkeypatch.setattr(_monthly_benchmark, "ensure_daily", lambda *_: {"errors": {}})
+    monkeypatch.setattr(airs_history, "finalise_previous_year", lambda *_a, **_kw: [])
+    monkeypatch.setattr(_airs_price_check, "refresh_price_checks", lambda *_a, **_kw: {})
+    monkeypatch.setattr(_prepared_analyse, "run_controlled", lambda **_kw: {})
+    monkeypatch.setattr(S, "_run_body", lambda *_: None)
+    monkeypatch.setattr(D, "prepare_month", lambda name: {
+        "account": name, "end": "2026-11-02", "errors": {"opening": "No stored valuation"},
+    })
+    downloads = []
+    def collect(name, month, ctx):
+        ctx.check()
+        downloads.append((name, month))
+        return "Performance updated."
+    monkeypatch.setattr(_airs_monthly_report, "collect_report", collect)
+    _, receipt = S._body_dashboard_post_airs()
+    assert downloads == [(account, "2026-11")]
+    assert receipt["monthly"][0]["errors"] == {}
+
+
 @pytest.mark.parametrize("kind,needs_scan", [("normaal", False), ("meervoudig", False), ("fixed (model)", True), (None, True)])
 def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, needs_scan):
     from routers import _airs_account_links as links, _prepared_analyse as prepared
@@ -374,6 +399,7 @@ def test_daily_month_report_keeps_accrued_interest_out_of_security_price_return(
             'sections': {'opening': {'status': 'ok', 'data': {'as_of': '2026-09-30', 'rows': opening}}}})]
         for r in db.tables['airs_holding'][:2]:
             r.pop('valuation_component', None)
+            r['current_price_local'] = 101
         db.tables['airs_holding'][0]['current_value_eur'] += correction
     monkeypatch.setattr(D, 'supabase', db)
     monkeypatch.setattr(monthly, '_monthly_rows', lambda *_: [dict(month='2026-10', periode='2026-10-29', rendement=10)])

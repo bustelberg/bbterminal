@@ -1,143 +1,80 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { apiFetch } from '../../../lib/apiFetch';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { useLang } from '../../../lib/i18n';
 import { startJob } from '../../../lib/stores/jobs';
-import type { MonthlyPosition, MonthlyReport } from './monthlyReport';
-import { savedContributionCalculation, monthlyBenchmarkMissing } from './monthlyReport';
+import type { MonthlyPosition, PerformanceBundle } from './monthlyReport';
 import InfoTip from '../InfoTip';
-import { currentPerformanceMonth, loadPerformanceTiles, readPerformanceTiles } from './monthlyReportPrefetch';
+import { profileBenchmarkLabel } from './analyseCopy';
+import { invalidatePerformanceBundle, loadPerformanceBundle, readPerformanceBundle } from './monthlyReportPrefetch';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
 const ctl = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-xs text-fg-muted hover:border-accent-500/50 disabled:opacity-50';
 const tone = (value?: number | null) => value == null ? 'text-fg-subtle' : value < 0 ? 'text-neg-400' : value > 0 ? 'text-pos-400' : 'text-fg-strong';
 
-type OverviewReturns = { portfolio: number | null | undefined; benchmark: number | null | undefined; asOf?: string | null; from?: string | null };
-
-export default function MonthlyReportPanel({ portefeuille, name, overviewReturns }: { portefeuille?: string | null; name: string; overviewReturns?: OverviewReturns }) {
+export default function MonthlyReportPanel({ portefeuille, name, variant }: { portefeuille?: string | null; name: string; variant?: string | null }) {
   const [lang] = useLang();
+  const benchmarkLabel = profileBenchmarkLabel(lang, variant);
   const nl = lang === 'nl', locale = nl ? 'nl-NL' : 'en-GB';
   const text = (en: string, dutch: string) => nl ? dutch : en;
-  const today = currentPerformanceMonth();
-  const [month, setMonth] = useState(today);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [report, setReport] = useState<MonthlyReport | null>(() => portefeuille ? readPerformanceTiles(portefeuille, today) : null);
-  const [pending, setPending] = useState(!report);
+  const [bundle, setBundle] = useState<PerformanceBundle | null>(() => portefeuille ? readPerformanceBundle(portefeuille) : null);
+  const [yearSelection, setYearSelection] = useState<string | null>(null);
+  const [monthSelection, setMonthSelection] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
-  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
-  const [benchmarkError, setBenchmarkError] = useState(false);
-  const benchmarkAttempts = useRef(new Set<string>());
   const [reload, setReload] = useState(0);
-  const [selection, setSelection] = useState(0);
   const [detailsHeight, setDetailsHeight] = useState(0);
   const detailsElement = useRef<HTMLDivElement>(null);
-  const saved = useRef(new Map<string, MonthlyReport>());
-  const loadedRevision = useRef(report ? { account: portefeuille, month: today, revision: 0 } : null);
-  const detailsRead = useRef(new Set<string>());
-  const automaticAttempts = useRef(new Set<string>());
-  const fetching = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
   useEffect(() => {
+    if (!portefeuille) return;
     let active = true;
-    setError(null); setPending(true);
-    if (!portefeuille) { setReport(null); setPending(false); return; }
-    setReport((previous) => previous?.portefeuille === portefeuille ? previous : null);
-    const key = `${portefeuille}|${month}`;
-    const cached = saved.current.get(key);
-    // Tiles are warmed from Analyse. Only selecting a tile fetches its full report.
-    if (!detailsOpen && report?.portefeuille === portefeuille && report.month === month
-        && loadedRevision.current?.revision === reload && loadedRevision.current.account === portefeuille) {
-      setPending(false); return;
-    }
-    if (detailsOpen && cached && !monthlyBenchmarkMissing(cached, month) && !cached.needs_refresh && !cached.warning && cached.snapshot?.positions
-      && cached.snapshot.positions.every((position) => Object.hasOwn(position, 'contribution_calculation'))) {
-      setReport(cached); setPending(false); return;
-    }
-    const request = detailsOpen ? apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report?month=${month}&include_details=true`,
-      { noReadCache: true, cache: 'no-store' }).then(async (res) => {
-      if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.detail ?? `HTTP ${res.status}`); }
-      return res.json() as Promise<MonthlyReport>;
-    }) : loadPerformanceTiles(portefeuille, month, reload);
-    void request.then((data) => { if (active) {
-      if (detailsOpen) { detailsRead.current.add(key); saved.current.set(key, data); }
-      loadedRevision.current = { account: portefeuille, month, revision: reload };
-      setReport(data);
-    } })
+    setError(null);
+    setPending(true);
+    void loadPerformanceBundle(portefeuille)
+      .then((data) => { if (active) setBundle(data); })
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-    // report is retained for tiles while loading another month, not a request dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [portefeuille, month, reload, today, detailsOpen]);
+  }, [portefeuille, reload]);
+
+  const data = bundle?.portefeuille === portefeuille ? bundle : null;
+  const today = data?.current_month ?? '';
+  const year = yearSelection && data?.years[yearSelection] ? yearSelection : today.slice(0, 4);
+  const report = data?.years[year];
+  const month = monthSelection ?? '';
+  const detailsOpen = !!report?.details[month];
+  const selectedReport = report?.details[month];
+  const perf = report?.rows[month];
+  const positions = selectedReport?.snapshot?.positions;
+  const reconciliation = selectedReport?.snapshot?.reconciliation;
+  const openingWeightDate = selectedReport?.snapshot?.opening_weight_date;
 
   const openMonth = (key: string) => {
-    if (key === month && detailsOpen) { setDetailsOpen(false); return; }
-    automaticAttempts.current.delete(`${portefeuille}|${key}`);
-    setSelection((n) => n + 1);
-    setMonth(key); setDetailsOpen(true); setJobError(null); setBenchmarkError(false);
+    setMonthSelection(key === month ? null : key);
+    setJobError(null);
   };
-  const fetchMonth = useCallback(async () => {
-    if (!portefeuille || fetching.current) return;
-    fetching.current = true;
-    automaticAttempts.current.add(`${portefeuille}|${month}`);
-    saved.current.delete(`${portefeuille}|${month}`);
-    setBusy(true); setJobError(null);
+
+  const refreshMonth = async (kind: 'monthly-report' | 'monthly-benchmark') => {
+    if (!portefeuille || !month || busy) return;
+    setBusy(true);
+    setJobError(null);
     try {
-      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report/job?month=${month}`, name);
+      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/${kind}/job?month=${month}`, name);
       const job = await done;
-      if (mounted.current && job.status === 'failed') setJobError(job.summary ?? (nl ? 'Het rapport kon niet worden voltooid.' : 'Report could not be completed.'));
+      if (job.status !== 'done') throw new Error(job.summary ?? text('Refresh incomplete.', 'Verversing onvolledig.'));
     } catch (err) {
       if (mounted.current) setJobError(err instanceof Error ? err.message : String(err));
     } finally {
-      fetching.current = false;
+      invalidatePerformanceBundle(portefeuille);
       if (mounted.current) { setBusy(false); setReload((n) => n + 1); }
     }
-  }, [portefeuille, month, name, nl]);
-  useEffect(() => {
-    if (!detailsOpen || pending || busy || !report || report.warning
-      || report.month !== month || report.portefeuille !== portefeuille) return;
-    if (!report.needs_refresh && report.snapshot?.positions) return;
-    const key = `${portefeuille}|${month}`;
-    // The complete saved month is read before deciding whether AIRS needs a refresh.
-    if (!detailsRead.current.has(key)) return;
-    // One automatic attempt per selected month. A partial/failed download must
-    // not trigger a retry loop when its saved result is read back afterwards.
-    if (automaticAttempts.current.has(key)) return;
-    automaticAttempts.current.add(key);
-    void fetchMonth();
-  }, [detailsOpen, pending, busy, report, month, portefeuille, fetchMonth, selection]);
-  const refreshBenchmark = useCallback(async () => {
-    if (!portefeuille || benchmarkBusy) return;
-    const key = `${portefeuille}|${month}`;
-    benchmarkAttempts.current.add(key);
-    setBenchmarkBusy(true); setBenchmarkError(false);
-    try {
-      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-benchmark/job?month=${month}`,
-        `${name} · Benchmark`);
-      const job = await done;
-      if (job.status !== 'done') throw new Error('Benchmark update incomplete');
-      saved.current.delete(key);
-      if (mounted.current) setReload((value) => value + 1);
-    } catch { if (mounted.current) setBenchmarkError(true); }
-    finally { if (mounted.current) setBenchmarkBusy(false); }
-  }, [portefeuille, month, name, benchmarkBusy]);
-  useEffect(() => {
-    if (pending || benchmarkBusy || !report || report.month !== month || report.portefeuille !== portefeuille
-        || !monthlyBenchmarkMissing(report, month) || benchmarkAttempts.current.has(`${portefeuille}|${month}`)) return;
-    void refreshBenchmark();
-  }, [pending, benchmarkBusy, report, month, portefeuille, refreshBenchmark]);
-  const selectedReport = report?.month === month && report.portefeuille === portefeuille ? report : null;
-  const performance = selectedReport?.snapshot?.sections.performance;
-  const perf = performance?.status === 'ok' ? performance.data : report?.months.find((r) => r.month === month);
-  const positions = selectedReport?.snapshot?.positions;
-  const reconciliation = selectedReport?.snapshot?.reconciliation;
-  const openingValuation = selectedReport?.snapshot?.sections.opening;
-  const openingWeightDate = openingValuation?.status === 'ok' ? openingValuation.data?.as_of : null;
+  };
   useLayoutEffect(() => {
     const element = detailsElement.current;
     if (!detailsOpen || !element) return;
@@ -166,7 +103,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const eurPrice = (value: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   const shortDate = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }).replaceAll('.', '').replace(' sep ', ' sept ');
   const contributionDetails = (position: MonthlyPosition) => {
-    const calculation = savedContributionCalculation(selectedReport, position);
+    const calculation = position.contribution_calculation;
     if (!calculation) return <div className="space-y-2 text-xs"><p className="font-medium">{position.name}</p><p>{position.is_cash
       ? text('Cash balance movements from trades are not investment gains. AIRS income and accrued interest are shown separately below.', 'Kasmutaties door transacties zijn geen beleggingsresultaat. AIRS-inkomsten en opgelopen rente staan hieronder afzonderlijk.')
       : text('Contribution cannot yet be calculated reliably from the available AIRS valuations and transactions. A dash is not a zero contribution.', 'De bijdrage kan nog niet betrouwbaar worden berekend uit de beschikbare AIRS-waarderingen en transacties. Een streepje is geen nulbijdrage.')}</p></div>;
@@ -180,23 +117,16 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
         [text('= Position result · EUR', '= Positieresultaat · EUR'), eurPrice(calculation.result_eur)],
         [text('Portfolio opening capital', 'Beginvermogen portefeuille'), eurPrice(calculation.portfolio_opening_capital_eur)],
       ].map(([label, value]) => <tr key={label} className="border-t border-neutral-800/40"><td className="py-2 pr-4 text-left">{label}</td><td className="py-2 text-right font-mono tabular-nums">{value}</td></tr>)}</tbody></table>
-      <p className="font-mono">{eurPrice(calculation.result_eur)} / {eurPrice(calculation.portfolio_opening_capital_eur)} × 100 = {pp(100 * calculation.result_eur / calculation.portfolio_opening_capital_eur)}</p>
+      <p className="font-mono">{eurPrice(calculation.result_eur)} / {eurPrice(calculation.portfolio_opening_capital_eur)} × 100 = {pp(position.contribution_pp)}</p>
       {calculation.trades.length > 0 && <div><p className="mb-1 font-medium">{text('AIRS transactions', 'AIRS-transacties')}</p><ul className="max-h-40 space-y-1 overflow-auto">{calculation.trades.map((trade, i) => <li key={i} className="flex justify-between gap-4"><span>{shortDate(trade.date)} · {trade.kind === 'buy' ? text('Bought', 'Aangekocht') : text('Sold', 'Verkocht')}</span><span className="font-mono">{eurPrice(trade.amount_eur)}</span></li>)}</ul></div>}
       <p className="text-fg-subtle">{text('Source: AIRS valuations, transactions and opening portfolio capital. Income is shown separately. Calculations use full precision; EUR values here are rounded to two decimals.', 'Bron: AIRS-waarderingen, transacties en beginvermogen. Inkomsten staan afzonderlijk. De berekening gebruikt volledige precisie; EUR-bedragen zijn hier op twee decimalen afgerond.')}</p>
       {reconciliation?.status !== 'reconciled' && <p className="text-warn-300">{text('The month as a whole is not yet reconciled with AIRS.', 'De maand als geheel sluit nog niet aan op AIRS.')}</p>}
     </div>;
   };
   const benchmarkDetails = (key: string) => {
-    const benchmark = (selectedReport?.month === key ? selectedReport.weighted_benchmark?.[key] : null)
-      ?? report?.weighted_benchmark?.[key];
-    if (key === overviewBenchmarkMonth) return <div className="space-y-2 text-xs">
-      <p className="font-medium text-fg-strong">{monthLabel(key)} · {text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')}</p>
-      <p>{overviewReturns?.from ? holdingDate(overviewReturns.from) : '—'} — {overviewReturns?.asOf ? holdingDate(overviewReturns.asOf) : '—'}</p>
-      <p>{text('This portfolio started during this month. We use the same policy benchmark and exact investment period as the YTD headline, excluding days before the portfolio started.', 'Deze portefeuille startte in deze maand. We gebruiken dezelfde beleidsbenchmark en exacte beleggingsperiode als de YTD-tegel, zonder de dagen vóór de start van de portefeuille.')}</p>
-      <p className="font-mono">{pct(overviewReturns?.benchmark)}</p>
-    </div>;
+    const benchmark = report?.weighted_benchmark[key];
     return <div className="space-y-3 text-xs">
-    <p className="font-medium text-fg-strong">{monthLabel(key)} · {text('Monthly weighted benchmark · EUR', 'Gewogen maandbenchmark · EUR')}</p>
+    <p className="font-medium text-fg-strong">{monthLabel(key)} · {benchmarkLabel}</p>
     <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>
       {[text('ETF', 'ETF'), text('Weight', 'Gewicht'), text('Opening · EUR', 'Begin · EUR'), text('Closing · EUR', 'Eind · EUR'), text('Return', 'Rendement')].map((label) => <th key={label} className="px-2 py-2 font-medium text-fg-subtle">{label}</th>)}
     </tr></thead><tbody>{benchmark?.components?.map((component) => <tr key={component.ticker} className="border-t border-neutral-800/40">
@@ -213,34 +143,14 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     {!benchmark?.components?.length && <p className="text-fg-subtle">{text('The underlying price and weight details are not available for this month.', 'De onderliggende koers- en wegingsdetails zijn voor deze maand niet beschikbaar.')}</p>}
   </div>;
   };
-  const months = Array.from({ length: month.slice(0, 4) === today.slice(0, 4) ? Number(today.slice(5, 7)) : 12 }, (_, i) => `${month.slice(0, 4)}-${String(i + 1).padStart(2, '0')}`);
-  const monthPerformance = (key: string) => key === month && perf ? perf : report?.months.find((row) => row.month === key);
-  // The Analyse headline is AIRS's published cumulative return, not a chain of
-  // monthly observations. Its policy benchmark is buy-and-hold over the full
-  // window; chaining monthly policy returns would imply monthly rebalancing.
-  const useOverview = !!overviewReturns && month.slice(0, 4) === today.slice(0, 4) && (overviewReturns.asOf
-    ? overviewReturns.asOf.slice(0, 4) === month.slice(0, 4)
-    : month.slice(0, 4) === today.slice(0, 4));
-  const summary = selectedReport?.year_summary;
-  const historical = month.slice(0, 4) < today.slice(0, 4);
-  const years = [...new Set([Number(today.slice(0, 4)), Number(month.slice(0, 4)), ...(report?.available_years ?? [])])].sort((a, b) => b - a);
-  const rounded = (value: number | null | undefined) => value == null ? null : Math.round(value * 100) / 100;
-  const portfolioCompounded = useOverview ? rounded(overviewReturns.portfolio) : rounded(summary?.return_pct);
-  const benchmarkCompounded = useOverview ? rounded(overviewReturns.benchmark) : rounded(summary?.benchmark_pct);
-  const compoundedExcess = portfolioCompounded != null && benchmarkCompounded != null ? portfolioCompounded - benchmarkCompounded : null;
-  // YTD is also a monthly period only when BOTH boundaries fall in that month.
-  // This preserves a newly funded book's partial-month benchmark without putting a
-  // January–October YTD return into the January tile.
-  const overviewBenchmarkMonth = useOverview && overviewReturns.from && overviewReturns.asOf
-    && overviewReturns.from.slice(0, 7) === overviewReturns.asOf.slice(0, 7)
-    ? overviewReturns.asOf.slice(0, 7) : null;
-  const benchmarkForMonth = (key: string) => (key === overviewBenchmarkMonth ? overviewReturns?.benchmark : null)
-    ?? report?.weighted_benchmark?.[key]?.return_pct;
-  const compoundedThrough = useOverview ? overviewReturns.asOf : summary?.end;
-  const compoundedFrom = useOverview ? overviewReturns.from : summary?.start;
+  const summary = report?.summary;
+  const historical = year < today.slice(0, 4);
+  const benchmarkForMonth = (key: string) => report?.weighted_benchmark[key]?.return_pct;
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'
     ? text('Position movement needs review', 'Positiemutatie controleren')
-    : reason === 'identity_changed' || reason === 'ambiguous_position'
+    : reason === 'ambiguous_position'
+      ? text('AIRS valuation components unclear', 'AIRS-waarderingscomponenten onduidelijk')
+      : reason === 'identity_changed'
       ? text('Position identity needs review', 'Positie-identiteit controleren')
       : text('AIRS period data incomplete', 'AIRS-periodegegevens onvolledig');
 
@@ -250,64 +160,71 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       <h2 className="text-xl font-semibold text-fg-strong">{name}</h2>
       <p className="mt-1 text-xs text-fg-subtle">{text('Choose a month to see its return and individual positions.', 'Kies een maand voor het rendement en de individuele posities.')}</p>
     </div><label className="flex items-center gap-2 text-xs text-fg-muted">{text('Year', 'Jaar')}
-      <select aria-label={text('Reporting year', 'Rapportagejaar')} value={month.slice(0, 4)} className={ctl}
+      <select aria-label={text('Reporting year', 'Rapportagejaar')} value={year} className={ctl}
         onChange={(event) => {
-          const year = event.target.value;
-          setMonth(year === today.slice(0, 4) ? today : `${year}-12`);
-          setDetailsOpen(false); setJobError(null); setSelection((n) => n + 1);
-        }}>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select>
+          setYearSelection(event.target.value);
+          setMonthSelection(null);
+          setJobError(null);
+        }}>{data?.available_years.map((option) => <option key={option} value={option}>{option}</option>)}</select>
     </label></header>
     {!portefeuille && <p className="text-sm text-warn-400">{text('Link an AIRS account to view monthly positions.', 'Koppel een AIRS-rekening om de maandposities te bekijken.')}</p>}
     {error && <p role="alert" className="rounded-lg bg-neg-500/10 p-3 text-xs text-neg-300">{error}</p>}
     {jobError && <p role="alert" className="rounded-lg bg-neg-500/10 p-3 text-xs text-neg-300">{jobError}</p>}
     {pending && !report && <p className="text-sm text-fg-subtle">{text('Loading…', 'Laden…')}</p>}
-    {historical && selectedReport && !summary?.complete && <p className="text-xs text-warn-300">{text('Year-end report incomplete. Figures below run through the dates shown; finalisation will retry during the daily refresh.', 'Jaareindrapport onvolledig. De cijfers lopen tot de getoonde datums; afronding wordt bij de dagelijkse verversing opnieuw geprobeerd.')}</p>}
+    {historical && report && !summary?.complete && <p className="text-xs text-warn-300">{text('Year-end report incomplete. Figures below run through the dates shown; finalisation will retry during the daily refresh.', 'Jaareindrapport onvolledig. De cijfers lopen tot de getoonde datums; afronding wordt bij de dagelijkse verversing opnieuw geprobeerd.')}</p>}
     {report && <>
       <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-3" aria-label={text('Compounded returns', 'Samengestelde rendementen')}>
         {[
-          { label: historical ? text('Annual return · EUR', 'Jaarrendement · EUR') : text('Return (YTD) · EUR', 'Rendement (YTD) · EUR'), value: portfolioCompounded },
-          { label: historical ? text('Annual weighted benchmark return · EUR', 'Gewogen benchmarkjaarrendement · EUR') : text('Weighted benchmark return (YTD) · EUR', 'Gewogen benchmarkrendement (YTD) · EUR'), value: benchmarkCompounded },
+          { label: historical ? text('Annual return · EUR', 'Jaarrendement · EUR') : `${name} (YTD) €`, value: summary?.return_pct },
+          { label: historical ? text('Annual weighted benchmark return · EUR', 'Gewogen benchmarkjaarrendement · EUR') : `${benchmarkLabel} (YTD) €`, value: summary?.benchmark_pct },
         ].map(({ label, value }) => <div key={label} className={`${box} flex items-center justify-between gap-4 px-5 py-4`}>
-          <div><p className="text-sm text-fg-muted">{label}</p><p className="mt-1 text-xs text-fg-subtle">{compoundedFrom && compoundedThrough ? `${holdingDate(compoundedFrom)} ${text('to', 't/m')} ${holdingDate(compoundedThrough)}` : month.slice(0, 4)}</p>
+          <div><p className="text-sm text-fg-muted">{label}</p><p className="mt-1 text-xs text-fg-subtle">{summary?.start && summary.end ? `${holdingDate(summary.start)} ${text('to', 't/m')} ${holdingDate(summary.end)}` : year}</p>
             {value == null && <p className="mt-1 text-xs text-fg-faint">{text('Monthly data incomplete', 'Maandgegevens onvolledig')}</p>}</div>
           <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(value)}`}>{pct(value)}</span>
         </div>)}
         <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}>
           <span className="text-sm text-fg-muted">{text('Excess', 'Excess')}</span>
-          <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(compoundedExcess)}`}>{compoundedExcess == null ? '—' : `${new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero' }).format(compoundedExcess)}pp`}</span>
+          <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(summary?.excess_pp)}`}>{summary?.excess_pp == null ? '—' : `${new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero' }).format(summary?.excess_pp)}pp`}</span>
         </div>
       </div>
-      {useOverview && <p className="text-[11px] text-fg-faint">{text('Same YTD source and calculation as the Analyse overview: AIRS cumulative portfolio return and the full-period policy benchmark. Monthly figures below are separate period returns; compounding them can differ from these YTD figures.', 'Dezelfde YTD-bron en berekening als het Analyse-overzicht: cumulatief AIRS-portefeuillerendement en de beleidsbenchmark over de volledige periode. De maandcijfers hieronder zijn afzonderlijke perioderendementen; het samenstellen daarvan kan afwijken van deze YTD-cijfers.')}</p>}
       <nav className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5" aria-label={text('Months', 'Maanden')}>
-        {months.map((key) => { const row = monthPerformance(key); const active = detailsOpen && key === month;
+        {report.months.map((key) => { const row = report.rows[key]; const active = detailsOpen && key === month;
           return <button key={key} type="button" disabled={busy} onClick={() => openMonth(key)} aria-expanded={active} aria-pressed={active} aria-controls="monthly-report-details"
             className={`group rounded-xl border p-4 text-left transition-colors ${active ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400/50' : 'border-neutral-800/40 bg-elevated hover:border-accent-500/50'}`}>
             <span className={`block capitalize text-xs ${active ? 'font-medium text-accent-300' : 'text-fg-subtle'}`}>{monthLabel(key, true)}</span>
             <span className={`mt-2 block font-mono text-xl tabular-nums ${tone(row?.rendement)}`}>{pct(row?.rendement)}</span>
-            <span data-month-benchmark={key} className="mt-1 block text-xs text-fg-subtle">{text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')} <span className={`font-mono tabular-nums ${tone(benchmarkForMonth(key))}`}>{pct(benchmarkForMonth(key))}</span><InfoTip className="ml-1" wide content={benchmarkDetails(key)} /></span>
+            <span data-month-benchmark={key} className="mt-1 block text-xs text-fg-subtle">{benchmarkLabel} <span className={`font-mono tabular-nums ${tone(benchmarkForMonth(key))}`}>{pct(benchmarkForMonth(key))}</span><InfoTip className="ml-1" wide content={benchmarkDetails(key)} /></span>
             <span className={`mt-3 block text-[11px] ${active ? 'text-accent-300' : 'text-fg-faint group-hover:text-accent-300'}`}>{text('View positions', 'Bekijk posities')}</span>
           </button>; })}
       </nav>
       <div data-month-detail-space style={detailsHeight ? { minHeight: detailsHeight } : undefined}>
-      {detailsOpen && <div ref={detailsElement} id="monthly-report-details" aria-busy={pending || busy || benchmarkBusy} className="min-h-80 space-y-4 border-t border-neutral-800/40 pt-5">
-        {pending || busy || benchmarkBusy ? <p role="status" className="text-sm text-fg-subtle">{text('Loading…', 'Laden…')}</p> : !selectedReport ? <p role="status" className="text-sm text-fg-subtle">{error ? text('Report could not be loaded.', 'Rapport kon niet worden geladen.') : text('Loading…', 'Laden…')}</p> : <>
+      {detailsOpen && <div ref={detailsElement} id="monthly-report-details" aria-busy={pending || busy} className="min-h-80 space-y-4 border-t border-neutral-800/40 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-3"><div>
           <h3 className="text-lg font-medium capitalize text-fg-strong">{monthLabel(month)}</h3>
-          <p className="mt-1 text-xs text-fg-subtle">{perf?.periode ? `${text('Through', 'T/m')} ${perf.periode}` : text('Return unavailable', 'Rendement ontbreekt')}{month === today ? ` · ${text('Month to date', 'Lopende maand')}` : ''}</p>
+          <p className="mt-1 text-xs text-fg-subtle">{perf?.periode ? `${text('Through', 'T/m')} ${shortDate(perf.periode)}` : text('Return unavailable', 'Rendement ontbreekt')}{month === today ? ` · ${text('Month to date', 'Lopende maand')}` : ''}</p>
         </div><div className="flex gap-2">
-          <button type="button" className={ctl} onClick={() => void fetchMonth()} disabled={busy || pending || !!report.warning}>{busy ? text('Reading AIRS…', 'AIRS ophalen…') : report.snapshot ? text('Refresh month', 'Maand verversen') : text('Load month from AIRS', 'Maand ophalen uit AIRS')}</button>
+          <button type="button" className={ctl} onClick={() => void refreshMonth('monthly-report')} disabled={busy || pending || !!report.warning}>{busy ? text('Reading AIRS…', 'AIRS ophalen…') : selectedReport?.snapshot ? text('Refresh month', 'Maand verversen') : text('Load month from AIRS', 'Maand ophalen uit AIRS')}</button>
         </div></div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Monthly return · AIRS', 'Maandrendement · AIRS')}</span>
+          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{name}</span>
             <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(perf?.rendement)}`}>{pct(perf?.rendement)}</span></div>
-          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Weighted benchmark return · EUR', 'Gewogen benchmarkrendement · EUR')}<InfoTip className="ml-2" wide content={benchmarkDetails(month)} /></span>
+          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{benchmarkLabel}<InfoTip className="ml-2" wide content={benchmarkDetails(month)} /></span>
             <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(benchmarkForMonth(month))}`}>{pct(benchmarkForMonth(month))}</span></div>
         </div>
         {report.warning && <p className="text-xs text-warn-300">{report.warning}</p>}
-        {benchmarkBusy && <p role="status" className="text-xs text-fg-muted">{text('Loading benchmark…', 'Benchmark laden…')}</p>}
-        {!benchmarkBusy && (benchmarkError || (!pending && selectedReport && monthlyBenchmarkMissing(selectedReport, month)
-          && benchmarkAttempts.current.has(`${portefeuille}|${month}`))) && <p role="alert" className="text-xs text-warn-300">{text('Benchmark is not available yet.', 'Benchmark is nog niet beschikbaar.')} <button type="button" className="underline" onClick={() => void refreshBenchmark()}>{text('Try again', 'Opnieuw proberen')}</button></p>}
-        {report.needs_refresh && !report.warning && <p className="text-xs text-warn-300">{busy ? text('Loading this month’s position results from AIRS…', 'De positieresultaten van deze maand worden uit AIRS opgehaald…') : text('Some position results are incomplete. Refresh this month to try again.', 'Sommige positieresultaten zijn onvolledig. Ververs deze maand om het opnieuw te proberen.')}</p>}
+        {selectedReport?.benchmark_needs_refresh && <p className="text-xs text-warn-300">
+          {text('Benchmark is not available yet.', 'Benchmark is nog niet beschikbaar.')} <button type="button" className="underline" disabled={busy || pending} onClick={() => void refreshMonth('monthly-benchmark')}>{text('Refresh benchmark', 'Benchmark verversen')}</button>
+        </p>}
+        {selectedReport?.needs_refresh && !report.warning && selectedReport.refresh_reason
+          && selectedReport.refresh_reason !== 'incomplete_report' && <p className="text-xs text-warn-300">
+          {selectedReport.refresh_reason === 'ambiguous_position'
+            ? text('AIRS supplied multiple valuation rows for one position. The security value could not be verified separately.', 'AIRS leverde meerdere waarderingsregels voor één positie. De waarde van het effect kon niet afzonderlijk worden vastgesteld.')
+            : selectedReport.refresh_reason === 'outdated_report'
+              ? text('The saved position report does not cover the latest valuation date for this month.', 'Het opgeslagen positierapport loopt niet tot de laatste waarderingsdatum van deze maand.')
+              : selectedReport.refresh_reason === 'preparation_failed'
+                ? text('AIRS could not provide all position data for this month.', 'AIRS kon niet alle positiegegevens voor deze maand leveren.')
+                : text('No position report has been saved for this month yet.', 'Voor deze maand is nog geen positierapport opgeslagen.')}
+        </p>}
         <div className={`${box} overflow-hidden`}><h4 className="px-5 pt-4 text-sm font-medium text-fg-strong">{text('Individual positions', 'Individuele posities')}</h4>
           {!positions ? <p className="p-5 text-sm text-fg-subtle">{busy ? text('Reading AIRS position reports…', 'AIRS-positierapporten ophalen…') : text('Position results are not available yet.', 'De positieresultaten zijn nog niet beschikbaar.')}</p>
             : !positions.length ? <p className="p-5 text-sm text-fg-subtle">{text('No positions were found in the available AIRS reports.', 'Geen posities gevonden in de beschikbare AIRS-rapporten.')}</p>
@@ -325,21 +242,18 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
                 <p className="text-fg-subtle">{text('Includes currency movements; excludes income.', 'Inclusief valuta-effecten; exclusief inkomsten.')}</p>
               </div>} />}</td>
               <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.contribution_pp)}`}>{pp(position.contribution_pp)}<InfoTip className="ml-2" wide content={contributionDetails(position)} /></td>
-              <td className="px-3 py-3 text-xs text-fg-subtle">{position.is_cash ? text('Trading cash balance; income shown below', 'Handelskas; inkomsten hieronder') : position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : unavailable(position.reason)}</td>
+              <td className="px-3 py-3 text-xs text-fg-subtle">{!position.is_cash && (position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : unavailable(position.reason))}</td>
             </tr>)}{reconciliation?.adjustments.map((adjustment) => <tr key={adjustment.kind} className="border-t border-neutral-800/40 text-fg-muted">
               <td className="px-3 py-3">{adjustment.kind === 'opbrengsten' ? text('Income · AIRS (not allocated to positions)', 'Inkomsten · AIRS (niet aan posities toegerekend)') : text('Accrued interest change · AIRS', 'Mutatie opgelopen rente · AIRS')}</td>
               <td className="px-3 py-3 text-right">—</td><td className="px-3 py-3 text-right">—</td><td className={`px-3 py-3 text-right font-mono ${tone(adjustment.contribution_pp)}`}>{pp(adjustment.contribution_pp)}</td><td />
             </tr>)}</tbody>{reconciliation && <tfoot className="border-t border-neutral-700 text-fg-strong">
               {[
                 [text('Known contributions', 'Bekende bijdragen'), pp(reconciliation.contribution_sum_pp)],
-                [text('Monthly return · AIRS', 'Maandrendement · AIRS'), pct(reconciliation.monthly_return_pct)],
+                [name, pct(reconciliation.monthly_return_pct)],
                 [text('Unexplained difference', 'Onverklaard verschil'), pp(reconciliation.difference_pp)],
               ].map(([label, value]) => <tr key={label}><th colSpan={3} className="px-3 py-2 text-left font-medium">{label}</th><td className="px-3 py-2 text-right font-mono">{value}</td><td /></tr>)}
             </tfoot>}</table></div>}
         </div>
-        <p role="status" className={`text-xs ${reconciliation?.status === 'reconciled' ? 'text-pos-400' : 'text-warn-300'}`}>{reconciliation?.status === 'reconciled' ? text('Reconciled with AIRS monthly return.', 'Sluit aan op het AIRS-maandrendement.') : text('Not reconciled: incomplete or inconsistent source data. No balancing adjustment has been applied.', 'Niet aangesloten: onvolledige of inconsistente brongegevens. Er is geen sluitpost toegepast.')}</p>
-        <p className="text-[11px] leading-relaxed text-fg-faint">{text('Weight is the opening portfolio weight. Position return is the EUR price/FX change, excluding income. Contribution uses the actual EUR result adjusted for purchases and sales, divided by opening portfolio capital. For traded positions, opening weight × price return is not the contribution. Income and accrued interest are separate AIRS accounting rows, not allocated estimates. Exact contribution reconciliation is unavailable for months with external cash flows.', 'Gewicht is het begingewicht in de portefeuille. Positierendement is de koers-/valutaverandering in EUR, exclusief inkomsten. Bijdrage gebruikt het werkelijke EUR-resultaat, gecorrigeerd voor aan- en verkopen, gedeeld door het beginvermogen. Bij verhandelde posities is begingewicht × koersrendement niet de bijdrage. Inkomsten en opgelopen rente zijn afzonderlijke AIRS-boekhoudregels, geen geschatte toerekening. Exacte aansluiting van bijdragen is niet beschikbaar voor maanden met externe kasstromen.')}</p>
-        </>}
       </div>}
       </div>
     </>}

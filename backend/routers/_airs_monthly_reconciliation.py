@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from math import isfinite
 
-from routers._airs_monthly_positions import position_boundary
+from routers._airs_monthly_positions import position_boundary, section_data
 
 
 def _number(value):
@@ -15,10 +15,6 @@ def _number(value):
 
 
 def reconcile_positions(sections: dict, performance: dict | None, positions: list[dict]) -> dict:
-    def data(key):
-        section = sections.get(key) or {}
-        return section.get('data') if section.get('status') == 'ok' else None
-
     perf = performance or {}
     capital = perf.get('beginvermogen')
     target = perf.get('rendement')
@@ -29,7 +25,7 @@ def reconcile_positions(sections: dict, performance: dict | None, positions: lis
     if not _number(capital) or capital <= 0 or not _number(target):
         result['issues'].append('performance_missing')
         return result
-    opening, closing, transactions = data('opening'), data('closing'), data('transactions')
+    opening, closing, transactions = (section_data(sections, key) for key in ('opening', 'closing', 'transactions'))
     if not opening or not closing or not transactions or not transactions.get('readable'):
         result['issues'].append('reports_missing')
         return result

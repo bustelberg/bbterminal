@@ -86,6 +86,84 @@ def test_read_uses_latest_monthly_observation_and_does_not_download(monkeypatch)
     assert db.writes == []
 
 
+def test_performance_bundle_reads_all_years_and_keeps_canonical_tile_values(monkeypatch):
+    class Clock:
+        @staticmethod
+        def now(tz):
+            return SimpleNamespace(year=2026, strftime=lambda _: "2026-11")
+
+    monkeypatch.setattr(report, "datetime", Clock)
+    monkeypatch.setattr(report, "month_window", lambda key: (key + "-01", key + "-28", key + "-01"))
+    db = FakeSupabase({
+        "airs_performance": [
+            {"portefeuille": "BOOK", "periode": "2026-11-28", "rendement": .41},
+            {"portefeuille": "BOOK", "periode": "2025-12-28", "rendement": 2},
+        ],
+        "airs_monthly_report": [{
+            "portefeuille": "BOOK", "month": "2026-11-01", "datum_tot": "2026-11-28",
+            "performance": {"periode": "2026-11-28", "rendement": 99},
+            "report": {"positions": [], "sections": {}, "raw_transactions": ["unused"]},
+        }],
+    })
+    monkeypatch.setattr(report, "supabase", db)
+    from routers import _airs_monthly_positions
+    monkeypatch.setattr(_airs_monthly_positions, "position_performance", lambda *_: [])
+
+    bundle = report.read_performance("BOOK")
+    assert bundle["available_years"] == [2026, 2025]
+    current = bundle["years"]["2026"]
+    assert current["rows"]["2026-11"]["rendement"] == .41
+    details = current["details"]["2026-11"]
+    assert details["snapshot"]["positions"] == []
+    assert "raw_transactions" not in details["snapshot"]
+    assert not details["needs_refresh"]
+    assert bundle["years"]["2025"]["rows"]["2025-12"]["rendement"] == 2
+    assert db.writes == []
+
+
+def test_performance_prepares_missing_observed_months_before_returning(monkeypatch):
+    import dashboard_daily
+
+    bundle = {"portefeuille": "BOOK", "years": {"2026": {
+        "warning": None, "months": ["2026-07", "2026-08", "2026-09", "2026-10", "2026-11"],
+        "rows": {"2026-07": {"rendement": 1}, "2026-08": {"rendement": 1}, "2026-09": {"rendement": 1}, "2026-11": {"rendement": 0}},
+        "details": {
+            "2026-07": {"refresh_reason": "ambiguous_position"},
+            "2026-08": {"refresh_reason": "incomplete_report"},
+            "2026-09": {"refresh_reason": None},
+            "2026-10": {"refresh_reason": "missing_report"},
+            "2026-11": {"refresh_reason": "missing_report"},
+        },
+    }}}
+    details = bundle["years"]["2026"]["details"]
+    attempted = []
+    downloaded = []
+    def prepare(account, *, month, complete_only):
+        assert account == "BOOK" and complete_only
+        attempted.append(month)
+        if month == "2026-11":
+            return {"errors": {"opening": "Missing valuation"}}
+        details[month] = {"refresh_reason": None, "snapshot": {"positions": [{"name": "Stock"}]}}
+        return {"errors": {}}
+    def collect(account, month, ctx):
+        assert account == "BOOK"
+        downloaded.append(month)
+        details[month] = {"refresh_reason": None, "snapshot": {"positions": [{"name": "Stock"}]}}
+
+    monkeypatch.setattr(report, "read_performance", lambda _: bundle)
+    monkeypatch.setattr(dashboard_daily, "prepare_month", prepare)
+    monkeypatch.setattr(report, "collect_report", collect)
+
+    result = report.prepare_performance("BOOK")
+    assert attempted == ["2026-11", "2026-08"]
+    assert downloaded == ["2026-11", "2026-07"]
+    for month in ["2026-11", "2026-08", "2026-07"]:
+        assert result["years"]["2026"]["details"][month]["snapshot"]["positions"] == [{"name": "Stock"}]
+    report.prepare_performance("BOOK")
+    assert attempted == ["2026-11", "2026-08"]
+    assert downloaded == ["2026-11", "2026-07"]
+
+
 def test_month_strip_does_not_load_or_reconcile_position_details(monkeypatch):
     db = FakeSupabase({'airs_performance': [{'portefeuille': 'BOOK', 'periode': '2026-10-23', 'rendement': 1}],
         'airs_monthly_report': [{'portefeuille': 'BOOK', 'month': '2026-10-01', 'datum_tot': '2026-10-23',
@@ -218,6 +296,36 @@ def test_legacy_ambiguous_components_offer_a_dated_airs_refresh(monkeypatch):
     result = report.read_report('BOOK', '2026-04')
     assert result['snapshot']['positions'][0]['reason'] == 'ambiguous_position'
     assert result['needs_refresh'] is True
+    details = report.read_performance('BOOK')['years']['2026']['details']['2026-04']
+    assert details['refresh_reason'] == 'ambiguous_position'
+    assert db.writes == []
+
+
+def test_performance_bundle_resolves_rabobank_principal_with_unquoted_interest_row(monkeypatch):
+    principal = dict(name='6,5% Rabobank Certificaten 14-perp.', isin='XS1002121454',
+                     currency='EUR', quantity=1000, price_local=100, value_eur=1000)
+    interest = {**principal, 'quantity': None, 'price_local': None, 'value_eur': 50}
+    closing = {**principal, 'price_local': 101, 'value_eur': 1010}
+    sections = {
+        'opening': {'status': 'ok', 'data': {'as_of': '2026-03-31', 'rows': [interest, principal]}},
+        'closing': {'status': 'ok', 'data': {'as_of': '2026-04-30', 'rows': [closing, interest]}},
+        'transactions': {'status': 'ok', 'data': {'readable': True, 'activity': []}},
+    }
+    db = FakeSupabase({
+        'airs_performance': [dict(portefeuille='BOOK', periode='2026-04-30', rendement=100 * 10 / 1050,
+                                  beginvermogen=1050, eindvermogen=1060, stortingen=0, onttrekkingen=0,
+                                  opbrengsten=0, mutatie_opgelopen_rente=0, kosten=0)],
+        'airs_monthly_report': [dict(portefeuille='BOOK', month='2026-04-01', datum_tot='2026-04-30',
+                                     report={'positions': [], 'sections': sections})],
+    })
+    monkeypatch.setattr(report, 'supabase', db)
+    details = report.read_performance('BOOK')['years']['2026']['details']['2026-04']
+    position, = details['snapshot']['positions']
+    assert position['isin'] == 'XS1002121454'
+    assert position['return_pct'] == pytest.approx(1)
+    assert position['opening_weight_pct'] == pytest.approx(100 * 1000 / 1050)
+    assert position['contribution_pp'] == pytest.approx(100 * 10 / 1050)
+    assert details['refresh_reason'] is None
     assert db.writes == []
     assert all(w[1] == 'airs_monthly_report' for w in db.writes)
 

@@ -322,7 +322,7 @@ export default function ActiveSharePanel({
       {/*  EVERYTHING BELOW THE HEADER SCROLLS AS ONE. `min-h-0` is what lets it: without it the
           flex child refuses to shrink under its content and the dialog's fixed height gives way
           — see `PanelDialog`. */}
-      <div className={`relative flex-1 min-h-0 pt-3 ${view === 'active' || view === 'returns'
+      <div className={`relative flex-1 min-h-0 pt-3 ${view === 'active'
         ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
       {/* Only the selected view renders; its data is already in the shared Risk bundle.

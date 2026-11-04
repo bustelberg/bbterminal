@@ -1,442 +1,113 @@
 // @vitest-environment happy-dom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '../../../lib/apiFetch';
 import { startJob } from '../../../lib/stores/jobs';
-import MonthlyReportPanel from './MonthlyReportPanel';
 import { invalidateReadCache } from '../../../lib/readCache';
-import { loadPerformanceTiles } from './monthlyReportPrefetch';
+import MonthlyReportPanel from './MonthlyReportPanel';
+import type { PerformanceBundle } from './monthlyReport';
 
 vi.mock('../../../lib/i18n', () => ({ useLang: () => ['en'] }));
 vi.mock('../../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
 vi.mock('../../../lib/stores/jobs', () => ({ startJob: vi.fn() }));
 
-const observation = { periode: '2026-10-23', rendement: -2, beleggingsresultaat: -200,
-  beginvermogen: 10000, eindvermogen: 10800, stortingen: 1000, onttrekkingen: 0,
-  koersresultaat: -210, opbrengsten: 10, kosten: 0, mutatie_opgelopen_rente: 0 };
-const response = () => ({ portefeuille: 'BOOK', month: '2026-10', start: '2026-10-01',
-  end: '2026-10-23', opening_date: '2026-09-30', months: [{ month: '2026-10', ...observation }],
-  needs_refresh: true, warning: null, fetched_at: null, snapshot: null });
-const completeResponse = () => ({ ...response(), needs_refresh: false, snapshot: {
-  start: '2026-10-01', end: '2026-10-23', fetched_at: '2026-10-26T12:00:00Z',
-  positions: [], sections: { performance: { status: 'ok', data: observation } },
-} });
-const job = (status: 'done' | 'failed', summary = '') => ({ id: 'job', body: {}, done: Promise.resolve({
-  id: 'job', kind: 'report', label: 'Report', title: 'Report', status, done: 4, total: 4, summary,
-} as Awaited<Awaited<ReturnType<typeof startJob>>['done']>) });
+const november = '2026-11';
+const october = '2026-10';
+const december = '2025-12';
+const summary = { return_pct: 5, benchmark_pct: 2, excess_pp: 3, start: '2026-01-01', end: '2026-11-04', complete: true };
+const missing = { snapshot: null, needs_refresh: true, benchmark_needs_refresh: true };
+const fixture: PerformanceBundle = {
+  portefeuille: 'BOOK', current_month: november, available_years: [2026, 2025],
+  years: {
+    '2026': {
+      months: [october, november], warning: null, summary,
+      rows: { [november]: { periode: '2026-11-04', rendement: 0.41 } },
+      weighted_benchmark: { [november]: { return_pct: 0.02, start_date: '2026-10-31', end_date: '2026-11-04', source: 'ETF' } },
+      details: {
+        [october]: missing,
+        [november]: { ...missing, benchmark_needs_refresh: false, snapshot: {
+          opening_weight_date: '2026-10-31',
+          positions: [{ name: 'Sample stock', isin: null, status: 'held', return_pct: 5, contribution_pp: 1,
+            start_date: '2026-10-31', end_date: '2026-11-04' }],
+        } },
+      },
+    },
+    '2025': {
+      months: [december], warning: null, summary: { ...summary, start: '2025-01-01', end: '2025-12-31' },
+      rows: { [december]: { periode: '2025-12-31', rendement: -2 } },
+      weighted_benchmark: {}, details: { [december]: missing },
+    },
+  },
+};
 
-describe('AIRS monthly report', () => {
-  let root: Root;
-  let host: HTMLDivElement;
-  beforeEach(() => {
-    vi.resetAllMocks();
-    invalidateReadCache('monthly panel test');
-    vi.setSystemTime(new Date('2026-10-26T12:00:00Z'));
-    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    host = document.createElement('div'); document.body.appendChild(host);
-    root = createRoot(host);
+let host: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  invalidateReadCache('performance panel test');
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(fixture)));
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+});
+
+it('opens and closes month details from the same data used for the tile', async () => {
+  await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+  const tile = host.querySelectorAll<HTMLButtonElement>('nav button')[1];
+  const contents = tile.textContent;
+  expect(contents).toContain('+0.41%');
+  expect(contents).toContain('+0.02%');
+
+  await act(async () => tile.click());
+  const details = host.querySelector('#monthly-report-details');
+  expect(details?.textContent).toContain('Sample stock');
+  expect(details?.textContent).toContain('+1.00pp');
+  expect(details?.textContent).toContain('+0.41%');
+  expect(details?.textContent).toContain('+0.02%');
+  expect(tile.textContent).toBe(contents);
+
+  await act(async () => tile.click());
+  expect(host.querySelector('#monthly-report-details')).toBeNull();
+  expect(tile.textContent).toBe(contents);
+  expect(apiFetch).toHaveBeenCalledOnce();
+  expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/accounts/BOOK/performance'), expect.anything());
+  expect(startJob).not.toHaveBeenCalled();
+});
+
+it('uses the bundle for prior years and keeps missing data visible without starting jobs', async () => {
+  await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+  const year = host.querySelector('select')!;
+  await act(async () => {
+    year.value = '2025';
+    year.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); });
-  const openOctober = async () => {
-    const button = host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Months"] button')[9];
-    await act(async () => button.click());
-  };
+  const tile = host.querySelector<HTMLButtonElement>('nav button')!;
+  expect(tile.textContent).toContain('-2.00%');
+  await act(async () => tile.click());
+  const details = host.querySelector('#monthly-report-details');
+  expect(details?.textContent).toContain('Position results are not available yet.');
+  expect(details?.textContent).toContain('Benchmark is not available yet.');
+  expect(apiFetch).toHaveBeenCalledOnce();
+  expect(startJob).not.toHaveBeenCalled();
+});
 
-  it('recovers a missing benchmark separately, then replaces the cached month without rereading AIRS', async () => {
-    let ready = false;
-    vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify({
-      ...completeResponse(), benchmark_needs_refresh: !ready,
-      weighted_benchmark: ready ? { '2026-10': { return_pct: 1.23, start_date: '2026-09-30', end_date: '2026-10-23', source: 'ETF' } } : {},
-    })));
-    vi.mocked(startJob).mockImplementation(async (url) => {
-      expect(String(url)).toContain('/monthly-benchmark/job?month=2026-10');
-      ready = true;
-      return job('done');
-    });
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    expect(startJob).toHaveBeenCalledOnce();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
-    expect(host.textContent).toContain('Weighted benchmark · EUR +1.23%');
-    await openOctober();
-    expect(startJob).toHaveBeenCalledOnce();
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.23%');
+it('replaces the bundle only after an explicit refresh', async () => {
+  vi.mocked(startJob).mockResolvedValue({
+    id: 'job', body: {}, done: Promise.resolve({ status: 'done' } as Awaited<Awaited<ReturnType<typeof startJob>>['done']>),
   });
-
-  it('opens a month with only its reported return and individual positions', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
-      '2026-10': { return_pct: 1.23, start_date: '2026-09-30', end_date: '2026-10-23', source: 'ACWI ETF · EUR' },
-    } })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    expect(host.textContent).toContain('-2.00%');
-    expect(host.querySelectorAll('nav button')[9].textContent).toContain('Weighted benchmark · EUR +1.23%');
-    expect(host.querySelector('nav[aria-label="Months"] button')?.textContent).toContain('Jan 2026');
-    expect(host.querySelector('input[type="month"]')).toBeNull();
-    expect(host.querySelector('#monthly-report-details')).toBeNull();
-    await openOctober();
-    expect(host.querySelector('#monthly-report-details')).not.toBeNull();
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('Weighted benchmark return · EUR');
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.23%');
-    expect(host.textContent).not.toContain('€');
-    expect(host.textContent).toContain('Individual positions');
-    expect(host.textContent).toContain('No positions were found');
-    for (const removed of ['Price result', 'Income and costs', 'Investment result', 'Deposits', 'opening capital']) {
-      expect(host.textContent).not.toContain(removed);
-    }
-    expect(host.textContent).not.toContain('Selection');
-    expect(startJob).not.toHaveBeenCalled();
-    expect(vi.mocked(apiFetch).mock.calls[0][0]).toContain('/accounts/BOOK/monthly-report?month=2026-10');
-  });
-
-  it('highlights only the toggled-on tile and clears the highlight when closed', async () => {
-    vi.mocked(apiFetch).mockImplementation(async (url) => {
-      const month = new URL(String(url), 'http://localhost').searchParams.get('month');
-      return new Response(JSON.stringify({ ...completeResponse(), month }));
-    });
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    const tiles = host.querySelectorAll<HTMLButtonElement>('nav button');
-    expect(host.querySelector('nav button[aria-pressed="true"]')).toBeNull();
-    await openOctober();
-    expect(tiles[9].getAttribute('aria-pressed')).toBe('true');
-    expect(tiles[9].className).toContain('bg-accent-500/10');
-    await act(async () => tiles[8].click());
-    expect(tiles[9].getAttribute('aria-pressed')).toBe('false');
-    expect(tiles[9].className).not.toContain('bg-accent-500/10');
-    expect(tiles[8].getAttribute('aria-pressed')).toBe('true');
-    await act(async () => tiles[8].click());
-    expect(host.querySelector('nav button[aria-pressed="true"]')).toBeNull();
-  });
-
-  it('reserves the loaded detail height when toggling the selected month closed', async () => {
-    const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 640));
-    try {
-      vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify(completeResponse())));
-      await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-      await openOctober();
-      const space = host.querySelector<HTMLElement>('[data-month-detail-space]');
-      const nav = host.querySelector('nav');
-      expect(space?.style.minHeight).toBe('640px');
-      await openOctober();
-      expect(host.querySelector('#monthly-report-details')).toBeNull();
-      expect(host.querySelector('nav')).toBe(nav);
-      expect(space?.style.minHeight).toBe('640px');
-      await openOctober();
-      expect(space?.style.minHeight).toBe('640px');
-    } finally { bounds.mockRestore(); }
-  });
-
-  it('keeps the month tiles mounted while another month loads without showing the previous positions', async () => {
-    let resolveReport!: (response: Response) => void;
-    vi.mocked(apiFetch).mockResolvedValueOnce(new Response(JSON.stringify({ ...completeResponse(), snapshot: null })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ...completeResponse(), snapshot: {
-      ...completeResponse().snapshot, positions: [{ name: 'October only', return_pct: 1, status: 'held', contribution_calculation: null }],
-    } }))).mockImplementationOnce(() => new Promise((resolve) => { resolveReport = resolve; }));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    await openOctober();
-    const nav = host.querySelector('nav');
-    const details = host.querySelector('#monthly-report-details');
-    expect(host.textContent).toContain('October only');
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[8].click());
-    expect(host.querySelector('nav')).toBe(nav);
-    expect(host.querySelector('#monthly-report-details')).toBe(details);
-    expect(host.textContent).not.toContain('October only');
-    expect(details?.getAttribute('aria-busy')).toBe('true');
-    await act(async () => resolveReport(new Response(JSON.stringify({ ...completeResponse(), month: '2026-09' }))));
-    expect(host.querySelector('nav')).toBe(nav);
-    expect(details?.getAttribute('aria-busy')).toBe('false');
-  });
-
-  it('uses the Analyse YTD source rather than inventing a second headline from monthly returns', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify(completeResponse())));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio"
-      overviewReturns={{ portfolio: 3.754, benchmark: 9.614, asOf: '2026-10-23', from: '2026-01-01' }} />));
-    const summary = host.querySelector('[aria-label="Compounded returns"]');
-    expect(summary?.textContent).toContain('Return (YTD) · EUR');
-    expect(summary?.textContent).toContain('+3.75%');
-    expect(summary?.textContent).toContain('+9.61%');
-    expect(summary?.textContent).toContain('-5.86pp');
-    expect(summary?.textContent).not.toContain('Compounded portfolio');
-  });
-
-  it('keeps January monthly returns separate from a January-to-October YTD headline', async () => {
-    const data = { ...completeResponse(), months: [
-      { ...observation, month: '2026-01', periode: '2026-01-30', rendement: -0.05 },
-      { ...observation, month: '2026-10', periode: '2026-10-29' },
-    ], weighted_benchmark: {
-      '2026-01': { return_pct: 1.38, start_date: '2025-12-31', end_date: '2026-01-30', source: 'Policy' },
-    } };
-    vi.mocked(apiFetch).mockImplementation(async (url) => new Response(JSON.stringify({
-      ...data, month: new URL(String(url), 'http://localhost').searchParams.get('month'),
-    })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Bustelberg Offensief"
-      overviewReturns={{ portfolio: 6.64, benchmark: 19.26, asOf: '2026-10-29', from: '2026-01-01' }} />));
-    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).toContain('+19.26%');
-    const january = host.querySelector<HTMLButtonElement>('nav[aria-label="Months"] button')!;
-    expect(january.textContent).toContain('Weighted benchmark · EUR +1.38%');
-    expect(january.textContent).not.toContain('+19.26%');
-    await act(async () => january.click());
-    const details = host.querySelector('#monthly-report-details');
-    expect(details?.textContent).toContain('+1.38%');
-    expect(details?.textContent).not.toContain('+19.26%');
-  });
-
-  it('does not substitute YTD when its end date is unknown', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
-      '2026-10': { return_pct: 2.05, source: 'Policy' },
-    } })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio"
-      overviewReturns={{ portfolio: -1.7, benchmark: 1.55, from: '2026-10-15' }} />));
-    expect(host.querySelectorAll('nav[aria-label="Months"] button')[9].textContent)
-      .toContain('Weighted benchmark · EUR +2.05%');
-  });
-
-  it('explains each tile using that month’s source prices without opening positions or fetching AIRS', async () => {
-    const weighted_benchmark = Object.fromEntries([
-      ['2026-01', 100, 101.38, 1.38, '2025-12-31', '2026-01-30'],
-      ['2026-10', 200, 204.1, 2.05, '2026-09-30', '2026-10-23'],
-    ].map(([key, opening, closing, value, start, end]) => [key, {
-      return_pct: value, components: [{ ticker: 'ACWI', weight_pct: 100,
-        start_price_eur: opening, end_price_eur: closing, return_pct: value, start_date: start, end_date: end }],
-    }]));
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    const icon = (key: string) => host.querySelector<HTMLElement>(`[data-month-benchmark="${key}"] span[class*="cursor-help"] > span`)!;
-    await act(async () => icon('2026-01').click());
-    expect(document.body.textContent).toContain('101.38');
-    expect(document.body.textContent).toContain('closing price in EUR ÷ opening price in EUR');
-    expect(document.body.textContent).toContain('(+1.38% × 100 / 100) = +1.38%');
-    expect(host.querySelector('#monthly-report-details')).toBeNull();
-    await act(async () => icon('2026-01').click());
-    await act(async () => icon('2026-10').click());
-    expect(document.body.textContent).toContain('204.10');
-    expect(document.body.textContent).toContain('(+2.05% × 100 / 100) = +2.05%');
-    expect(host.querySelector('#monthly-report-details')).toBeNull();
-    expect(startJob).not.toHaveBeenCalled();
-    expect(apiFetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('uses the AIRS funding window for a portfolio that starts during the selected month', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
-      '2026-10': { return_pct: 2.05, start_date: '2026-09-30', end_date: '2026-10-29', source: 'Policy' },
-    } })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio"
-      overviewReturns={{ portfolio: -1.7, benchmark: 1.55, asOf: '2026-10-29', from: '2026-10-15' }} />));
-    const summary = host.querySelector('[aria-label="Compounded returns"]');
-    expect(summary?.textContent).toContain('+1.55%');
-    expect(summary?.textContent).toContain('15 okt 2026 to Thursday 29 okt 2026');
-    expect(host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Months"] button')[9].textContent)
-      .toContain('Weighted benchmark · EUR +1.55%');
-  });
-
-  it('uses the reported annual source instead of compounding monthly returns', async () => {
-    const months = Array.from({ length: 10 }, (_, i) => ({ ...observation,
-      month: `2026-${String(i + 1).padStart(2, '0')}`, rendement: i === 0 ? 10 : i === 1 ? -10 : 0,
-    }));
-    const weighted_benchmark = Object.fromEntries(months.map((row, i) => [row.month, {
-      return_pct: i < 2 ? 5 : 0, start_date: '2026-01-01', end_date: '2026-10-23', source: 'Policy',
-    }]));
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...response(), months, weighted_benchmark, year_summary: { return_pct: 7.59, benchmark_pct: 5.12, start: '2026-06-01', end: '2026-10-23' } })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    const summary = host.querySelector('[aria-label="Compounded returns"]');
-    expect(summary?.textContent).toContain('+7.59%');
-    expect(summary?.textContent).toContain('+5.12%');
-    expect(summary?.children).toHaveLength(3);
-    expect(summary?.lastElementChild?.textContent).toContain('Excess+2.47pp');
-    expect(summary?.compareDocumentPosition(host.querySelector('nav')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-  });
-
-
-  it('selects a historical year with twelve months and its own annual headline', async () => {
-    vi.setSystemTime(new Date('2027-01-04T12:00:00Z'));
-    vi.mocked(apiFetch).mockImplementation(async (url) => {
-      const month = new URL(String(url), 'http://localhost').searchParams.get('month')!;
-      return new Response(JSON.stringify({ ...response(), month, available_years: [2027, 2026],
-        months: month.startsWith('2026') ? [{ ...observation, month: '2026-12', periode: '2026-12-31' }] : [],
-        year_summary: month.startsWith('2026')
-          ? { return_pct: 7.59, benchmark_pct: 5.12, start: '2026-06-01', end: '2026-12-31', complete: true }
-          : { return_pct: null, benchmark_pct: null, start: null, end: null, complete: false },
-      }));
-    });
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Portfolio"
-      overviewReturns={{ portfolio: 99, benchmark: 98, from: '2026-01-01', asOf: '2026-12-31' }} />));
-    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).not.toContain('+99.00%');
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Reporting year"]')!;
-    await act(async () => { select.value = '2026'; select.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(host.querySelectorAll('nav[aria-label="Months"] button')).toHaveLength(12);
-    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).toContain('+7.59%');
-    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).toContain('Annual return');
-    expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('month=2026-12&include_details=false'), expect.anything());
-    expect(startJob).not.toHaveBeenCalled();
-    await act(async () => { select.value = '2027'; select.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(host.querySelectorAll('nav[aria-label="Months"] button')).toHaveLength(1);
-    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).not.toContain('+99.00%');
-  });
-
-  it('keeps last year selectable on January 1 without showing its return as new YTD', async () => {
-    vi.setSystemTime(new Date('2027-01-01T12:00:00Z'));
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...response(), month: '2027-01',
-      months: [], available_years: [2027, 2026], year_summary: { return_pct: null, benchmark_pct: null, start: null, end: null },
-    })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Portfolio"
-      overviewReturns={{ portfolio: 7.59, benchmark: 5.12, asOf: '2026-12-31', from: '2026-06-01' }} />));
-    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).not.toContain('+7.59%');
-    expect(host.querySelector('select')?.textContent).toContain('2026');
-    expect(startJob).not.toHaveBeenCalled();
-  });
-
-  it('automatically loads missing results on selection without fabricating zero returns', async () => {
-    vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify({ ...response(), months: [] })));
-    vi.mocked(startJob).mockResolvedValue(job('failed', 'AIRS unavailable'));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    await openOctober();
-    expect(host.textContent).toContain('Return unavailable');
-    expect(host.textContent).not.toContain('€0.00');
-    expect(host.textContent).not.toContain('0.00%');
-    expect(startJob).toHaveBeenCalledOnce();
-  });
-
-  it('retains a partial-download failure after reloading the saved result', async () => {
-    vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(response())));
-    vi.mocked(startJob).mockResolvedValue({ id: 'job', body: {}, done: Promise.resolve({
-      id: 'job', kind: 'report', label: 'Report', title: 'Report', status: 'failed',
-      done: 5, total: 5, summary: 'Closing valuation could not be downloaded',
-    } as Awaited<Awaited<ReturnType<typeof startJob>>['done']>) });
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    await openOctober();
-    expect(startJob).toHaveBeenCalledOnce();
-    expect(host.textContent).toContain('Closing valuation could not be downloaded');
-    expect(apiFetch).toHaveBeenCalledTimes(3); // tiles, selected month, post-job replacement
-  });
-
-  it('refreshes a stale saved report automatically, then displays the saved replacement', async () => {
-    let refreshed = false;
-    vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(refreshed
-      ? completeResponse() : { ...completeResponse(), needs_refresh: true })));
-    vi.mocked(startJob).mockImplementation(async () => { refreshed = true; return job('done'); });
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    expect(startJob).not.toHaveBeenCalled();
-    await openOctober();
-    expect(startJob).toHaveBeenCalledOnce();
-    expect(apiFetch).toHaveBeenCalledTimes(3); // tiles, selected month, post-job replacement
-    expect(host.textContent).toContain('No positions were found');
-    await openOctober();
-    await openOctober();
-    expect(startJob).toHaveBeenCalledOnce();
-  });
-
-  it('does not launch AIRS when persistent storage cannot be read', async () => {
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...response(), warning: 'Storage unavailable' })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    await openOctober();
-    expect(host.textContent).toContain('Storage unavailable');
-    expect(startJob).not.toHaveBeenCalled();
-  });
-
-  it('reopens a completed historical month from memory without another DB or AIRS request', async () => {
-    vi.mocked(apiFetch).mockImplementation(async (url) => {
-      const selected = new URL(String(url), 'http://localhost').searchParams.get('month')!;
-      return new Response(JSON.stringify({ ...completeResponse(), month: selected }));
-    });
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    const selectSeptember = async () => {
-      await act(async () => host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Months"] button')[8].click());
-    };
-    await selectSeptember();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
-    await openOctober();
-    expect(apiFetch).toHaveBeenCalledTimes(3); // first full October request, after tiles and September
-    await openOctober();
-    await openOctober();
-    expect(apiFetch).toHaveBeenCalledTimes(3);
-    await selectSeptember();
-    expect(apiFetch).toHaveBeenCalledTimes(3);
-    expect(startJob).not.toHaveBeenCalled();
-  });
-
-  it('shows prefetched tiles immediately and fetches one complete report only after a tile click', async () => {
-    const report = completeResponse();
-    const full = { ...report,
-      weighted_benchmark: { '2026-10': { return_pct: 1.23, start_date: '2026-09-30', end_date: '2026-10-23', source: 'ETF' } },
-      snapshot: { ...report.snapshot, positions: [{ name: 'Sample stock', isin: 'TEST', status: 'held',
-        return_pct: 5, contribution_pp: 1, opening_weight_pct: 20,
-        start_date: '2026-09-30', end_date: '2026-10-23', contribution_calculation: null }] },
-    };
-    vi.mocked(apiFetch).mockImplementation(async (url) => new Response(JSON.stringify(
-      String(url).includes('include_details=false') ? { ...full, snapshot: null } : full)));
-    await loadPerformanceTiles('BOOK', '2026-10');
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    expect(apiFetch).toHaveBeenCalledOnce();
-    expect(String(vi.mocked(apiFetch).mock.calls[0][0])).toContain('include_details=false');
-    expect(host.querySelector('#monthly-report-details')).toBeNull();
-    expect(host.textContent).toContain('Weighted benchmark · EUR +1.23%');
-    expect(startJob).not.toHaveBeenCalled();
-    await openOctober();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
-    expect(String(vi.mocked(apiFetch).mock.calls[1][0])).toContain('include_details=true');
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('Sample stock');
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+5.00%');
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.00pp');
-    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.23%');
-    expect(startJob).not.toHaveBeenCalled();
-    await openOctober();
-    await openOctober();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('shows the actual contribution calculation and dated trades in its info popover', async () => {
-    const data = completeResponse();
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...data, snapshot: { ...data.snapshot,
-      positions: [{ name: 'Bought stock', isin: 'TEST', status: 'bought', return_pct: 5,
-        contribution_pp: .5, opening_weight_pct: 0, contribution_calculation: {
-          opening_value_eur: 0, closing_value_eur: 1050, sales_eur: 0, purchases_eur: 1000,
-          result_eur: 50, portfolio_opening_capital_eur: 10000,
-          opening_date: '2026-09-30', closing_date: '2026-10-23',
-          trades: [{ date: '2026-10-10', kind: 'buy', amount_eur: 1000 }],
-        } }],
-    } })));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    await openOctober();
-    const contribution = host.querySelector('tbody tr')!.querySelectorAll('td')[3];
-    await act(async () => contribution.querySelector<HTMLElement>('span span')!.click());
-    expect(document.body.textContent).toContain('Contribution calculation');
-    expect(document.body.textContent).toContain('− Purchases');
-    expect(document.body.textContent).toContain('€50.00 / €10,000.00 × 100 = +0.50pp');
-    expect(document.body.textContent).toContain('10 okt 2026 · Bought');
-    expect(document.body.textContent).toContain('not yet reconciled');
-  });
-
-  it('shows monthly position percentages and holding dates without raw amounts or extra sections', async () => {
-    const section = <T,>(data: T) => ({ status: 'ok', data });
-    const valuation = { as_of: '2026-10-23', requested_date: '2026-10-23', rows: [
-      { name: 'Sample stock', isin: 'TEST', currency: 'EUR', quantity: 987, value_eur: 43210, weight_pct: 25 },
-    ] };
-    const data = { ...response(), needs_refresh: false, snapshot: { start: '2026-10-01', end: '2026-10-23',
-      fetched_at: '2026-10-26T12:00:00Z', positions: [
-        { name: 'Sample stock', isin: 'TEST', return_pct: 5, opening_weight_pct: 20, contribution_pp: 1, start_date: '2026-09-30', end_date: '2026-10-23', status: 'held' },
-      ], reconciliation: { status: 'not_reconciled', monthly_return_pct: -2, contribution_sum_pp: 1,
-        difference_pp: -3, adjustments: [], issues: ['return_mismatch'] }, sections: {
-        performance: section(observation), opening: section(valuation), closing: section(valuation),
-        transactions: section({ columns: ['Amount'], kinds: { Amount: 'number' }, rows: [{ Amount: 1234 }],
-          readable: true, activity: [{ name: 'Sample stock', kind: 'buy', date: '2026-10-10', amount_eur: 1234, quantity: 987 }] }),
-        journal: section([{ boekdatum: '2026-10-10', fonds: 'Sample stock', grootboek: 'Dividend', omschrijving: 'Raw amount 1234', amount_eur: 12 }]),
-      } } };
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify(data)));
-    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
-    await openOctober();
-    expect(host.textContent).toContain('+5.00%');
-    expect(host.textContent).toContain('Opening weight (%)');
-    expect(host.textContent).toContain('Contribution (pp)');
-    expect(host.textContent).toContain('20.00%');
-    expect(host.textContent).toContain('+1.00pp');
-    expect(host.textContent).toContain('Unexplained difference');
-    expect(host.textContent).toContain('-3.00pp');
-    expect(host.textContent).toContain('Not reconciled:');
-    expect(host.textContent).toContain('Return in EUR (%)');
-    expect(host.textContent).toContain('Sample stock');
-    expect(host.textContent).toContain('Wednesday 30 sept 2026 to Friday 23 okt 2026');
-    for (const forbidden of ['€', '43,210', '43210', '1,234', '987', 'Raw amount']) expect(host.textContent).not.toContain(forbidden);
-    expect(host.textContent).not.toContain('Month overview');
-    await openOctober();
-    expect(host.querySelector('#monthly-report-details')).toBeNull();
-  });
+  await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+  await act(async () => host.querySelector<HTMLButtonElement>('nav button')!.click());
+  const refresh = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Load month from AIRS')!;
+  await act(async () => refresh.click());
+  expect(startJob).toHaveBeenCalledWith(expect.stringContaining('/monthly-report/job?month=2026-10'), 'Client portfolio');
+  expect(apiFetch).toHaveBeenCalledTimes(2);
+  expect(host.querySelector('#monthly-report-details')).not.toBeNull();
 });
