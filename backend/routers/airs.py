@@ -2328,6 +2328,7 @@ class ActiveShare(BaseModel):
     #:  How much of the index we could price. A missing constituent does not lose its weight, it
     #: redistributes it — so an unpriceable name we do not hold makes active share read LOW.
     benchmark_covered_pct: float | None = None
+    benchmark_workbook_as_of: str | None = None
 
     #:  WHEN THE INDEX'S CAPS WERE READ — the OLDEST and NEWEST stamp across its constituents,
     #: because a cap-weighted index is exactly as current as the caps under it and those are

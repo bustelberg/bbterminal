@@ -1,14 +1,11 @@
 # Verifying changes — tests, tiers, CI
 
-> Split out of `CLAUDE.md` (2026-08-17) to keep the always-loaded file small. Content is verbatim; `CLAUDE.md` carries a one-line index entry pointing here.
-
 **No git hooks** — there are intentionally no pre-commit / pre-push hooks (husky was removed); commits and pushes stay fast, and all gating runs in **CI** on push (see below). Run the local checks yourself when you want fast feedback before pushing:
 
 > ## ⚠ UNIT TESTS ONLY — NOTHING ELSE, ANYWHERE (2026-07-23)
 >
-> Every test in this repo is a **fast unit test**: `backend/tests/` pytest and colocated
-> `frontend/**/*.test.ts` vitest, running in milliseconds against in-memory fakes
-> (`tests/_fake_supabase.py`) or frozen fixtures. Nothing else.
+> Backend tests use pytest and in-memory fakes or frozen fixtures. Frontend tests use Vitest
+> with colocated `*.test.ts` and `*.test.tsx` files, including component and page tests with a simulated DOM.
 >
 > **Deleted, do not re-add**: the Playwright e2e suite (`frontend/e2e/`, `playwright.config.ts`,
 > the `@playwright/test` dep, the `E2E_BYPASS_AUTH` proxy short-circuit and `lib/authBypass.ts`),

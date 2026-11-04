@@ -67,6 +67,17 @@
             "title": "Benchmark Members",
             "type": "integer"
           },
+          "benchmark_workbook_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Workbook As Of"
+          },
           "n_holdings": {
             "default": 0,
             "title": "N Holdings",
@@ -19565,7 +19576,7 @@
     },
     "/api/acwi/holdings": {
       "get": {
-        "description": "Current iShares ACWI ETF holdings parsed from the bundled XLS.",
+        "description": "Current iShares ACWI ETF holdings from the newest saved snapshot.",
         "operationId": "acwi_holdings_api_acwi_holdings_get",
         "responses": {
           "200": {

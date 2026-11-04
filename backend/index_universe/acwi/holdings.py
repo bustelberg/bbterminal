@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import csv
 import math
+import logging
 from datetime import datetime
 
 from lxml import etree
@@ -21,6 +22,7 @@ _DATA_DIR = os.path.dirname(os.path.dirname(__file__))
 _FILE = os.path.join(_DATA_DIR, "iShares-MSCI-ACWI-ETF_fund.xls")
 _CSV_FILE = os.path.join(_DATA_DIR, "iShares-MSCI-ACWI-ETF_holdings.csv")
 _NS = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
+log = logging.getLogger(__name__)
 
 
 def _parse_xml_spreadsheet(path: str) -> list[list[str]]:
@@ -87,7 +89,13 @@ def load_acwi_holdings() -> tuple[list[dict], str]:
 def _parse_holdings_csv(path: str) -> tuple[list[dict], str]:
     """Keep the original issuer snapshot; derive precision from values, not rounded weights."""
     with open(path, encoding='utf-8-sig', newline='') as stream:
-        rows = list(csv.reader(stream))
+        return parse_holdings_csv(stream)
+
+
+def parse_holdings_csv(stream) -> tuple[list[dict], str]:
+    rows = list(csv.reader(stream))
+    if not rows or not rows[0] or rows[0][0].strip() != 'iShares MSCI ACWI ETF':
+        raise ValueError('Unexpected iShares fund in ACWI holdings download')
     stamp = next((row[1].strip() for row in rows if row and row[0] == 'Fund Holdings as of' and len(row) > 1), '')
     as_of = datetime.strptime(stamp, '%b %d, %Y').date().isoformat()
     index = next(i for i, row in enumerate(rows) if row[:2] == ['Ticker', 'Name'])
@@ -99,6 +107,21 @@ def _parse_holdings_csv(path: str) -> tuple[list[dict], str]:
     total = sum(values)
     for row, value in zip(equities, values):
         # Small constituents round to 0.00% in the CSV but have real, nonzero weights.
+        row['Published Weight (%)'] = row.get('Weight (%)')
         row['Weight (%)'] = str(value / total * 100)
         row['Currency'] = row.get('Market Currency') or row.get('Currency') or ''
     return equities, as_of
+
+
+def load_latest_acwi_holdings() -> tuple[list[dict], str]:
+    """Use the newest archived source. Keep the bundled export as the bootstrap."""
+    from deps import supabase
+
+    try:
+        rows = (supabase.table('acwi_holdings_snapshot').select('as_of,holdings')
+                .order('as_of', desc=True).limit(1).execute().data or [])
+        if rows:
+            return rows[0]['holdings'], rows[0]['as_of']
+    except Exception:
+        log.warning('Could not read the archived ACWI holdings; using the bundled snapshot', exc_info=True)
+    return load_acwi_holdings()

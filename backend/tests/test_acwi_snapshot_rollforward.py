@@ -1,4 +1,4 @@
-"""A new ACWI snapshot is usable before the next price bar exists."""
+"""ACWI snapshot weights remain fixed between imports."""
 import pytest
 
 from routers import _active_share as active, _asset_benchmark as prices, _benchmark_index as pricing
@@ -10,8 +10,8 @@ def snapshot(monkeypatch):
     from index_universe.acwi import asset_membership, holdings
     rows = [{"analysis_id": aid, "name": name, "weight_pct": weight, "currency": "EUR"}
             for aid, name, weight in ((1, "Apple Inc", 60), (2, "Microsoft Corp", 40))]
-    monkeypatch.setattr(asset_membership, "resolve", lambda: (rows, {"as_of": "2026-10-29"}))
-    monkeypatch.setattr(holdings, "load_acwi_holdings", lambda: ([
+    monkeypatch.setattr(asset_membership, "resolve", lambda *_: (rows, {"as_of": "2026-10-29"}))
+    monkeypatch.setattr(holdings, "load_latest_acwi_holdings", lambda: ([
         {"Name": row["name"], "Weight (%)": row["weight_pct"]} for row in rows], "2026-10-29"))
     monkeypatch.setattr(active, "load_rows_via_copy", lambda *args: [])
     monkeypatch.setattr(active, "supabase", FakeSupabase())
@@ -19,28 +19,11 @@ def snapshot(monkeypatch):
     return rows
 
 
-@pytest.mark.parametrize("direct_marks", [True, False])
-def test_snapshot_keeps_published_weights_without_a_new_bar(snapshot, monkeypatch, direct_marks):
-    marks = {aid: {"start": ("2026-10-29", 100), "end": ("2026-10-29", 100)} for aid in (1, 2)}
-    monkeypatch.setattr(prices, "window_marks", lambda *args: marks if direct_marks else {})
-    monkeypatch.setattr(prices, "_asset_closes", lambda *args: {aid: [("2026-10-29", 100)] for aid in (1, 2)})
+def test_snapshot_ignores_newer_marks_and_does_not_need_old_marks(snapshot, monkeypatch):
+    monkeypatch.setattr(prices, "window_marks", lambda *args: pytest.fail("snapshot weights must not use prices"))
     result = active._load_benchmark_weights("ACWI", None)
-    weights = sorted(row["weight_pct"] for row in result["bench"].values())
-    assert weights == pytest.approx([40, 60])
-    for row in result["bench"].values():
-        assert row["weight_calculation"]["return_eur_pct"] == 0
-        assert row["weight_calculation"]["as_of"] == "2026-10-29"
-
-
-def test_snapshot_mixes_unchanged_and_newer_marks_without_dropping_members(snapshot, monkeypatch):
-    monkeypatch.setattr(prices, "window_marks", lambda *args: {
-        1: {"start": ("2026-10-29", 100), "end": ("2026-10-30", 110)},
-        2: {"start": ("2026-10-29", 100), "end": ("2026-10-29", 100)},
-    })
-    result = active._load_benchmark_weights("ACWI", None)
-    weights = {row["name"]: row["weight_pct"] for row in result["bench"].values()}
-    assert weights["Apple Inc"] == pytest.approx(66 / 106 * 100)
-    assert weights["Microsoft Corp"] == pytest.approx(40 / 106 * 100)
+    assert result["coverage"]["workbook_as_of"] == "2026-10-29"
+    assert {key: row["weight_pct"] for key, row in result["bench"].items()} == {"apple": 60, "microsoft": 40}
 
 
 def test_return_windows_still_require_two_dates():
@@ -48,14 +31,6 @@ def test_return_windows_still_require_two_dates():
     marks = {1: {"start": ("2026-10-29", 100), "end": ("2026-10-29", 100)}}
     assert pricing._window_rows([member], {}, {}, "2026-10-29", marks=marks)[0] == []
     assert pricing._window_rows([member], {}, {}, "2026-10-29", marks=marks, allow_single_mark=True)[0][0]["return_eur_pct"] == 0
-
-
-def test_absent_opening_history_is_not_fabricated(snapshot, monkeypatch):
-    monkeypatch.setattr(prices, "window_marks", lambda *args: {
-        1: {"start": None, "end": ("2026-10-30", 110)},
-    })
-    with pytest.raises(active.IssuerError, match="no usable stored opening prices and FX"):
-        active._load_benchmark_weights("ACWI", None)
 
 
 @pytest.mark.parametrize("stock_target", [100, 60, 30])

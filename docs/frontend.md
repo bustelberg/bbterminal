@@ -45,4 +45,6 @@ Others (orientation): `/` welcome · `/longequity-universe` · `/airs-portfolio`
 
 **Stores** (`frontend/lib/stores/`): lightweight reactive `createStore`. `momentum.ts` holds SSE-driven backtest + current portfolio state.
 
+## Company comparisons in Research Dashboard
 
+Company B uses the Fundamental charts’ benchmark slot so both lines share the same calculation and axes. Pass the actual `BenchTarget` through to chart helpers. Its label is display text and its identity can be a universe or an ISIN. Period-specific market-cap weights apply to universe targets only. The picker uses the scoped asset search endpoint. Keep its exact user read permission and preserve `ilike_pattern` escaping for PostgREST filter delimiters.

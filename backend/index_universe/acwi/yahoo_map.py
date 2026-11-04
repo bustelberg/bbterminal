@@ -72,7 +72,7 @@ EXCHANGE_SUFFIX: dict[str, str] = {
     "Stock Exchange Of Thailand": ".BK",
     "Philippine Stock Exchange": ".PS",
     "Gretai Securities Market": ".TWO",
-    "Xetra": ".DE",
+    "Xetra": ".DE", "Deutsche Boerse Xetra": ".DE",
     "Nyse Euronext - Euronext Paris": ".PA",
     "Euronext Amsterdam": ".AS",
     "Euronext Brussels": ".BR", "Nyse Euronext - Euronext Brussels": ".BR",

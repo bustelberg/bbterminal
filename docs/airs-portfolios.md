@@ -513,3 +513,9 @@ bundles are protected against overwrite by daily preparation. This uses the exis
 AIRS session lock within the daily workflow; it adds no second account/model scan
 or independent cron job. The weekday cutoff does not infer a market holiday calendar;
 missing final valuations remain explicitly pending.
+
+## Diagnosing missing AIRS valuations
+
+In `airs_vermogen._vermogen_most_recent`, a failed valuation lookup initially applies only to the account that made it. A shared miss can skip a date only after the quorum is met and the date is newer than the latest proven valuation. The memo expires on the read path so single-account refreshes can see valuations published after a fleet scan. The saved `reports_ok` badge clears when a refresh successfully retrieves the report. See [diagnose_missing_reports.py](../backend/scripts/diagnose_missing_reports.py) and the valuation-discovery tests in `test_airs_html_fragment.py`.
+
+Analyse opens with the AIRS cumulative book-return series. Performance and Risk load their respective bundles when opened. The current book-return chart uses the dated AIRS observations. It does not derive returns from holdings values.

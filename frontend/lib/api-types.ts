@@ -93,7 +93,7 @@ export interface paths {
         };
         /**
          * Acwi Holdings
-         * @description Current iShares ACWI ETF holdings parsed from the bundled XLS.
+         * @description Current iShares ACWI ETF holdings from the newest saved snapshot.
          */
         get: operations["acwi_holdings_api_acwi_holdings_get"];
         put?: never;
@@ -9190,6 +9190,8 @@ export interface components {
              * @default 0
              */
             benchmark_members?: number;
+            /** Benchmark Workbook As Of */
+            benchmark_workbook_as_of?: string | null;
             /**
              * N Holdings
              * @default 0

@@ -103,9 +103,9 @@ def _acwi_file_member_names() -> list[str]:
             and now < _acwi_file_member_names_cache[0]):
         return list(_acwi_file_member_names_cache[1])
 
-    from index_universe.acwi.holdings import load_acwi_holdings  # noqa: PLC0415
+    from index_universe.acwi.holdings import load_latest_acwi_holdings  # noqa: PLC0415
 
-    holdings, _as_of = load_acwi_holdings()
+    holdings, _as_of = load_latest_acwi_holdings()
     names = sorted({str(h.get("Name") or "").strip()
                     for h in holdings
                     if (h.get("Asset Class") or "").strip() == "Equity"

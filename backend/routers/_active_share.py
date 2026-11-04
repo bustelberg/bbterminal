@@ -26,11 +26,7 @@ DIFFERENT one, and mixing the two is how a 30% figure becomes uncomparable with 
 `stocks_pct` says how much of the book this sleeve actually is, so the renormalisation is never
 silent.
 
- THE BENCHMARK IS NOT FLOAT-ADJUSTED and is priced over the names we can bridge — the same two
-caveats `_asset_benchmark` carries, and they land differently here than on a return. A missing
-constituent does not reduce the index's weight in the rest, it INFLATES it (renormalisation), so an
-unheld name we cannot price makes active share read slightly LOW. `benchmark_covered_pct` is
-returned so the figure is never read as exact.
+ ACWI uses the full dated iShares equity snapshot until the next import.
 """
 from __future__ import annotations
 
@@ -442,6 +438,7 @@ def compute_active_share(holdings: list[dict], benchmark: str,
         "off_benchmark_pct": sum(r["portfolio_pct"] for r in held if not r["in_benchmark"]),
         "benchmark_members": len(bench),
         "benchmark_covered_pct": coverage.get("covered_pct"),
+        "benchmark_workbook_as_of": coverage.get("workbook_as_of"),
         #  When the index side was measured — a RANGE, and separate from the book's own date.
         # The two sides of this comparison are read from different places on different schedules
         # (the book from AIRS, the caps from Yahoo), so one "as of" over the pair would be a date
@@ -477,7 +474,7 @@ def _benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict:
         saved['issuer_by_asset'] = {int(key): value for key, value in saved['issuer_by_asset'].items()}
         return saved
 
-    cache_key = ("risk-workbook-identity-v9", benchmark.upper(), benchmark_start, date.today().isoformat(),
+    cache_key = ("risk-workbook-identity-v11", benchmark.upper(), benchmark_start, date.today().isoformat(),
                  revision, prepared.code_version() if revision is not None else None)
     with _benchmark_lock:
         return deepcopy(leg(cache_key, lambda: _load_benchmark_weights(benchmark, benchmark_start)))
@@ -507,102 +504,29 @@ def _load_benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict
                     "caps_to": max(dates) if dates else benchmark_start,
                     "caps_unstamped": len(positive) - len(dates)}
     elif benchmark.upper() == "ACWI":
-        # The iShares workbook supplies the actual dated ACWI weights. Roll each forward by its
-        # yfinance EUR return, then normalise: this is today's composition implied by that file,
-        # not a substitute full-market-cap index.
-        from index_universe.acwi.asset_membership import resolve  # noqa: PLC0415
-        from index_universe.acwi.holdings import load_acwi_holdings
-        raw_members, _ = load_acwi_holdings()
-        file_rows, file_stats = resolve()
-        file_weights = {int(r["analysis_id"]): float(r.get("weight_pct") or 0) for r in file_rows}
-        issuer_by_asset = {int(r["analysis_id"]): _issuer_key(r.get("name")) for r in file_rows}
-        from datetime import date, timedelta
+        from index_universe.acwi.asset_membership import resolve
+        from index_universe.acwi.holdings import load_latest_acwi_holdings
         from index_universe.acwi.reconstruction import _parse_xls_as_of
-        from routers._asset_benchmark import window_marks, _asset_closes
-        from routers._benchmark_index import _window_rows, _fx_to_eur
-        parsed = _parse_xls_as_of(str(file_stats.get("as_of") or ""))
+
+        raw_members, snapshot_date = load_latest_acwi_holdings()
+        parsed = _parse_xls_as_of(snapshot_date)
         if parsed is None:
-            raise IssuerError("The ACWI workbook has no valid weight snapshot date.")
+            raise IssuerError("The iShares ACWI holdings have no valid snapshot date.")
         start = parsed.isoformat()
-        end = date.today().isoformat()
-        ids = list(file_weights)
-        columns = "analysis_id,isin,currency,name,gf_company_name"
-        grid_rows = load_rows_via_copy("asset_grid", columns, "analysis_id", ids)
-        if grid_rows is None:
-            grid_rows = []
-            for offset in range(0, len(ids), IN_CHUNK_SIZE):
-                grid_rows += (supabase.table("asset_grid").select(columns)
-                              .in_("analysis_id", ids[offset:offset + IN_CHUNK_SIZE]).execute().data or [])
-        grid = {int(row["analysis_id"]): row for row in grid_rows}
-        price_members = []
-        for row in file_rows:
-            aid = int(row["analysis_id"])
-            g = grid.get(aid, {})
-            # The ACWI workbook's constituent name is the stable fallback. A local asset-grid
-            # row may have a blank display name; preferring it made the benchmark top-five table
-            # show weights beside empty company cells.
-            price_members.append({"company_id": aid, "company_name": row.get("name") or g.get("gf_company_name") or g.get("name"),
-                                  "isin": g.get("isin"), "currency": g.get("currency") or row.get("currency"),
-                                  "gurufocus_ticker": row.get("yahoo_symbol"), "market_cap_eur": 1.0})
-        lookback = (parsed - timedelta(days=45)).isoformat()
-        marks = window_marks(ids, lookback, start, end)
-        fx = _fx_to_eur({m.get("currency") or "USD" for m in price_members}, lookback, end)
-        priced, _ = _window_rows(price_members, {} if marks else _asset_closes(ids, lookback, end),
-                                 fx, start, marks=marks or None, allow_single_mark=True)
-        coverage = {"workbook_as_of": start}
-        grown = [(r, file_weights.get(int(r["company_id"]), 0.0) * (1 + float(r.get("return_eur_pct") or 0) / 100))
-                 for r in priced if file_weights.get(int(r["company_id"]), 0) > 0 and r.get("return_eur_pct") is not None]
-        total = sum(weight for _r, weight in grown)
-        if total <= 0:
-            raise IssuerError(f"ACWI weights dated {start} have no usable stored opening prices and FX. "
-                              "The daily market-data refresh needs to prepare these inputs.")
+        file_rows, _ = resolve((raw_members, snapshot_date))
+        issuer_by_asset = {int(r["analysis_id"]): membership_key(r.get("name"), start) for r in file_rows}
         bench = _fold([
-            (_issuer_key(r.get("company_name")) or f"isin:{(r.get('isin') or '').upper()}",
-             r.get("company_name") or "", weight / total * 100.0)
-            for r, weight in grown
+            (membership_key(row.get("Name"), start), row["Name"],
+             float(str(row.get("Weight (%)") or 0).replace(",", ".")))
+            for row in raw_members if row.get("Name")
         ])
-        prices_by_issuer: dict[str, list[dict]] = {}
-        for r, grown_weight in grown:
-            key = _issuer_key(r.get("company_name")) or f"isin:{(r.get('isin') or '').upper()}"
-            slot = bench[key]
-            slot["workbook_weight_pct"] = slot.get("workbook_weight_pct", 0.0) + file_weights[int(r["company_id"])]
-            slot["grown_weight"] = slot.get("grown_weight", 0.0) + grown_weight
-            prices_by_issuer.setdefault(key, []).append({k: r.get(k) for k in (
-                "ticker", "start_date", "end_date", "start_price_eur", "end_price_eur")})
+        total = sum(row["weight_pct"] for row in bench.values())
+        if total <= 0:
+            raise IssuerError(f"The iShares ACWI holdings dated {start} have no usable weights.")
         for slot in bench.values():
-            slot["yfinance_return_pct"] = (slot["grown_weight"] / slot["workbook_weight_pct"] - 1) * 100
-            slot["normalisation_total"] = total
-            slot["weight_calculation"] = {
-                "as_of": start, "initial_weight_pct": slot["workbook_weight_pct"],
-                "return_eur_pct": slot["yfinance_return_pct"],
-                "normalisation_total": total, "result_pct": slot["weight_pct"],
-                "prices": prices_by_issuer[slot["key"]],
-            }
-        # A workbook constituent with a temporarily missing price is still an ACWI constituent.
-        # Keep its issuer identity in the comparison (at zero rolled-forward weight) so a held
-        # name is never labelled outside the index merely because its price row was unavailable.
-        grown_ids = {int(r["company_id"]) for r, _weight in grown}
-        for file_row in file_rows:
-            aid = int(file_row["analysis_id"])
-            if aid in grown_ids:
-                continue
-            name = str(file_row.get("name") or file_row.get("ticker") or "")
-            if not name:
-                continue
-            key = _issuer_key(name)
-            if key:
-                bench.setdefault(key, {"key": key, "name": name, "weight_pct": 0.0})
-        # Asset resolution and price coverage must never decide membership. A raw source
-        # member remains visible even if it has no stored listing at all.
-        for source_row in raw_members:
-            key = membership_key(source_row.get('Name'), start)
-            if key:
-                bench.setdefault(key, {'key': key, 'name': source_row['Name'], 'weight_pct': 0.0})
-        priced_ids = {int(row['company_id']) for row, _ in grown}
-        source_weight = sum(float(str(row.get('Weight (%)') or 0).replace(',', '.')) for row in raw_members)
-        coverage = {**coverage, "workbook_as_of": start,
-                    'covered_pct': (sum(weight for aid, weight in file_weights.items() if aid in priced_ids)
-                                    / source_weight * 100) if source_weight > 0 else None}
+            slot["workbook_weight_pct"] = slot["weight_pct"]
+            slot["weight_pct"] = slot["weight_pct"] / total * 100.0
+        coverage = {"workbook_as_of": start}
     else:
         mem, coverage = members(benchmark)
         cap_total = sum(float(m.get("market_cap_eur") or 0) for m in mem)

@@ -2657,9 +2657,9 @@ def _member_count_total(body: FundamentalCoverageRequest, cov: dict) -> int:
     if body.universe != "ACWI":
         return fallback
     try:
-        from index_universe.acwi.holdings import load_acwi_holdings  # noqa: PLC0415
+        from index_universe.acwi.holdings import load_latest_acwi_holdings  # noqa: PLC0415
 
-        holdings, _as_of = load_acwi_holdings()
+        holdings, _as_of = load_latest_acwi_holdings()
         return len(holdings) or fallback
     except Exception:  # noqa: BLE001 - disclosure must not block an otherwise valid chart
         _log.warning("Could not read the bundled ACWI holdings workbook for the member count",

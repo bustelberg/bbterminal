@@ -394,3 +394,7 @@ OpenFIGI ticker resolutions: `ticker` is the input we tried to look up, the `gur
 | `universe_full_stats()` | One-shot aggregate per universe (total/unique counts, monthly counts, sector counts) used by `/api/universe/labels`. |
 
 A `set_admin_role_on_signup()` trigger on `auth.users` stamps `app_metadata.role = 'admin'` when a new user's SHA-256(lower(email)) matches a hardcoded admin-hash allowlist (keeps admin emails out of source).
+
+### Sequence drift after explicit-ID imports
+
+If an insert fails on an existing primary-key value after a clone or import, check the backing sequence. Explicit IDs do not advance it, and an interrupted clone can skip the sequence-resync step. The report in [resync-sequences.sql](../scripts/resync-sequences.sql) identifies drift. Its repair only advances sequences and is safe to repeat. The script checks the column default when `pg_get_serial_sequence` cannot find an unowned sequence. Runtime recovery in `common/sequences.py` is restricted to primary-key violations. A business uniqueness conflict needs a different diagnosis.

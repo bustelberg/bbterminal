@@ -1,5 +1,9 @@
 -- Risk weights are already part of the request identity. A different account's
 -- AIRS holdings, transactions or display-name update cannot invalidate them.
+ALTER TABLE public.analyse_source_revision
+  DROP CONSTRAINT IF EXISTS analyse_source_revision_scope_check,
+  ADD CONSTRAINT analyse_source_revision_scope_check CHECK (scope IN ('holdings', 'acwi', 'risk'));
+
 INSERT INTO public.analyse_source_revision(scope) VALUES ('risk') ON CONFLICT DO NOTHING;
 
 -- Keep existing Analyse invalidation triggers; add a dedicated market/identity

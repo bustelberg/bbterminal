@@ -50,6 +50,18 @@ def ex(isin: str, symbol: str, name: str, aid: int) -> dict:
     return {"isin": isin, "yahoo_symbol": symbol, "name": name, "analysis_id": aid}
 
 
+def test_qiagen_workbook_line_matches_reviewed_us_listing_by_isin(monkeypatch):
+    from index_universe.acwi import asset_membership as M
+
+    holding = {"Ticker": "QIA", "Name": "QIAGEN", "Exchange": "Deutsche Boerse Xetra",
+               "Location": "Germany", "Asset Class": "Equity", "Weight (%)": "0.01"}
+    monkeypatch.setattr(M, "load_acwi_holdings", lambda: ([holding], "2026-10-29"))
+    monkeypatch.setattr(M, "_executions", lambda: [ex("NL0015002SN0", "QGEN", "Qiagen NV", 42)])
+    monkeypatch.setattr(M, "_country_by_code", lambda: CODES)
+    rows, _ = M.resolve()
+    assert [(row["analysis_id"], row["yahoo_symbol"]) for row in rows] == [(42, "QGEN")]
+
+
 def test_linde_previous_reviewed_isin_is_supported_when_current_isin_is_not_stored(monkeypatch):
     from index_universe.acwi import asset_membership as M
     monkeypatch.setattr(M, 'load_acwi_holdings', lambda: ([{

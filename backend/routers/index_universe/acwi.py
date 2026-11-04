@@ -38,10 +38,10 @@ from index_universe.acwi import (
     gurufocus_exchange,
     gurufocus_exchange_for_db,
     gurufocus_url,
-    load_acwi_holdings,
     reconstruct_monthly_holdings as reconstruct_acwi_monthly_holdings,
 )
 from index_universe.sp500 import store_index_membership
+from index_universe.acwi.holdings import load_latest_acwi_holdings
 
 from ._helpers import drain_thread_queue
 
@@ -50,9 +50,9 @@ router = APIRouter(tags=["index-universe"])
 
 @router.get("/api/acwi/holdings")
 async def acwi_holdings():
-    """Current iShares ACWI ETF holdings parsed from the bundled XLS."""
+    """Current iShares ACWI ETF holdings from the newest saved snapshot."""
     def work():
-        holdings, as_of = load_acwi_holdings()
+        holdings, as_of = load_latest_acwi_holdings()
 
         try:
             rows = supabase.table("gurufocus_exchange").select("exchange_code,currency_code").execute()

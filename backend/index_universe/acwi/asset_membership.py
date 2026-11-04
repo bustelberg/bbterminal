@@ -53,7 +53,7 @@ import logging
 import deps
 from asset_pipeline.geo import normalize_country
 from asset_pipeline.resolve import same_company
-from index_universe.acwi.holdings import load_acwi_holdings
+from index_universe.acwi.holdings import load_latest_acwi_holdings as load_acwi_holdings
 from index_universe.acwi.yahoo_map import yahoo_symbol
 from index_universe.acwi.identity import issuer_key, share_class
 
@@ -69,6 +69,7 @@ SOURCE = "ishares_acwi"
 # while its ordinary shares have an Irish ISIN. Never relax the general country gate.
 _REVIEWED_INTERLISTINGS = {
     ("LIN", "LINDE PLC", "NASDAQ", "United States"): ("IE000S9YS762", "IE00BZ12WP82"),
+    ("QIA", "QIAGEN", "Deutsche Boerse Xetra", "Germany"): ("NL0015002SN0",),
 }
 # Everpure's NYSE ticker changed on 2026-04-17; its Class A security/ISIN did not.
 # https://www.everpuredata.com/company/newsroom/press-releases/everpure-to-change-ticker-symbol.html
@@ -188,16 +189,19 @@ def _interlisted(cands: list[dict], location: str, name: str,
     return same[0] if len(same) == 1 else None
 
 
-def resolve() -> tuple[list[dict], dict]:
+def resolve(snapshot: tuple[list[dict], str] | None = None) -> tuple[list[dict], dict]:
     """`(rows, stats)` — the file resolved to `index_file_membership` rows. Reads, never writes."""
-    holdings, as_of = load_acwi_holdings()
+    holdings, as_of = snapshot if snapshot is not None else load_acwi_holdings()
     equities = [h for h in holdings if (h.get("Asset Class") or "").strip() == "Equity"]
     executions = _executions()
     by_symbol = _assets_by_symbol_from(executions)
     by_base = _by_base_ticker(executions)
+    by_isin: dict[str, list[dict]] = {}
     by_name: dict[str, list[dict]] = {}
     for execution in executions:
         if execution.get('analysis_id') is not None:
+            if isin := execution.get('isin'):
+                by_isin.setdefault(isin, []).append(execution)
             by_name.setdefault(issuer_key(execution.get('name')), []).append(execution)
     codes = _country_by_code()
 
@@ -230,10 +234,10 @@ def resolve() -> tuple[list[dict], dict]:
                 reviewed_isins = _REVIEWED_INTERLISTINGS.get((
                     h.get("Ticker"), h.get("Name"), h.get("Exchange"), h.get("Location")), ())
                 for candidate_isin in reviewed_isins:
-                    reviewed = [row for row in by_base.get(_base(sym.upper()), [])
-                                if row.get("isin") == candidate_isin
-                                and same_company(h.get("Name") or "", row.get("name") or "")]
-                    if len(reviewed) == 1:
+                    reviewed = [row for row in by_isin.get(candidate_isin, [])
+                                if same_company(h.get("Name") or "", row.get("name") or "")
+                                and row.get("yahoo_symbol")]
+                    if reviewed and len({row["analysis_id"] for row in reviewed}) == 1:
                         hit = reviewed[0]
                         break
             if hit is not None:
@@ -264,7 +268,7 @@ def resolve() -> tuple[list[dict], dict]:
             "analysis_id": aid, "source": SOURCE,
             "ticker": h.get("Ticker"), "exchange": h.get("Exchange"),
             "name": h.get("Name"),
-            "currency": h.get("Currency"),
+            "currency": (h.get("Market Currency") or h.get("Currency")) if held_sym == sym.upper() else None,
             "yahoo_symbol": held_sym, "source_as_of": as_of,
             "weight_pct": float(str(h.get("Weight (%)") or h.get("Weight") or 0).replace("%", "").replace(",", ".")),
         })

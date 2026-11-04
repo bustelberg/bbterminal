@@ -222,12 +222,12 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     JobSpec(
         id='acwi_weekly_coverage',
         label='Weekly ACWI coverage and saved charts',
-        fills='ACWI statements, estimates, coverage reports and complete chart/statistics snapshots',
+        fills='Dated iShares ACWI holdings, mapped membership, company coverage and chart snapshots',
         cadence='Every Saturday, 03:00 Amsterdam',
         trigger={'day_of_week': 'sat', 'hour': 3, 'minute': 0, 'timezone': 'Europe/Amsterdam'},
         options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
         max_age_hours=24 * 8,
-        note='Checks every current constituent, retries available feeds weekly, respects subscriptions and '
+        note='Imports and validates the official iShares holdings before checking constituents, respects subscriptions and '
              'regional quota reserves, then atomically saves annual and quarterly chart bundles with statistics.',
     ),
     JobSpec(

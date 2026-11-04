@@ -256,7 +256,8 @@ export default function ActiveSharePanel({
    *  AND ½ Σ|Active| RECONCILES TO THE TILE ABOVE **ONLY OVER EVERY NAME**. On the held subset
    * half the sum is missing, so it is not shown there rather than shown and quietly wrong.
    */
-  const benchmarkSnapshot = data?.rows?.map((row) => row.weight_calculation?.as_of).filter(Boolean).sort()[0];
+  const benchmarkSnapshot = data?.benchmark_workbook_as_of;
+
 
   // Reserve space for the full labels, not just percentage values. Both tables share the same
   // columns and horizontal scroll surface so the fixed totals cannot drift away from the rows.
@@ -387,7 +388,6 @@ export default function ActiveSharePanel({
                 <p>{facts.overlap(data.overlap_pct, data.active_share_pct)}</p>
                 <p>{facts.weights(selectedPortfolioAsOf)}</p>
                 {benchmarkSnapshot && <p>{facts.snapshot(benchmark, benchmarkSnapshot)}</p>}
-                {data.benchmark_covered_pct != null && <p>{facts.coverage(data.benchmark_covered_pct, benchmark)}</p>}
               </>}>{t.active.cards.activeShare.what}</SimpleExplanation>} />} />
             <Tile label={t.active.overlap} value={pct2(data.overlap_pct)}
               suffix={riskBenchmarkWeights ? undefined : <><span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>=</span><Tile label="Total" value="100.00%" /></>}
@@ -395,7 +395,6 @@ export default function ActiveSharePanel({
                 <p>{facts.overlap(data.overlap_pct, data.active_share_pct)}</p>
                 <p>{facts.weights(selectedPortfolioAsOf)}</p>
                 {benchmarkSnapshot && <p>{facts.snapshot(benchmark, benchmarkSnapshot)}</p>}
-                {data.benchmark_covered_pct != null && <p>{facts.coverage(data.benchmark_covered_pct, benchmark)}</p>}
               </>}>{t.active.cards.overlap.how}</SimpleExplanation>} />} />
           </div>
 
@@ -492,24 +491,14 @@ export default function ActiveSharePanel({
                     <td className="text-right font-mono tabular-nums text-fg-muted">
                       <span className="inline-flex flex-row-reverse items-center gap-1 whitespace-nowrap">
                       {!r.residual && <span className="font-sans">
-                        <InfoTip content={r.weight_calculation ? <div className="space-y-2 text-xs">
-                          <p className="font-medium text-fg-strong">{r.name} · ACWI</p>
-                          <p>{facts.snapshot('iShares ACWI', r.weight_calculation.as_of)} · {r.weight_calculation.initial_weight_pct.toFixed(4)}%</p>
-                          {!!r.weight_calculation.prices?.length && <table className="w-full text-left"><thead><tr className="text-fg-muted">
-                            <th className="py-1 pr-3">{text('Instrument', 'Instrument')}</th><th className="py-1 pr-3">{text('Opening · EUR', 'Begin · EUR')}</th><th className="py-1">{text('Closing · EUR', 'Eind · EUR')}</th>
-                          </tr></thead><tbody>{r.weight_calculation.prices.map((price, index) => <tr key={index} className="border-t border-neutral-800/40">
-                            <td className="py-2 pr-3 font-medium">{price.ticker}</td>
-                            <td className="py-2 pr-3 tabular-nums">{price.start_price_eur != null ? `€${price.start_price_eur.toFixed(4)}` : '—'}<span className="block text-fg-muted">{facts.date(price.start_date)}</span></td>
-                            <td className="py-2 tabular-nums">{price.end_price_eur != null ? `€${price.end_price_eur.toFixed(4)}` : '—'}<span className="block text-fg-muted">{facts.date(price.end_date)}</span></td>
-                          </tr>)}</tbody></table>}
-                          <p>{text('The snapshot weight grows with the EUR price return. Dividing by all grown weights brings the index back to 100%.', 'Het oorspronkelijke gewicht groeit mee met het EUR-koersrendement. Delen door alle gegroeide gewichten brengt de index terug naar 100%.')}</p>
-                          <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
-                          {tableBenchmarkAllocation !== 100 && <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({tableBenchmarkAllocation} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}%</p>}
-                        </div> : undefined} text={`${tableBenchmarkLabel}'s weight in ${r.name}. The table uses profile weights; the headline metrics use 100% ACWI.`} />
+                        <InfoTip text={r.workbook_weight_pct != null
+                          ? text(`iShares equity snapshot weight: ${r.workbook_weight_pct.toFixed(4)}%. The weight stays fixed until the next snapshot.`,
+                            `Aandelengewicht in de iShares-momentopname: ${r.workbook_weight_pct.toFixed(4)}%. Het gewicht blijft gelijk tot de volgende momentopname.`)
+                          : `${tableBenchmarkLabel}'s weight in ${r.name}.`} />
                       </span>}
-                      {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`
-                        : r.in_benchmark ? <span title="Index member; price unavailable for the weight calculation">{data.benchmark ?? benchmark}</span>
-                          : <span title="Not a constituent of the policy benchmark; this is not a price-return field">—</span>}
+                      {(r.benchmark_pct ?? 0) > 0 ? ((r.benchmark_pct ?? 0) < .005 ? '<0.01%' : `${(r.benchmark_pct ?? 0).toFixed(2)}%`)
+                        : r.in_benchmark ? <span title={text('Index constituent; no weight available', 'Indexpositie zonder beschikbaar gewicht')}>—</span>
+                          : <span title={text('No matching holding in the benchmark snapshot', 'Geen overeenkomende positie in de benchmarkmomentopname')}>—</span>}
                       </span>
                     </td>
                     {/*  NO TONE ON THE NUMBER ITSELF beyond direction. An overweight is not a

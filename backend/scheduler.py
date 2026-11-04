@@ -1750,8 +1750,7 @@ def _fire_acwi_weekly_coverage() -> None:
 
 def _body_acwi_weekly_coverage(ctx=None) -> tuple[str, dict]:
     from routers._acwi_weekly import run
-    from common.pg import _db_url
-    import psycopg
+    from index_universe.acwi.weekly_holdings import publication_connection, refresh
     class WeeklyContext(_LogCtx):
         def emit(self, kind, message='', **data):
             super().emit(kind, message, **data)
@@ -1761,18 +1760,37 @@ def _body_acwi_weekly_coverage(ctx=None) -> tuple[str, dict]:
             super().spent(calls)
             if ctx is not None:
                 ctx.spent(calls)
-    url = _db_url()
-    if not url:
-        raise RuntimeError('Weekly ACWI maintenance requires a database connection for its cross-replica lock')
-    with psycopg.connect(url, autocommit=True, connect_timeout=5,
-                         options='-c statement_timeout=5000') as conn:
-        if not conn.execute("SELECT pg_try_advisory_lock(hashtext('bbterminal.acwi_weekly_coverage'))").fetchone()[0]:
+    with publication_connection() as conn:
+        if conn is None:
             return 'Weekly ACWI maintenance is already running.', {'skipped': 'another replica holds the lease'}
+        weekly_ctx = WeeklyContext(lambda: _cancel_requested(ctx), step=_reporter(ctx), label='ACWI')
+        weekly_ctx.progress(0, 0, 'Importing the official iShares ACWI holdings…')
         try:
-            return run(WeeklyContext(lambda: _cancel_requested(ctx), step=_reporter(ctx), label='ACWI'),
-                       reserve=_FUNDAMENTALS_REGION_FLOOR)
-        finally:
-            conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.acwi_weekly_coverage'))")
+            holdings = refresh(conn, weekly_ctx)
+        except _Cancelled:
+            raise
+        except Exception as exc:
+            holdings = {'status': 'failed', 'error': str(exc)}
+            _log.exception('[scheduler] ACWI holdings import failed; retaining the previous snapshot')
+        weekly_ctx.emit('diagnostic', 'iShares ACWI holdings import', details=holdings)
+        message, result = run(weekly_ctx, reserve=_FUNDAMENTALS_REGION_FLOOR)
+        result['holdings_import'] = holdings
+        if holdings['status'] == 'failed':
+            _require_complete('ACWI holdings import failed; previous snapshot retained', result)
+        return message, result
+
+
+def _bootstrap_acwi_holdings() -> None:
+    """Catch up the holdings snapshot without running the weekly fundamentals job."""
+    from index_universe.acwi.weekly_holdings import needs_bootstrap, publication_connection, refresh
+
+    try:
+        with publication_connection() as conn:
+            if conn is not None and needs_bootstrap(conn):
+                receipt = refresh(conn, _LogCtx(label='ACWI startup'))
+                _log.warning('[scheduler] ACWI startup holdings import: %s', receipt)
+    except Exception:
+        _log.exception('[scheduler] ACWI startup holdings import failed; retaining the previous snapshot')
 
 
 def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
@@ -2854,6 +2872,7 @@ def register_scheduler(app) -> None:
             _log.info("[scheduler] in-process asset ingest-queue worker enabled")
         sched.start()
         _scheduler = sched
+        _submit_scheduled_work("acwi_holdings_bootstrap", _bootstrap_acwi_holdings)
         # Reap any orphan `ingest_run` rows left in `status='running'`
         # from a previous process that died mid-job (uvicorn --reload,
         # Railway redeploy, OOM kill, …). Runs BEFORE the bootstrap

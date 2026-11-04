@@ -44,3 +44,6 @@ Routers + the prune/template/momentum *phase orchestrators* still lack unit test
 
 **Env vars** (`.env`, overridden by `.env.local`): `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `GURUFOCUS_BASE_URL`, `GURUFOCUS_API_KEY`, `BROKER_USERNAME`/`BROKER_PASSWORD` (AirSPMS Playwright), `CRON_SECRET`.
 
+## Stalled background jobs
+
+Cancellation in `jobs.py` is cooperative. `reap_stalled()` marks silent jobs failed and signals cancellation so a worker that resumes can unwind. The timeout measures time since the last event, not total runtime. The registry can release a stalled entry and let the UI retry, while the blocked thread itself may still be running. The SSE stream checks for stalled jobs even when no new job is started or listed.

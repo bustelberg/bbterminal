@@ -14,6 +14,8 @@ _ALIASES = {
     'pure storage': 'everpure',  # Same security/CUSIP; PSTG became P on 2026-04-17.
     'equity resident': 'equity residential',
     'avalonbay comm': 'avalonbay communities',
+    'shopify subordinate voting': 'shopify',
+    'shopify subordinate voting inc cla': 'shopify',
 }
 # Source: https://investors.vivmarkresidential.com/news-events/press-releases/detail/113/
 # Do not apply this to historical snapshots or to the listing used for price history.
@@ -24,7 +26,7 @@ _SUCCESSORS = {
 
 
 def issuer_key(name: str | None) -> str:
-    text = re.sub(r'\s+', ' ', (name or '').strip().lower().replace('&', ' and ').replace('-', ' '))
+    text = re.sub(r'\s+', ' ', (name or '').strip().rstrip('_').strip().lower().replace('&', ' and ').replace('-', ' '))
     for _ in range(8):
         cleaned = _CLASS.sub('', _SUFFIX.sub('', text)).strip(' ,. ')
         if not cleaned or cleaned == text:

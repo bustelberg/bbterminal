@@ -13,6 +13,8 @@ a full underweight in Alphabet, roughly a 4% swing on a US book, invented by the
 """
 from __future__ import annotations
 
+import pytest
+
 import routers._active_share as A
 
 
@@ -26,10 +28,10 @@ def test_workbook_identity_bridges_amazon_and_sp_global_spellings(monkeypatch):
     names = {h["Ticker"]: h["Name"] for h in workbook}
     file_rows = [{"analysis_id": aid, "name": names[ticker], "weight_pct": 50, "currency": "EUR"}
                  for aid, ticker in [(1, "AMZN"), (2, "SPGI")]]
-    monkeypatch.setattr(membership, "resolve", lambda: (file_rows, {"as_of": as_of}))
+    monkeypatch.setattr(membership, "resolve", lambda *_: (file_rows, {"as_of": as_of}))
     import index_universe.acwi.holdings as source
-    monkeypatch.setattr(source, 'load_acwi_holdings', lambda: (
-        [row for row in workbook if row['Ticker'] in ('AMZN', 'SPGI')], as_of))
+    monkeypatch.setattr(source, 'load_latest_acwi_holdings', lambda: (
+        [{**row, "Weight (%)": "50"} for row in workbook if row['Ticker'] in ('AMZN', 'SPGI')], as_of))
     monkeypatch.setattr(A, "load_rows_via_copy", lambda *_args: [])
     monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
         "US0231351067": {"analysis_id": 1, "gf_company_name": "Amazon.com Inc"},
@@ -48,6 +50,35 @@ def test_workbook_identity_bridges_amazon_and_sp_global_spellings(monkeypatch):
     assert got["active_share_pct"] < 1e-9
     assert len(got["rows"]) == 2
     assert all(r["benchmark_pct"] > 0 for r in got["rows"] if r["held"])
+
+
+def test_workbook_members_keep_weight_without_stored_prices(monkeypatch):
+    import index_universe.acwi.asset_membership as membership
+    import index_universe.acwi.holdings as source
+    from routers import _asset_benchmark as prices, _benchmark_index as pricing
+
+    workbook, as_of = source.load_acwi_holdings()
+    selected = [row for row in workbook if row["Ticker"] in {"QIA", "SHOP", "AMZN"}]
+    monkeypatch.setattr(source, "load_latest_acwi_holdings", lambda: (selected, as_of))
+    monkeypatch.setattr(membership, "resolve", lambda *_: ([], {"as_of": as_of}))
+    monkeypatch.setattr(A, "load_rows_via_copy", lambda *_: [])
+    monkeypatch.setattr(A, "_grid_by_isin", lambda *_: {})
+    monkeypatch.setattr(prices, "window_marks", lambda *_: {})
+    monkeypatch.setattr(prices, "_asset_closes", lambda *_: {})
+    monkeypatch.setattr(pricing, "_fx_to_eur", lambda *_: {})
+
+    holdings = [_h("QIAGEN NV_", "NL0015002SN0", 40), _h("Shopify", "CA82509L1076", 60)]
+    result = A.compute_active_share(holdings, "ACWI")
+    assert result["n_in_benchmark"] == 2
+    assert result["benchmark_workbook_as_of"] == as_of
+    total = sum(float(row["Weight (%)"]) for row in selected)
+    for ticker, name in [("QIA", "QIAGEN NV_"), ("SHOP", "Shopify")]:
+        weight = float(next(row["Weight (%)"] for row in selected if row["Ticker"] == ticker))
+        row = next(row for row in result["rows"] if row["name"] == name)
+        assert row["workbook_weight_pct"] == weight
+        assert row["benchmark_pct"] == pytest.approx(weight / total * 100)
+        assert row["weight_calculation"] is None
+    assert sum(row["benchmark_pct"] for row in result["rows"]) == pytest.approx(100)
 
 
 def test_benchmark_work_is_shared_and_invalidates_on_data_change(monkeypatch):
@@ -281,40 +312,22 @@ def test_risk_profile_returns_only_the_verified_yahoo_symbol_for_a_held_etf(monk
 
 
 class TestTheIdentities:
-    def test_workbook_weight_rollforward_exposes_actual_calculation(self, monkeypatch):
-        from types import SimpleNamespace
-        import index_universe.acwi.asset_membership as membership
-        import routers._asset_benchmark as prices
-        import routers._benchmark_index as pricing
+    def test_workbook_weights_stay_fixed_when_prices_move(self, monkeypatch):
+        from index_universe.acwi import asset_membership, holdings
+        from routers import _asset_benchmark as prices
 
-        monkeypatch.setattr(membership, "resolve", lambda: ([
-            {"analysis_id": 1, "name": "Berkshire Hathaway Inc", "weight_pct": 60, "currency": "EUR"},
-            {"analysis_id": 2, "name": "Apple Inc", "weight_pct": 40, "currency": "EUR"},
-        ], {"as_of": "15-Apr-2026"}))
-        class Grid:
-            def select(self, _columns): return self
-            def in_(self, _column, _ids): return self
-            def execute(self): return SimpleNamespace(data=[])
-        monkeypatch.setattr(A, "supabase", SimpleNamespace(table=lambda _name: Grid()))
-        monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {})
-        monkeypatch.setattr(prices, "window_marks", lambda *_args: {
-            1: {"start": ("2026-04-15", 100), "end": ("2026-10-15", 110)},
-            2: {"start": ("2026-04-15", 100), "end": ("2026-10-15", 90)},
-        })
-        monkeypatch.setattr(pricing, "_fx_to_eur", lambda *_args: {})
+        snapshot = ([{"Name": "Berkshire Hathaway Inc", "Weight (%)": "60"},
+                     {"Name": "Apple Inc", "Weight (%)": "40"}], "2026-10-29")
+        monkeypatch.setattr(holdings, "load_latest_acwi_holdings", lambda: snapshot)
+        monkeypatch.setattr(asset_membership, "resolve", lambda *_: ([], {}))
+        monkeypatch.setattr(prices, "window_marks", lambda *_: pytest.fail("snapshot weights must not use prices"))
+        monkeypatch.setattr(A, "_grid_by_isin", lambda *_: {})
         result = A.compute_active_share([_h("Berkshire Hathaway Inc", "US1", 100)], "ACWI")
-        row = next(r for r in result["rows"] if "Berkshire" in r["name"])
-        calc = row["weight_calculation"]
-        assert calc["as_of"] == "2026-04-15"
-        assert calc["initial_weight_pct"] == 60
-        assert abs(calc["return_eur_pct"] - 10) < 1e-9
-        assert abs(calc["normalisation_total"] - 102) < 1e-9
-        assert abs(row["benchmark_pct"] - 66 / 102 * 100) < 1e-9
-        assert calc["prices"][0]["start_price_eur"] == 100
-        # Exercise the HTTP response contract too: missing legacy cap metadata must not turn
-        # a valid workbook calculation into FastAPI's 500 response-validation error.
+        row = next(row for row in result["rows"] if "Berkshire" in row["name"])
+        assert row["benchmark_pct"] == 60
+        assert row["weight_calculation"] is None
         from routers.airs import ActiveShare
-        assert ActiveShare.model_validate(result).benchmark_caps_unstamped == 0
+        assert ActiveShare.model_validate(result).benchmark_workbook_as_of == "2026-10-29"
 
     def test_a_book_that_IS_the_index_has_no_active_share(self, monkeypatch):
         _bench(monkeypatch, [("Apple Inc", 60.0), ("Microsoft Corp", 40.0)])

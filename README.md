@@ -62,15 +62,16 @@ Frontend runs at `http://localhost:3000`.
 
 ### Environment variables
 
-Copy and fill in your env files:
+Use the local project values from `supabase status`. The backend loads `backend/.env` first and then overrides it with `backend/.env.local`. Use the latter for local development so a production default does not select the hosted database.
 
 ```bash
 # frontend — create frontend/.env.local
-NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_API_URL=http://localhost:8000
 
-# backend — create backend/.env
-SUPABASE_URL=...
+# backend — create backend/.env.local
+SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_SERVICE_KEY=...
 # Optional: a shared Redis connection for benchmark Graphs responses across Railway replicas.
 # Leave unset for local/single-process development; it falls back to the in-memory cache.
@@ -82,7 +83,7 @@ BLEND_CACHE_REDIS_URL=redis://...
 ## Useful commands
 
 ```bash
-# Frontend: lint / typecheck / unit tests / e2e
+# Frontend: lint / typecheck / unit and component tests
 cd frontend && npm run lint
 cd frontend && npx tsc --noEmit
 cd frontend && npm test          # vitest
@@ -103,7 +104,7 @@ npm run api:check
 # Stop local Supabase
 supabase stop
 
-# Reset local Supabase DB and re-run migrations
+# Destructive: ask before resetting the local Supabase database
 supabase db reset
 
 # Generate a new Supabase migration

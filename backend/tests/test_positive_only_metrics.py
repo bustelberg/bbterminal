@@ -129,7 +129,7 @@ class TestTheCountIsAlwaysReported:
                                                                              monkeypatch):
         from index_universe.acwi import holdings as acwi_holdings
 
-        monkeypatch.setattr(acwi_holdings, "load_acwi_holdings",
+        monkeypatch.setattr(acwi_holdings, "load_latest_acwi_holdings",
                             lambda: ([{}] * 2_270, "15-Apr-2026"))
         body = earnings.FundamentalCoverageRequest(universe="ACWI")
         assert earnings._member_count_total(body, {"holdings": 553}) == 2_270

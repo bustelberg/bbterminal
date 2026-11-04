@@ -22,7 +22,8 @@ def raw_benchmark(monkeypatch):
     # Only Apple has a resolved/priced listing. Every other source member must still be a member.
     source, stamp = H.load_acwi_holdings()
     apple = next(row for row in source if row['Ticker'] == 'AAPL')
-    monkeypatch.setattr(M, 'resolve', lambda: ([{
+    monkeypatch.setattr(H, 'load_latest_acwi_holdings', lambda: (source, stamp))
+    monkeypatch.setattr(M, 'resolve', lambda *_: ([{
         'analysis_id': 1, 'name': apple['Name'], 'weight_pct': float(apple['Weight (%)']),
         'currency': 'USD', 'yahoo_symbol': 'AAPL'}], {'as_of': stamp}))
     monkeypatch.setattr(A, 'load_rows_via_copy', lambda *_args: [])
@@ -45,8 +46,8 @@ def test_each_reported_dash_against_the_complete_source(raw_benchmark, name, exp
     assert result['rows'][0]['in_benchmark'] is expected
     assert result['off_benchmark_pct'] == (0 if expected else 100)
     if expected:
-        # No fabricated price/weight: the UI already distinguishes this state from non-membership.
-        assert result['rows'][0]['benchmark_pct'] == 0
+        assert result['rows'][0]['benchmark_pct'] > 0
+        assert result['rows'][0]['weight_calculation'] is None
 
 
 def test_successor_folds_predecessors_once_without_copying_benchmark_weight(raw_benchmark):

@@ -59,3 +59,8 @@ The legacy `_run_smart_pipeline_sync` (job `smart_daily`) + `_run_pipeline_sync`
 - ⚠️ A restart landing exactly at 05:00 UTC drops that tick; the startup kickstart catches up.
 - `POST /api/ingest/scheduled-refresh/cron` (X-Cron-Secret) still exists for reverting to Railway Cron — pass `job_name=price_update`/`rebalance`.
 
+## Missed ticks and startup recovery
+
+`scan_for_missed_ticks` compares declared cron windows with actual run history. An APScheduler misfire means the scheduler was alive and missed its grace period. Downtime gaps are reconstructed from the trigger because the in-memory job store cannot emit missed events for ticks that predate the process. A late run counts in its own window. A failed history read is treated as unknown.
+
+`_boot_gap_pass` records gaps before starting recovery so catch-up runs cannot erase evidence of missed ticks. Recovery uses durable daily limits, including `ingest_run` for pipeline jobs. `DISABLE_BOOT_HEAL=1` keeps gap recording active and disables the recovery pass. For current job IDs and schedules, see [scheduled_jobs.py](../backend/scheduled_jobs.py).
