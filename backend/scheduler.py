@@ -753,7 +753,7 @@ def job_health(now=None) -> dict:
                         .eq("job_id", spec.id)
                         .order("started_at", desc=True)
                         .limit(1).execute().data or []):
-                out.append({**row, "job_name": row.pop("job_id")})
+                out.append({**row, "job_name": row.pop("job_id"), "scheduled_record": True})
         return out
 
     err = None
@@ -761,7 +761,8 @@ def job_health(now=None) -> dict:
         runs = _runs()
     except APIError as e:
         runs, err = [], f"{type(e).__name__}: {e}"
-    rows = build_rows(specs, registered, runs, now, scheduler_running=running, runnable=runnable)
+    rows = build_rows(specs, registered, runs, now, scheduler_running=running, runnable=runnable,
+                      scheduler_booted_at=_booted_at)
     # The queue worker deliberately avoids one durable row per 20-second tick. Its health therefore
     # comes from the queue itself: pending work plus the timestamp of the last resolved item.
     for row in rows:

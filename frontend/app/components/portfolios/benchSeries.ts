@@ -4,6 +4,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { ACWI_MIN_REPORTING_COMPANIES, MIN_YEAR_COVERAGE_PCT } from './marginData';
 import { useBenchmarkRepair } from './benchmarkRepair';
 import { readBenchmarkSnapshot } from './benchmarkSnapshot';
+import { useCompanyChartInput } from './CompanyChartInputs';
 
 /**
  * The benchmark line every Long Equity chart can carry.
@@ -208,11 +209,14 @@ export function useBenchInputs<T>(
   /** Chart callers opt into saved series; tables and drill-downs keep their detailed rows. */
   savedChart = false,
 ): [T | null, string | null] {
+  const bundled = useCompanyChartInput<T>(path, 'benchmark', savedChart);
+  const hasBundle = bundled !== null;
   const [state, setState] = useState<[T | null, string | null]>([null, null]);
   const key = benchKey(target);
   const [loadedKey, setLoadedKey] = useState('');
   const repairRevision = useBenchmarkRepair(target);
   useEffect(() => {
+    if (hasBundle) return;
     let alive = true;
     const commit = (value: [T | null, string | null]) => { setLoadedKey(key); setState(value); };
     void (async () => {
@@ -270,7 +274,8 @@ export function useBenchInputs<T>(
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, key, repairRevision, savedChart]);
+  }, [path, key, repairRevision, savedChart, hasBundle]);
+  if (bundled) return [bundled.data, bundled.error];
   return loadedKey === key ? state : [null, null];
 }
 

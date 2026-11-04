@@ -24,7 +24,7 @@ import os
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from common.pg import copy_connection_scope
 from deps import supabase
@@ -101,6 +101,18 @@ FILL_WORKERS = _fill_worker_count()
 #: `tests/test_financials_empty_payload.py`, so it cannot drift silently.
 VENDOR_EMPTY_MARKER = "did not provide financial statements"
 VENDOR_EMPTY_LIMIT = 10
+_VENDOR_RETRY_DELAY = timedelta(hours=6)
+_vendor_retry_lock = threading.Lock()
+_vendor_retry_at: datetime | None = None
+
+
+def _vendor_cooldown(*, trip: bool = False) -> str | None:
+    global _vendor_retry_at
+    with _vendor_retry_lock:
+        now = datetime.now(timezone.utc)
+        if trip and (_vendor_retry_at is None or _vendor_retry_at <= now):
+            _vendor_retry_at = now + _VENDOR_RETRY_DELAY
+        return _vendor_retry_at.isoformat() if _vendor_retry_at and _vendor_retry_at > now else None
 
 
 def _all_failed_summary(failed: int, samples: list[str], reasons: dict[str, int]) -> str:
@@ -573,7 +585,12 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     #: picks up next time, so the cost of a false positive is a deferred fill and the cost of a
     #: miss is the budget.
     vendor_down = threading.Event()
+    vendor_retry_at = _vendor_cooldown() if best_effort and work else None
+    if vendor_retry_at:
+        vendor_down.set()
+        ctx.emit("info", f"GuruFocus statements paused until {vendor_retry_at}")
     empty_streak = 0
+    empty_sample: list[bool] = []
     ok = failed = rows = calls = 0
     # The summary used to say only "12 failed", while the per-company event holding the reason
     # had already scrolled out of the toast. Keep a short receipt: the next action differs for an
@@ -607,11 +624,13 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         sessions parked for the duration. A company is the unit of work; it is also the right unit
         of connection.
         """
+        if vendor_down.is_set():
+            return
         with copy_connection_scope():
             _one_inner(c)
 
     def _one_inner(c: dict) -> None:
-        nonlocal ok, failed, rows, unchanged, calls, empty_streak
+        nonlocal ok, failed, rows, unchanged, calls, empty_streak, vendor_retry_at
         #  Nothing is spent once the breaker is set — see `vendor_down`. The remaining futures
         # return immediately, which is what makes the run END rather than merely stop writing.
         if vendor_down.is_set():
@@ -676,14 +695,22 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             calls += r.get("calls", 0)
             #  The streak is counted on the vendor's own signal, not on "wrote nothing" — an
             # up-to-date company writes nothing every day and that is the healthy outcome.
-            if r["error"] and VENDOR_EMPTY_MARKER in r["error"]:
+            vendor_empty = bool(r["error"] and VENDOR_EMPTY_MARKER in r["error"])
+            if best_effort:
+                empty_sample.append(vendor_empty)
+                if len(empty_sample) > 20:
+                    empty_sample.pop(0)
+            if vendor_empty:
                 empty_streak += 1
-                if not best_effort and empty_streak >= VENDOR_EMPTY_LIMIT and not vendor_down.is_set():
+                exhausted = (len(empty_sample) == 20 and sum(empty_sample) >= 18
+                             if best_effort else empty_streak >= VENDOR_EMPTY_LIMIT)
+                if exhausted and not vendor_down.is_set():
                     vendor_down.set()
+                    if best_effort:
+                        vendor_retry_at = _vendor_cooldown(trip=True)
                     ctx.emit("info",
-                             f"Stopping: {empty_streak} companies in a row came back with no "
-                             "periods at all. That is the vendor, not this data — the rest are "
-                             "left for the next run.")
+                             "GuruFocus repeatedly returned empty statements. Remaining companies deferred."
+                             + (f" Retry after {vendor_retry_at}." if vendor_retry_at else ""))
             elif not r["error"]:
                 empty_streak = 0
             if r["error"]:
@@ -734,7 +761,9 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                      outcome=outcome, failed=bool(r["error"]))
 
     stopped = False
-    if work and FILL_WORKERS == 1:
+    if vendor_down.is_set():
+        ctx.check()
+    elif work and FILL_WORKERS == 1:
         # A serial fill can run on the admitted job thread without creating
         # another worker on a process already at its thread limit.
         try:
@@ -811,6 +840,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                        deferred=max(0, len(work) - ok - failed), rows=rows, calls=calls,
                        failure_samples=failure_samples, failure_reasons=failure_reasons,
                        unavailable_samples=refusal_samples, outcomes=outcomes)
+        if vendor_retry_at:
+            receipt['vendor_retry_at'] = vendor_retry_at
     if not work and refused:
         # A deliberate pre-flight refusal is an answer, not a successful zero-row refresh. This
         # is the common one-company shape for TSX/LSE/ASX holdings outside our GuruFocus plan.

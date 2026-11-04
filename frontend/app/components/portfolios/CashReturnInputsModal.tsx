@@ -8,7 +8,6 @@ import { cashReturnOf, type CashReturnInputs, type CashReturnRow } from './cashR
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
 import { inputsBody, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
-import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
 /** The base inputs behind Cash return on capital — THREE rows per company (Free Cash Flow,
  * Non-current liabilities, Equity), each in the company's own reporting currency (millions). Same
@@ -142,8 +141,7 @@ export default function CashReturnInputsModal({ target, portfolioName, benchTarg
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
-                <BenchmarkFundamentalsRefresh benchTarget={benchTarget} benchLabel={benchLabel}
-                  onDone={() => { setBenchReloadKey((k) => k + 1); onRefreshed?.(); }} />
+
               </div>
               {!bench && !benchErr && <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>}
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}

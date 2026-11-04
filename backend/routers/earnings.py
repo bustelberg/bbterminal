@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import gzip
+import json
 import logging
 import time
 from statistics import median
@@ -2851,11 +2853,30 @@ class ChartBundleRequest(BaseModel):
 
 @router.post('/api/earnings/chart-bundle')
 async def chart_bundle(body: ChartBundleRequest):
-    """Both growth lines and all their statistics are one atomic response."""
+    """Return growth charts and, for a company, all standard-cadence chart inputs."""
     from routers._chart_statistics import paired_statistics
     from routers._benchmark_snapshots import read, read_comparison
     keys = ['price_ps', 'eps_nri', 'eps_nri_estimate', 'revenue', 'fcf_ps', 'shares']
     cadence = body.cadence
+
+    async def derived_inputs(target):
+        from routers._benchmark_snapshots import INPUTS
+        from routers._blend_prewarm import _browser_request, _endpoints
+
+        async def load(path, endpoint):
+            try:
+                kwargs = {'response': Response()} if path in ('fcf-sbc-yield-inputs', 'dividend-yield-inputs') else {}
+                result = await endpoint(target.model_copy(update={'cadence': cadence}), _browser_request(), **kwargs)
+                if isinstance(result, Response):
+                    raw = result.body
+                    if result.headers.get('content-encoding') == 'gzip':
+                        raw = gzip.decompress(raw)
+                    result = json.loads(raw)
+                return path, {'data': result}
+            except HTTPException as error:
+                return path, {'error': str(error.detail)}
+
+        return dict(await asyncio.gather(*(load(path, endpoint) for path, endpoint in _endpoints() if path in INPUTS)))
 
     async def own_line():
         if body.isin:
@@ -2884,7 +2905,11 @@ async def chart_bundle(body: ChartBundleRequest):
             return dict(saved['growth']), saved['built_at']
         return await fundamental_blend_metrics(body.benchmark.model_copy(update={'metrics': keys, 'cadence': cadence}), None), None
 
-    own = await own_line()
+    own, inputs = await asyncio.gather(
+        own_line(),
+        derived_inputs(FundamentalCoverageRequest(holdings=[{'isin': body.isin, 'weight': 1}]))
+        if body.isin else asyncio.sleep(0, result=None),
+    )
     benchmark, revision = await comparison_line(own)
     own_stats, bench_stats = await asyncio.to_thread(
         paired_statistics, own.get('metrics', []), benchmark.get('metrics', []) if benchmark is not None else None,
@@ -2892,7 +2917,22 @@ async def chart_bundle(body: ChartBundleRequest):
     own = {**own, 'chart_statistics': own_stats}
     if benchmark is not None:
         benchmark = {**benchmark, 'chart_statistics': bench_stats}
-    return {'own': own, 'benchmark': benchmark, 'cadence': cadence, 'benchmark_built_at': revision, 'ready': True}
+    result = {'own': own, 'benchmark': benchmark, 'cadence': cadence, 'benchmark_built_at': revision, 'ready': True}
+    if inputs is not None:
+        benchmark_inputs = {}
+        if body.benchmark:
+            if body.benchmark.universe:
+                saved = await asyncio.to_thread(read, body.benchmark.universe, cadence, compact=True)
+                if saved is None or saved['built_at'] != revision:
+                    raise HTTPException(503, 'The saved benchmark charts are being updated. Please try again shortly.')
+                benchmark_inputs = {
+                    path: {'data': {'rows': [], 'years': [], 'saved_series': series, 'built_at': saved['built_at']}}
+                    for path, series in saved['series'].items()
+                }
+            else:
+                benchmark_inputs = await derived_inputs(body.benchmark)
+        result['inputs'] = {'own': inputs, 'benchmark': benchmark_inputs}
+    return result
 
 
 @router.post("/api/earnings/fundamental-blend-metrics/stream")
@@ -2961,10 +3001,11 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
             "annuals__cashflow_statement__Free Cash Flow"),
     "sbc": ("annuals__Cashflow Statement__Stock Based Compensation",
             "annuals__cashflow_statement__Stock Based Compensation"),
-    # Balance-sheet lines behind the LTD / (Total Assets − Goodwill) card.  Some issuers
-    # carry NO "Long-Term Debt" line at all (Berkshire) — the ratio is then blank, not 0.
+    # Prefer standalone debt. Some GuruFocus statements include leases on the same line.
     "long_term_debt": ("annuals__Balance Sheet__Long-Term Debt",
-                       "annuals__balance_sheet__Long-Term Debt"),
+                       "annuals__balance_sheet__Long-Term Debt",
+                       "annuals__Balance Sheet__Long-Term Debt & Capital Lease Obligation",
+                       "annuals__balance_sheet__Long-Term Debt & Capital Lease Obligation"),
     "total_assets": ("annuals__Balance Sheet__Total Assets",
                      "annuals__balance_sheet__Total Assets"),
     "goodwill": ("annuals__Balance Sheet__Goodwill",
@@ -4663,8 +4704,9 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest, request: Request):
 
      THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets − Goodwill)` is derived on the client from
     these three so the drill-down shows exactly what it is computed from (3 rows per company). A
-    missing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT — the
-    ratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the
+    missing Goodwill is treated as zero. Long-term debt including capital leases is the fallback
+    when standalone debt is absent. If both debt lines are missing, the ratio is blank.
+    Deduped by ISIN, weight is the share of the
     whole book, holdings with no company row omitted.
     """
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415

@@ -776,8 +776,28 @@ def _acwi_sector_snapshot(labels, items, codes):
         display_name = (grid.get(isin) or {}).get("name") or match.get("display_name") or name
         if display_name.isupper() and " " in display_name:
             display_name = " ".join(word if len(word) <= 2 else word.title() for word in display_name.split())
-        holdings[sector].append({"name": display_name, "isin": isin, "weight_pct": weight})
+        holdings[sector].append({"name": display_name, "isin": isin, "weight_pct": weight,
+                                 "_snapshot_issuer": issuer})
     return (as_of, holdings) if holdings else (None, {})
+
+
+def _mark_acwi_sector_overlap(portfolio, benchmark, as_of):
+    from index_universe.acwi.identity import membership_key
+
+    def identities(rows):
+        return ({row["isin"].strip().upper() for row in rows if row.get("isin")},
+                {issuer for row in rows if (issuer := key(row))})
+
+    def key(row):
+        return row.get("_snapshot_issuer") or membership_key(row.get("name"), as_of)
+
+    portfolio_rows = [row for rows in portfolio.values() for row in rows]
+    benchmark_rows = [row for rows in benchmark.values() for row in rows]
+    for rows, other in ((portfolio_rows, benchmark_rows), (benchmark_rows, portfolio_rows)):
+        isins, issuers = identities(other)
+        for row in rows:
+            isin = (row.get("isin") or "").strip().upper()
+            row["in_both"] = isin in isins or key(row) in issuers
 
 
 def _book_fetched_at(portefeuille: str | None) -> str | None:
@@ -2885,6 +2905,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         benchmark_sector_as_of, snapshot_sectors = _acwi_sector_snapshot(bench_labels, bench_items, codes)
         if benchmark_sector_as_of:
             benchmark_sectors = snapshot_sectors
+            _mark_acwi_sector_overlap(dd_sector["sector"], benchmark_sectors, benchmark_sector_as_of)
             bw["sector"] = {sector: sum(h["weight_pct"] for h in holdings)
                             for sector, holdings in benchmark_sectors.items()}
     _phase("axes")
@@ -4447,15 +4468,16 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         bench_labels.append({"isin": m.get("isin"), "name": m.get("company_name") or (row or {}).get("name")})
 
     pw, bw = _weigh(port_items), _weigh(bench_items)
+    dd = _axis_holdings(port_items, port_labels)
     benchmark_sectors = _benchmark_sector_holdings(bench_items, bench_labels, bench_total)
     benchmark_sector_as_of = None
     if benchmark_label.upper() == "ACWI":
         benchmark_sector_as_of, snapshot_sectors = _acwi_sector_snapshot(bench_labels, bench_items, codes)
         if benchmark_sector_as_of:
             benchmark_sectors = snapshot_sectors
+            _mark_acwi_sector_overlap(dd["sector"], benchmark_sectors, benchmark_sector_as_of)
             bw["sector"] = {sector: sum(h["weight_pct"] for h in holdings)
                             for sector, holdings in benchmark_sectors.items()}
-    dd = _axis_holdings(port_items, port_labels)
     axes = []
     for axis in ("sector", "region", "currency"):
         keys = set(pw[axis]) | set(bw[axis])

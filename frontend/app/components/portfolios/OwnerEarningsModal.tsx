@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { trace } from '../../../lib/debugTrace';
 import { type Basket } from './types';
 import LongEquityTab from './LongEquityTab';
+import type { BenchTarget } from './benchSeries';
 import TablesTab from './TablesTab';
 import QuickValuationTab from './QuickValuationTab';
 import DeepValuationTab from './DeepValuationTab';
@@ -14,7 +15,6 @@ import LangSwitch from '../LangSwitch';
 import { useLang } from '../../../lib/i18n';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 import { valuationSubject } from './valuationSubject';
-import { isUniverseTarget, type BenchTarget } from './benchSeries';
 
 export type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
 
@@ -260,19 +260,19 @@ export default function OwnerEarningsModal({
    * claim to be doing something to charts it cannot reach.
    */
   const [sbcCorrection, setSbcCorrection] = useState(true);
-  // Graphs and Tables keep independent selectors, so retain both reported targets and choose the
-  // one belonging to the visible tab. A hidden visited tab must never overwrite "currently active".
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
-  const [graphsBenchmark, setGraphsBenchmark] = useState<BenchTarget | null>(null);
-  const [tablesBenchmark, setTablesBenchmark] = useState<BenchTarget | null>(null);
+  const [graphsBenchmark, setGraphsBenchmark] = useState<BenchTarget | null>();
+  const [tablesBenchmark, setTablesBenchmark] = useState<BenchTarget | null>();
   const activeBenchmark = tab === 'longequity' ? graphsBenchmark
-    : tab === 'tables' ? tablesBenchmark : null;
-  const activeBenchmarkScope = useMemo<RefreshScope | undefined>(() => {
-    if (!activeBenchmark) return undefined;
-    return isUniverseTarget(activeBenchmark)
-      ? { kind: 'universe', label: activeBenchmark.universe, name: activeBenchmark.label }
-      : { kind: 'company', isin: activeBenchmark.isin, name: activeBenchmark.label };
-  }, [activeBenchmark]);
+    : tab === 'tables' ? tablesBenchmark : undefined;
+  const comparedCompany = activeBenchmark === undefined ? compare
+    : activeBenchmark && 'isin' in activeBenchmark ? { isin: activeBenchmark.isin, name: activeBenchmark.label }
+    : null;
+  const comparisonScope: RefreshScope | undefined = scope?.kind === 'company'
+    && comparedCompany?.isin && isin && comparedCompany.isin !== isin
+    ? { kind: 'basket', companyComparison: true, name: `${name || isin} and ${comparedCompany.name}`,
+        holdings: [{ isin }, { isin: comparedCompany.isin }] }
+    : undefined;
   /**  PERSISTED PER BROWSER, NOT PER MODAL — a language is a property of the reader, so it has to
    *  survive closing the dialog. See `lib/i18n.ts` for why it cannot be seeded synchronously. */
   const [lang, setLang] = useLang();
@@ -303,8 +303,8 @@ export default function OwnerEarningsModal({
         embedded ? 'w-full h-[82vh] min-w-0' : 'w-[80vw] h-[80vh]'}`}
         onClick={(e) => e.stopPropagation()}>
 
-        <div className="flex shrink-0 items-center gap-4 overflow-x-auto pb-3">
-        <div className="min-w-0 shrink-0">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 pb-3">
+        <div className="w-[20rem] max-w-full min-w-0 shrink-0">
           <div className="flex items-baseline gap-3">
             {/*  THE EYEBROW IS EVERYTHING THAT IS TRUE OF OTHER ROWS TOO — the dialog, the slice,
                 the identifier. The line under it is the one thing that is true only of this one.
@@ -344,7 +344,7 @@ export default function OwnerEarningsModal({
             the tab and then explaining the emptiness inside it would be an invitation to a number
             that does not exist. */}
         {hasInstrument && (
-          <div className="flex flex-1 items-center gap-3 whitespace-nowrap">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3 whitespace-nowrap">
           <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
             {((isAgg
               //  `Tables` SITS BESIDE `Graphs`. It is the same reads those cards draw,
@@ -378,8 +378,24 @@ export default function OwnerEarningsModal({
               the SBC box would make the same action appear and disappear depending on which chart
               you were looking at. It sits in the right-aligned group so it keeps its place when
               the SBC label comes and goes; `ml-auto` moved onto this wrapper for the same reason. */}
-          <div ref={setControlsHost} className="flex shrink-0 items-center" />
-          <div className="ml-auto flex items-center gap-3 min-w-0">
+          <div className="grid min-h-8 w-[25rem] max-w-full shrink-0 items-center">
+            <div ref={setControlsHost} className="col-start-1 row-start-1 min-w-0" />
+          {switchable && compare && (
+            <div role="group" aria-label={chrome.valuing} title={chrome.valuing}
+              className="col-start-1 row-start-1 flex w-fit max-w-full items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 shrink-0">
+              {([['a', name || (isin ?? '')], ['b', compare.name]] as const).map(([side, label]) => (
+                <button key={side} type="button" onClick={() => setValueSide(side)}
+                  aria-pressed={valueSide === side} title={label}
+                  className={`cursor-pointer w-32 truncate px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                    valueSide === side ? 'bg-accent-600 text-fg-strong'
+                      : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          </div>
+          <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-3">
           {/*  NO `onDone` — THE COMPONENT ALREADY DROPS THE READ CACHE ITSELF, which is what makes
               a filled figure reachable on every tab here. This used to re-key the Old-charts blend,
               the one mounted view that could not otherwise see the new data; that tab is gone and
@@ -389,7 +405,7 @@ export default function OwnerEarningsModal({
               the daily closes; its forward line and the Graphs tab's dotted consensus are the
               indicator and estimate feeds. None of the three is in the default fill. */}
           {scope && (
-            <PortfolioFundamentalsRefresh scope={scope} additionalScope={activeBenchmarkScope}
+            <PortfolioFundamentalsRefresh scope={comparisonScope ?? scope} allPeriods={!!comparisonScope} stableNote
               {...refreshPlan}
               jobTitle={chrome.refreshingTab(chrome.tabs[tab])} />
           )}
@@ -418,22 +434,7 @@ export default function OwnerEarningsModal({
                The names are truncated with the full one in `title`: "Taiwan Semiconductor
               Manufacturing Co Ltd" beside a second of its kind would push the refresh button and
               the language switch off the row. */}
-          {switchable && compare && (
-            <div role="group" aria-label={chrome.valuing} title={chrome.valuing}
-              className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 shrink-0">
-              {([['a', name || (isin ?? '')], ['b', compare.name]] as const).map(([side, label]) => (
-                <button key={side} type="button" onClick={() => setValueSide(side)}
-                  aria-pressed={valueSide === side} title={label}
-                  className={`cursor-pointer max-w-[9rem] truncate px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                    valueSide === side ? 'bg-accent-600 text-fg-strong'
-                      : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-          {tab === 'longequity' && (
-            <label className="flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer"
+            <label className={`flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer ${tab === 'longequity' ? '' : 'invisible'}`}
               title={chrome.sbcTitle}>
               <input type="checkbox" checked={sbcCorrection}
                 onChange={(e) => setSbcCorrection(e.target.checked)}
@@ -445,7 +446,6 @@ export default function OwnerEarningsModal({
                   card titles change with it, and the full explanation is in the label's `title`. */}
               {chrome.sbc}
             </label>
-          )}
           </div>
           </div>
         )}

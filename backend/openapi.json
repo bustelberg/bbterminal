@@ -6567,6 +6567,11 @@
             ],
             "title": "Classified As"
           },
+          "in_both": {
+            "default": false,
+            "title": "In Both",
+            "type": "boolean"
+          },
           "isin": {
             "anyOf": [
               {
@@ -30041,7 +30046,7 @@
     },
     "/api/earnings/chart-bundle": {
       "post": {
-        "description": "Both growth lines and all their statistics are one atomic response.",
+        "description": "Return growth charts and, for a company, all standard-cadence chart inputs.",
         "operationId": "chart_bundle_api_earnings_chart_bundle_post",
         "requestBody": {
           "content": {
@@ -30132,7 +30137,7 @@
     },
     "/api/earnings/debt-ratio-inputs": {
       "post": {
-        "description": "The base inputs behind the LTD / (Total Assets \u2212 Goodwill) ratio, per holding: Long-Term\nDebt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency\n(millions).\n\n THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets \u2212 Goodwill)` is derived on the client from\nthese three so the drill-down shows exactly what it is computed from (3 rows per company). A\nmissing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT \u2014 the\nratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the\nwhole book, holdings with no company row omitted.",
+        "description": "The base inputs behind the LTD / (Total Assets \u2212 Goodwill) ratio, per holding: Long-Term\nDebt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency\n(millions).\n\n THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets \u2212 Goodwill)` is derived on the client from\nthese three so the drill-down shows exactly what it is computed from (3 rows per company). A\nmissing Goodwill is treated as zero. Long-term debt including capital leases is the fallback\nwhen standalone debt is absent. If both debt lines are missing, the ratio is blank.\nDeduped by ISIN, weight is the share of the\nwhole book, holdings with no company row omitted.",
         "operationId": "debt_ratio_inputs_api_earnings_debt_ratio_inputs_post",
         "requestBody": {
           "content": {

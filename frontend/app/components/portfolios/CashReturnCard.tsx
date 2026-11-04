@@ -2,12 +2,10 @@
 
 import { savedBenchmarkSeries } from './benchmarkSnapshot';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
@@ -16,6 +14,7 @@ import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import MissingFundamentals from './MissingFundamentals';
+import { useChartHoldingsInputs } from './CompanyChartInputs';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -42,33 +41,13 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   /** Re-key the card after its drill-down refresh has populated new inputs. */
   onRefreshed?: () => void;
 }) {
-  const [data, setData] = useState<CashReturnInputs | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
   /**  ONE PAYLOAD, TWO MODES — the switch does NOT refetch. Both series come from the same
    *  response, so flipping cannot land you on a different vintage of the same company's accounts. */
   const [mode, setMode] = useState<CapitalMode>('croic');
   const M = MODES[mode];
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      setData(null); setErr(null);
-      try {
-        const r = await apiFetch(`${API_URL}/api/earnings/cash-return-inputs`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
-        });
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as CashReturnInputs);
-      } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; };
-  }, [holdingsTarget]);
+  const { data, error: err } = useChartHoldingsInputs<CashReturnInputs>('cash-return-inputs', holdingsTarget);
 
   const ratioByYr = useMemo(
     () => seriesByYear(data?.rows ?? [], mode, sbcCorrection), [data, mode, sbcCorrection]);
@@ -125,8 +104,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       ) : ratioByYr.size === 0 ? (
           <MissingFundamentals
             message={M.derived ? 'No FCF / capital figures ingested to compute a ratio.'
-              : 'GuruFocus reports no ROIC for these holdings.'}
-            target={holdingsTarget} name={holdingsName} />
+              : 'GuruFocus reports no ROIC for these holdings.'} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

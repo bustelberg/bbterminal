@@ -2,12 +2,10 @@
 
 import { savedBenchmarkSeries } from './benchmarkSnapshot';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
@@ -16,6 +14,7 @@ import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import MissingFundamentals from './MissingFundamentals';
+import { useChartHoldingsInputs } from './CompanyChartInputs';
 import CapexMarginInputsModal from './CapexMarginInputsModal';
 import { capexMarginByYear, type CapexMarginInputs } from './capexMarginData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -42,29 +41,9 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
-  const [data, setData] = useState<CapexMarginInputs | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      setData(null); setErr(null);
-      try {
-        const r = await apiFetch(`${API_URL}/api/earnings/capex-margin-inputs`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
-        });
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as CapexMarginInputs);
-      } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; };
-  }, [holdingsTarget]);
+  const { data, error: err } = useChartHoldingsInputs<CapexMarginInputs>('capex-margin-inputs', holdingsTarget);
 
   const marginByYr = useMemo(() => capexMarginByYear(data?.rows ?? []), [data]);
 
@@ -96,8 +75,7 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
       ) : (err || benchErr) ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : marginByYr.size === 0 ? (
-          <MissingFundamentals message="No capex / revenue figures ingested to compute a margin."
-            target={holdingsTarget} name={holdingsName} />
+          <MissingFundamentals message="No capex / revenue figures ingested to compute a margin." />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

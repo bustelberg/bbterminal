@@ -5415,7 +5415,7 @@ export interface paths {
         put?: never;
         /**
          * Chart Bundle
-         * @description Both growth lines and all their statistics are one atomic response.
+         * @description Return growth charts and, for a company, all standard-cadence chart inputs.
          */
         post: operations["chart_bundle_api_earnings_chart_bundle_post"];
         delete?: never;
@@ -5461,8 +5461,9 @@ export interface paths {
          *
          *      THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets − Goodwill)` is derived on the client from
          *     these three so the drill-down shows exactly what it is computed from (3 rows per company). A
-         *     missing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT — the
-         *     ratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the
+         *     missing Goodwill is treated as zero. Long-term debt including capital leases is the fallback
+         *     when standalone debt is absent. If both debt lines are missing, the ratio is blank.
+         *     Deduped by ISIN, weight is the share of the
          *     whole book, holdings with no company row omitted.
          */
         post: operations["debt_ratio_inputs_api_earnings_debt_ratio_inputs_post"];
@@ -11379,6 +11380,11 @@ export interface components {
             asset_class?: string | null;
             /** Classified As */
             classified_as?: string | null;
+            /**
+             * In Both
+             * @default false
+             */
+            in_both?: boolean;
             /** Isin */
             isin?: string | null;
             /** Name */

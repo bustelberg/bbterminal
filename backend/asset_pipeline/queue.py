@@ -300,6 +300,8 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
             except Exception:  # noqa: BLE001
                 pass
             _mark(isin, "failed", f"{type(e).__name__}: {e}")
+            with outcomes_lock:
+                failures.append({"isin": isin, "error": f"{type(e).__name__}: {e}"})
             _vp(f"  ERR  {isin}  [{of}]  ->  {type(e).__name__}: {e}")
             _report(isin, "failed", f"{type(e).__name__}: {e}"[:60])
             return "failed"
@@ -310,6 +312,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
     # causes one ISIN to be resolved twice during the fallback.
     outcomes: dict[str, str] = {}
     outcomes_lock = threading.Lock()
+    failures: list[dict] = []
 
     def _tracked_one(isin: str) -> str:
         outcome = _one(isin)
@@ -359,7 +362,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
             log.warning("[queue] re-applying %ss failed: %s: %s", _what, type(e).__name__, e)
     remaining = supabase.table("asset_ingest_queue").select("isin", count="exact").eq("status", "pending").limit(1).execute().count or 0
     return {"processed": ok + failed + unmapped, "ok": ok, "failed": failed,
-            "unmapped": unmapped, "remaining": remaining}
+            "unmapped": unmapped, "remaining": remaining, "failures": failures}
 
 
 # OpenFIGI securityTypes that have no Yahoo daily price series — don't bother

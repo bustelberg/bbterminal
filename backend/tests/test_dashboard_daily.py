@@ -291,10 +291,17 @@ def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, n
     }))
     monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
         {"portefeuille": "BOOK", "model_portfolio_id": 1}]})
-    monkeypatch.setattr(prepared, "read", lambda *_: (1, {}))
+    batches = []
+    def overview_states(keys):
+        batches.append(keys)
+        return {"holdings:1:ACWI:0": "older"}
+    monkeypatch.setattr(prepared, "overview_freshness", overview_states)
     result = D.freshness(date(2026, 10, 30))
     issues = result["accounts"][0]["issues"]
     assert ("model composition not successfully scanned today" in issues) == needs_scan
+    assert batches == [["holdings:1:ACWI:0", "holdings:1:ACWI:1"]]
+    assert "Analyse: older bundle still serving (look-through=False)" in issues
+    assert "Analyse: no bundle published (look-through=True)" in issues
 
 
 def test_daily_parent_retains_both_failed_child_receipts(monkeypatch):
@@ -333,7 +340,7 @@ def test_freshness_reads_actual_dates_and_reports_unmapped_coverage(monkeypatch)
     })
     monkeypatch.setattr(D, "supabase", db)
     monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": []})
-    monkeypatch.setattr(prepared, "read", lambda *_: (1, None))
+    monkeypatch.setattr(prepared, "overview_freshness", lambda keys: {})
     result = D.freshness(date(2026, 10, 30))
     assert result["incomplete"] == 1
     assert result["accounts"][0]["unmapped_isins"] == ["UNMAPPED"]

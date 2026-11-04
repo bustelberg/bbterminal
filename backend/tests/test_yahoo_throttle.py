@@ -136,6 +136,7 @@ def test_backfill_stops_on_provider_ban_without_sleeping_per_instrument(monkeypa
     monkeypatch.setattr(P.time, "sleep", lambda _: pytest.fail("must release worker immediately"))
     assert P.backfill_missing(set()) == {
         "missing": 20, "backfilled": 0, "failed": 1, "skipped": 19,
+        "failures": [{"isin": "0", "symbol": "0", "error": "circuit open"}],
     }
     assert calls == [1]
 

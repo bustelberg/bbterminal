@@ -24,6 +24,7 @@ import { benchBody, type BenchTarget } from './benchSeries';
 import type { ChartStatistics } from './chartStatistics';
 import { type Basket } from './types';
 import { GraphCoverageProvider } from './GraphCoverage';
+import { CompanyChartInputsContext, type CompanyChartInputs } from './CompanyChartInputs';
 import { useBenchmarkRepair } from './benchmarkRepair';
 
 /**
@@ -285,20 +286,23 @@ export default function LongEquityTab({
   // they go into `ck`, which re-keys every card's fetch. See `fundamentalChromeCopy`.
   const chrome = useFundamentalChromeCopy();
   const isAgg = !!basket || portfolioId != null;
-  const [bundle, setBundle] = useState<{ own: MetricsResponse; benchmark: MetricsResponse | null; requestKey: string } | null>(null);
+  const [bundle, setBundle] = useState<{ own: MetricsResponse; benchmark: MetricsResponse | null; inputs?: CompanyChartInputs; requestKey: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // Bumped after an empty card ingests this company's financials — reloads the metrics (repopulates
-  // every growth card) and re-keys the derived cards so they refetch their inputs too.
+  // Reload after the header refresh job finishes.
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
-    const reload = () => setReloadKey((k) => k + 1);
+    const reload = (event: Event) => {
+      const scope = (event as CustomEvent<{
+        kind: string; isin?: string; holdings?: { isin: string }[]; companyComparison?: boolean;
+      }>).detail;
+      if (!isAgg && !(scope?.kind === 'company' && scope.isin === isin)
+        && !(scope?.kind === 'basket' && scope.holdings?.some(holding => holding.isin === isin))) return;
+      if (isAgg && (scope?.kind === 'company' || scope?.companyComparison)) return;
+      setReloadKey((k) => k + 1);
+    };
     window.addEventListener('bb:fundamentals-finished', reload);
     return () => window.removeEventListener('bb:fundamentals-finished', reload);
-  }, []);
-  //  A second, narrower key. The growth cards all read ONE metrics fetch, while each derived card
-  // owns its own endpoint and refetches on a re-key — so bumping `reloadKey` to refresh one chart
-  // reloads twelve. This one refetches the metrics only; nothing else moves.
-  const [metricsKey, setMetricsKey] = useState(0);
+  }, [isAgg, isin]);
   /** Portfolio only: how many holdings the blend has read. Null on a single company. */
   const progress = null;
   /**
@@ -379,7 +383,6 @@ export default function LongEquityTab({
   useEffect(() => {
     let alive = true;
     const ctrl = new AbortController();
-    setBundle(null);
     setErr(null);
     void (async () => {
       try {
@@ -392,14 +395,16 @@ export default function LongEquityTab({
         const result = await response.json();
         if (!alive) return;
         if (!response.ok) throw new Error(result?.detail ?? `HTTP ${response.status}`);
-        if (!result.ready) throw new Error('The complete chart is not ready yet.');
+        if (!result.ready || (!isAgg && !result.inputs)) {
+          throw new Error('The complete chart is not ready yet.');
+        }
         setBundle({ ...result, requestKey });
       } catch (error) {
         if (alive) setErr(error instanceof Error ? error.message : String(error));
       }
     })();
     return () => { alive = false; ctrl.abort(); };
-  }, [isin, isAgg, holdingsTarget, benchTarget, cadence, reloadKey, metricsKey, repairRevision, requestKey]);
+  }, [isin, isAgg, holdingsTarget, benchTarget, cadence, reloadKey, repairRevision, requestKey]);
 
   /**
    *  Neither an error nor a load may take the control row with it — these used to be early
@@ -416,9 +421,9 @@ export default function LongEquityTab({
    * fires its own once it lands), so twelve boxes each saying "Loading…" showed a wait twelve
    * times over and none of them could say how far along it was.
    */
-  const body = err
+  const body = !currentBundle && err
     ? <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
-    : isAgg && !data
+    : !currentBundle
       ? <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>
       : null;
 
@@ -427,9 +432,7 @@ export default function LongEquityTab({
   // outstanding, SBC / OCF, Invested capital, Capex margin, Dividend yield, FCF-SBC yield.
   const [sharePrice, epsNri, revenue, fcfPs, shares] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
-  const ingestIsin = isAgg ? undefined : isin;
   const onIngested = () => setReloadKey((k) => k + 1);
-  const onReloadMetrics = () => setMetricsKey((k) => k + 1);
   const gName = name ?? data?.company_name;
   const growth = {
     metrics: data?.metrics ?? null,
@@ -442,15 +445,15 @@ export default function LongEquityTab({
     // The coverage line must therefore name the slice while the rest of the modal retains its
     // parent-book context.
     coverageLabel: basket?.label ?? gName,
-    ingestIsin, onIngested, onReloadMetrics, cadence,
+    cadence,
     benchMetrics, benchLabel: benchTarget?.label ?? null, benchTarget, benchErr, benchNotes,
     benchCounts,
   };
   //  One key suffix for every derived card. They each own their fetch, so without the cadence in
   // the key a switch would leave twelve charts showing the previous basis until something else
   // re-keyed them — and the toggle would look broken on the cards that matter most.
-  const ck = `${reloadKey}-${cadence}`;
-  const controls = <div className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs">
+  const ck = isAgg ? `${reloadKey}-${cadence}` : cadence;
+  const controls = <div className="flex min-w-0 flex-wrap items-center gap-2 whitespace-nowrap text-xs">
       <span className="text-fg-faint">{chrome.periods}</span>
       <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
         {([
@@ -487,7 +490,7 @@ export default function LongEquityTab({
             + 'run through the SAME formula as the portfolio, so the two lines are comparable. '
             + 'Only constituents whose fundamentals are ingested contribute — the coverage floor '
             + 'applies to the index exactly as it does to the book.'}
-          className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
+          className="w-28 truncate cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
           <option value="">None</option>
           {/*  FIRST, AND ONLY WHEN THERE IS ONE. The comparison company is what the reader came
               for on /research-dashboard; the indices stay available underneath so a company can
@@ -503,7 +506,9 @@ export default function LongEquityTab({
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
     <GraphCoverageProvider value={null}>
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <CompanyChartInputsContext.Provider value={currentBundle?.inputs ?? null}>
+    <div className="@container/charts w-full min-w-0">
+    <div className="grid min-w-0 grid-cols-1 gap-4 @[42rem]/charts:grid-cols-2 @[66rem]/charts:grid-cols-3 [&>*]:min-w-0">
       {/*  THREE ACROSS, NOT FOUR. Each card carries a 320px chart with up to five series, a legend
           that wraps, and stat tiles above it — at four columns the plot area was narrow enough that
           a twelve-year axis crowded its ticks and the legend took three lines. Only the grid
@@ -520,7 +525,6 @@ export default function LongEquityTab({
         {...growth} />
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         {...growth} />
-      {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
       <MarginCard key={`margin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} onRefreshed={onIngested} />
       <CashReturnCard key={`cashret-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} onRefreshed={onIngested} />
       <DebtRatioCard key={`debt-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
@@ -539,6 +543,8 @@ export default function LongEquityTab({
           leaves after direct cost, then whether the resulting profit turns into money. */}
       <CashConversionCard key={`cashconv-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
     </div>
+    </div>
+    </CompanyChartInputsContext.Provider>
     </GraphCoverageProvider>
     )}
     </>

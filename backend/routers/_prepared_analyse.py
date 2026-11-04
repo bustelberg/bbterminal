@@ -118,6 +118,28 @@ def read_overview(key: str) -> dict | None:
     return {**payload, 'overview_prepared_at': rows[0]['prepared_at']}
 
 
+def overview_freshness(keys: list[str]) -> dict[str, str]:
+    """Check publication metadata without downloading any overview payloads."""
+    if not keys:
+        return {}
+    version = source_version('holdings')
+    code = code_version()
+    day = date.today().isoformat()
+    try:
+        rows = (supabase.table('analyse_prepared_snapshot')
+                .select('cache_key,source_version,code_version,calculation_day')
+                .eq('scope', 'holdings').in_('cache_key', keys)
+                .not_.is_('payload->return_series', 'null')
+                .eq('payload->>details_pending', 'false').execute().data or [])
+    except Exception as exc:
+        _unavailable(exc)
+        return {key: 'unavailable' for key in keys}
+    stable = version is not None and version == source_version('holdings') and code == code_version()
+    return {row['cache_key']: 'current' if stable and (
+        row['source_version'], row['code_version'], row['calculation_day']
+    ) == (version, code, day) else 'older' for row in rows}
+
+
 def overview(payload: dict) -> dict:
     fields = ('portfolio_id', 'name', 'as_of', 'holdings_as_of', 'holdings_fetched_at',
               'book_portefeuille', 'book_note', 'benchmark', 'weight_basis', 'weight_note',

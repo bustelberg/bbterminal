@@ -7,6 +7,24 @@ from asset_pipeline import price_refresh, store
 from tests._fake_supabase import FakeSupabase
 
 
+def test_price_slice_receipt_identifies_failed_instruments(monkeypatch):
+    from asset_pipeline import queue
+    from ingest.phases import prices
+
+    monkeypatch.setattr(prices, 'supabase', FakeSupabase({'company': [{'company_id': 1, 'isin': 'TEST'}]}))
+    monkeypatch.setattr(prices, '_update_run', lambda *_a, **_kw: None)
+    monkeypatch.setattr(prices, 'log_step', lambda *_a, **_kw: None)
+    monkeypatch.setattr(queue, 'enqueue', lambda *_a, **_kw: None)
+    monkeypatch.setattr(queue, 'process_slice', lambda **_kw: {})
+    monkeypatch.setattr(price_refresh, 'backfill_missing', lambda *_: {})
+    monkeypatch.setattr(price_refresh, 'refresh_stale', lambda **_kw: {
+        'failed': 1, 'results': [{'isin': 'TEST', 'symbol': 'FUND', 'status': 'error', 'error': 'rate limited'}],
+    })
+    errors = []
+    prices._run_prices_phase(1, errors, companies_override=[{'cid': 1}])
+    assert errors == ['Yahoo price refresh had 1 failed instrument(s).\nFUND / TEST: rate limited']
+
+
 @pytest.mark.parametrize("last,expected_moved,expected_remaining", [
     ("2026-08-21", 0, 1), ("2026-10-29", 1, 1), ("2026-10-30", 1, 0),
 ])

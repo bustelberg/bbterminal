@@ -21,7 +21,7 @@ def test_weekly_retries_available_companies_preserves_quota_and_publishes_both_c
     monkeypatch.setattr(api_usage, '_region_for_exchange', lambda *a: 'usa')
     monkeypatch.setattr(repair, 'audit', lambda *a: {'present_companies_by_metric': {'revenue': 577}})
     monkeypatch.setattr(weekly, '_annual_growth_rows', lambda *a: [])
-    monkeypatch.setattr(weekly, 'annual_priorities', lambda *a: ({1: 10}, {'revenue': {'2024': 499}}))
+    monkeypatch.setattr(weekly, 'annual_priorities', lambda *a, **kw: ({1: 10}, {'revenue': {'2024': 499}}))
     requested = []
     def fetch(ctx, label, ids, **kw):
         requested.extend(ids)
@@ -49,6 +49,7 @@ def test_weekly_retries_available_companies_preserves_quota_and_publishes_both_c
     assert result['quota_deferred'] == 1
     assert published == ['annual', 'annual', 'quarterly']
     assert result['annual_chart_coverage_before'] == {'revenue': {'2024': 499}}
+    assert result['remaining_annual_chart_gaps'] == {'revenue': {'2024': {'usable': 499, 'short_of_500': 1}}}
     assert 'charts saved' in message
 
 

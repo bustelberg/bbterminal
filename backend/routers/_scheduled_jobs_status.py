@@ -86,6 +86,7 @@ def build_rows(
     *,
     scheduler_running: bool,
     runnable: set[str] | None = None,
+    scheduler_booted_at: datetime | None = None,
 ) -> list[dict]:
     """One row per declared job.
 
@@ -211,10 +212,18 @@ def build_rows(
             # redeploy, OOM, `uvicorn --reload` — leaves this behind instead of nothing at all.
             # Fresh, it means the job is running RIGHT NOW, which is fine; long past its own
             # allowance it means the process died and nobody has run it since.
-            stale_run = (spec.max_age_hours is not None and age_h is not None
+            heartbeat = _parse((run.get("summary") or {}).get("heartbeat_at"))
+            started = _parse(run.get("started_at"))
+            if heartbeat is not None and (now - heartbeat).total_seconds() > 300:
+                status, why = "interrupted", "the worker heartbeat expired"
+            elif (heartbeat is None and run.get("scheduled_record") and scheduler_running
+                  and scheduler_booted_at and started and started < scheduler_booted_at):
+                status, why = "interrupted", "the previous scheduler process left this run open"
+            else:
+                stale_run = (heartbeat is None and spec.max_age_hours is not None and age_h is not None
                          and age_h > spec.max_age_hours)
-            status, why = (("error", "started and never finished — the process died mid-run")
-                           if stale_run else ("running", "in flight now"))
+                status, why = (("error", "started and never finished — the process died mid-run")
+                               if stale_run else ("running", "in flight now"))
         elif spec.max_age_hours is not None and age_h is not None and age_h > spec.max_age_hours:
             status, why = "overdue", (
                 f"last ran {age_h / 24:.1f} days ago; expected at most "

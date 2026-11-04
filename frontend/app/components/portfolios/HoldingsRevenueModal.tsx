@@ -1695,7 +1695,6 @@ export default function HoldingsRevenueModal({
   /**  ITS OWN RELOAD KEY, NOT `reloadKey`. Filling the index moves the table below; filling the
    *  book moves the one above. One key would make each button re-read both tables — twice the wait
    *  for half a reason, and on ACWI the constituent read is the expensive one. */
-  const [benchReload, setBenchReload] = useState(0);
   const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
@@ -1712,7 +1711,7 @@ export default function HoldingsRevenueModal({
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchKey, metric, benchReload]);
+  }, [benchKey, metric]);
 
   /**
 
@@ -1913,31 +1912,6 @@ export default function HoldingsRevenueModal({
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>
-                {/*  SEPARATE FROM THE BOOK'S, AND IT MUST BE. The two fills are different work
-                    over different companies with wildly different quota costs — ACWI is ~1,900
-                    constituents against a book's twenty — so one button doing both would make the
-                    cheap press unavailable. It fills only the constituents we are MISSING, which is
-                    what raises this table's row count and the line's coverage with it. */}
-                {isUniverseTarget(benchTarget) && <span className="ml-auto shrink-0">
-                  <PortfolioFundamentalsRefresh
-                    /*  `smart` — THE PER-ROW REFRESH, RUN ACROSS THE INDEX, AND THE NAME IS NOW
-                       HONEST BECAUSE THE BEHAVIOUR IS. It fetches per constituent exactly the feeds
-                       that are missing or that can plausibly have changed, so a name with nothing
-                       new costs nothing — which is what makes "refresh the whole benchmark" an
-                       affordable thing for a button to promise.
-                        IT IS THE SAME RULE THE ROW BUTTON USES (`smart_flags` / `smart_flags_bulk`,
-                       sharing `_is_stale`), pinned that way on purpose: the moment the two diverge,
-                       the big button stops being N presses of the small one and this label goes back
-                       to being a claim rather than a description.
-                        MEASURED COST, ACWI 2026-08-14: ~5,701 calls on a FIRST press — nearly
-                       everything has something new, so smart ≈ all until the index is current. The
-                       saving is on the second press, not the first. `feeds: 'estimates'` is the
-                       cheaper, narrower fill (~1,597) if only the forecast columns are wanted. */
-                    scope={{ kind: 'universe', label: benchTarget.universe,
-                      name: benchLabel || benchTarget.label }}
-                    label="Refresh benchmark"
-                    onDone={() => setBenchReload((k) => k + 1)} />
-                </span>}
               </div>
               {!bench && !benchErr && (
                 <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>

@@ -4,9 +4,18 @@ import math
 import pytest
 from fastapi import HTTPException
 
-from routers import earnings, _benchmark_snapshots as snapshots, _chart_statistics as stats
+from routers import earnings, _benchmark_snapshots as snapshots, _chart_statistics as stats, _blend_prewarm
 
 CODE = 'annuals__Income Statement__Revenue'
+
+
+@pytest.fixture(autouse=True)
+def company_chart_inputs(monkeypatch):
+    async def margin(target, _request):
+        assert len(target.holdings) == 1
+        return {'rows': target.holdings, 'years': []}
+
+    monkeypatch.setattr(_blend_prewarm, '_endpoints', lambda: [('margin-inputs', margin)])
 
 
 def rows(values):
@@ -20,6 +29,9 @@ def test_bundle_waits_for_both_lines_and_returns_statistics_on_one_shared_window
     saved_stats = stats.precalculate(bench, 'annual')
     monkeypatch.setattr(snapshots, 'read_comparison', lambda *a: {'built_at': 'revision-one',
         'growth': {'metrics': bench, 'chart_statistics': saved_stats}})
+    monkeypatch.setattr(snapshots, 'read', lambda *a, **kw: {
+        'built_at': 'revision-one', 'series': {'margin-inputs': {'reported': {'points': []}}},
+    })
     async def exercise():
         entered, release = asyncio.Event(), asyncio.Event()
         async def own_read(*a):
@@ -36,6 +48,8 @@ def test_bundle_waits_for_both_lines_and_returns_statistics_on_one_shared_window
     result = asyncio.run(exercise())
     assert result['ready'] is True
     assert result['benchmark_built_at'] == 'revision-one'
+    assert result['inputs']['own']['margin-inputs']['data']['rows'][0]['isin'] == 'US0000000001'
+    assert result['inputs']['benchmark']['margin-inputs']['data']['saved_series'] == {'reported': {'points': []}}
     a, b = result['own']['chart_statistics']['revenue'], result['benchmark']['chart_statistics']['revenue']
     assert (a['fromX'], a['toX']) == (b['fromX'], b['toX']) == (2019, 2025)
     assert a['fit']['n'] == b['fit']['n'] == 2

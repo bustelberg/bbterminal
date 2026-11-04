@@ -71,7 +71,7 @@ export function fundamentalRefreshQuery({
 
 export type RefreshScope =
   | { kind: "portfolio"; id: number; name: string }
-  | { kind: "basket"; holdings: { isin: string }[]; name: string }
+  | { kind: "basket"; holdings: { isin: string }[]; name: string; companyComparison?: boolean }
   //  One company is a basket of one — same endpoint, same fill, one API call. It is a separate
   // `kind` only so the wording can be right: "every company in Fortinet Inc." is not a sentence.
   // The scope follows what the modal is SHOWING, which is the only rule a reader can predict.
@@ -87,31 +87,8 @@ export type RefreshScope =
    */
   | { kind: "universe"; label: string; name: string; feeds?: IndexFeeds };
 
-export const refreshScopeKey = (s: RefreshScope): string =>
-  s.kind === "portfolio"
-    ? `portfolio:${s.id}`
-    : s.kind === "universe"
-      ? `universe:${s.label}`
-      : s.kind === "company"
-        ? `company:${s.isin}`
-        : `basket:${s.holdings
-            .map((h) => h.isin)
-            .sort()
-            .join("|")}`;
-
-/** The primary selection followed by its comparison target, without refreshing one scope twice. */
-export function refreshScopes(
-  scope: RefreshScope,
-  additional?: RefreshScope,
-): RefreshScope[] {
-  return additional && refreshScopeKey(additional) !== refreshScopeKey(scope)
-    ? [scope, additional]
-    : [scope];
-}
-
 export default function PortfolioFundamentalsRefresh({
   scope,
-  additionalScope,
   onDone,
   label,
   jobTitle,
@@ -121,6 +98,7 @@ export default function PortfolioFundamentalsRefresh({
   prominent = false,
   prominentTone = "accent",
   showNote = true,
+  stableNote = false,
   compact = false,
   onProgress,
   feeds,
@@ -128,8 +106,6 @@ export default function PortfolioFundamentalsRefresh({
   keyRatios = false,
 }: {
   scope: RefreshScope;
-  /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
-  additionalScope?: RefreshScope;
   /**
    * Fetch EVERYTHING the Fundamental modal draws, not just the statements feed.
    *
@@ -173,6 +149,7 @@ export default function PortfolioFundamentalsRefresh({
   prominentTone?: "accent" | "positive" | "warning" | "info";
   /** Show the scope/coverage receipt beside the button. Dense modal headers can leave it to toast. */
   showNote?: boolean;
+  stableNote?: boolean;
   /** Reader-facing title in the job toast; defaults to the scope name. */
   jobTitle?: string;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
@@ -236,12 +213,7 @@ export default function PortfolioFundamentalsRefresh({
    *  It must match `jobs.start`'s KEY EXACTLY, because that is what the server de-duplicates on
    * and therefore the only thing that can identify "my run" from the outside.
    */
-  const indexedScope =
-    scope.kind === "universe"
-      ? scope
-      : additionalScope?.kind === "universe"
-        ? additionalScope
-        : null;
+  const indexedScope = scope.kind === "universe" ? scope : null;
   const jobKey = indexedScope
     ? { kind: "fundamentals.index", label: indexedScope.label }
     : null;
@@ -287,7 +259,7 @@ export default function PortfolioFundamentalsRefresh({
           `fundamentals fill finished for ${indexedScope?.name ?? scope.name}`,
         );
         if (broadcast)
-          window.dispatchEvent(new Event("bb:fundamentals-finished"));
+          window.dispatchEvent(new CustomEvent("bb:fundamentals-finished", { detail: indexedScope ?? scope }));
         onDone?.();
       }
       setBusy(false);
@@ -306,7 +278,7 @@ export default function PortfolioFundamentalsRefresh({
       //  `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
       // the `everything` prop for what the four things are and which chart each one was missing.
       const q = fundamentalRefreshQuery({
-        allPeriods,
+        allPeriods: allPeriods || scope.kind === "company",
         everything: Boolean(everything),
         feeds,
         prices,
@@ -387,68 +359,11 @@ export default function PortfolioFundamentalsRefresh({
       }
       const job = await done;
       changed = job.status !== "failed";
-      // Between the two serial jobs there is nothing cancellable. Leave the control disabled until
-      // the benchmark job id arrives instead of sending Cancel to the already-finished first job.
-      setJobId(null);
       // A pre-flight subscription refusal spends no call and is therefore a completed job, but
       // it is not a successful refresh. Keep the server's reason beside the button after the toast
       // leaves; otherwise the still-empty cards immediately invite the same impossible press.
       if (job.summary?.includes(" — unavailable:"))
         setNote(fundamentalJobMessage(job.summary));
-      let additionalSucceeded = false;
-      const extra = refreshScopes(scope, additionalScope)[1];
-      if (extra && job.status !== "cancelled") {
-        // One press, two deliberately SERIAL jobs. Both use the global GuruFocus rate limiter, so
-        // parallel jobs cannot finish sooner and would make both progress cards appear stalled.
-        const extraQ = fundamentalRefreshQuery({
-          allPeriods,
-          everything: Boolean(everything),
-          feeds,
-          prices,
-          keyRatios,
-        });
-        const extraHoldings =
-          extra.kind === "company"
-            ? [{ isin: extra.isin }]
-            : extra.kind === "basket"
-              ? extra.holdings.map((h) => ({ isin: h.isin }))
-              : null;
-        const extraUrl =
-          extra.kind === "universe"
-            ? `${API_URL}/api/benchmarks/index/${encodeURIComponent(extra.label)}` +
-              "/fundamentals/ingest/job?force=true&feeds=all&prices=true"
-            : extraHoldings
-              ? `${API_URL}/api/airs/basket/fundamentals/ingest/job${extraQ}`
-              : `${API_URL}/api/airs/model-portfolios/${(extra as { id: number }).id}` +
-                `/fundamentals/ingest/job${extraQ}`;
-        const extraStarted = await startJob(
-          extraUrl,
-          `${extra.name} fundamentals`,
-          extraHoldings
-            ? {
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  holdings: extraHoldings,
-                  label: extra.name,
-                }),
-              }
-            : undefined,
-          showPartialResult,
-        );
-        setJobId(extraStarted.id);
-        const extraJob = await extraStarted.done;
-        if (extraJob.summary?.includes(" — unavailable:")) {
-          setNote(fundamentalJobMessage(extraJob.summary));
-        }
-        additionalSucceeded = extraJob.status !== "failed";
-        changed ||= additionalSucceeded;
-        if (
-          extraJob.status === "done" &&
-          !extraJob.summary?.includes(" — unavailable:")
-        ) {
-          setNote(`updated ${scope.name} and ${extra.name}`);
-        }
-      }
       //  Re-read on anything but a failure, including a cancel. A cancelled fill has still loaded
       // every company it got through, and leaving the pre-fill charts on screen would hide real
       // work that was really done.
@@ -470,15 +385,12 @@ export default function PortfolioFundamentalsRefresh({
         }`,
       );
     } finally {
-      // Also runs when the second job could not start: work completed by the first job must still
-      // become visible instead of being stranded behind the pre-refresh read cache.
       if (changed) {
         invalidateReadCache(
-          `fundamentals fill finished for ${scope.name}` +
-            (additionalScope ? ` and ${additionalScope.name}` : ""),
+          `fundamentals fill finished for ${scope.name}`,
         );
         if (broadcast)
-          window.dispatchEvent(new Event("bb:fundamentals-finished"));
+          window.dispatchEvent(new CustomEvent("bb:fundamentals-finished", { detail: scope }));
         onDone?.();
       }
       setBusy(false);
@@ -503,9 +415,6 @@ export default function PortfolioFundamentalsRefresh({
     if (!(await cancelJob(jobId))) setCancelling(false);
   };
 
-  const extraTitle = refreshScopes(scope, additionalScope)[1]
-    ? ` This press then refreshes the active benchmark, ${additionalScope!.name}.`
-    : "";
   const prominentToneClass = {
     accent: "border-accent-500 bg-accent-600 text-white hover:bg-accent-500",
     positive: "border-pos-500 bg-pos-500 text-white hover:bg-pos-400",
@@ -520,7 +429,8 @@ export default function PortfolioFundamentalsRefresh({
           have to chase with the pointer. */}
       {showNote && (
         <span
-          className="text-[11px] leading-snug text-fg-faint whitespace-normal break-words max-w-[22rem]"
+          className={`text-[11px] leading-snug text-fg-faint ${stableNote
+            ? "w-36 shrink-0 truncate" : "max-w-[22rem] whitespace-normal break-words"}`}
           title={note ?? undefined}
         >
           {note}
@@ -551,13 +461,9 @@ export default function PortfolioFundamentalsRefresh({
               : "Stop the fill. Work still queued is dropped at once and the three companies in flight " +
                 "stop at their next feed boundary, seconds away. Everything loaded so far is kept — " +
                 "press again later and it carries on from there."
-            : allPeriods
+            : allPeriods || scope.kind === "company"
               ? `Re-download the full GuruFocus fundamentals history for ${scope.name}, including older fiscal years.`
-              : (scope.kind === "company"
-                  ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have ` +
-                    "filed since we last looked. One API call, and none at all when its next quarter " +
-                    "cannot be out yet."
-                  : scope.kind === "universe"
+              : (scope.kind === "universe"
                     ? `Refresh all reachable ${scope.name} constituents: their financial statements, cash ` +
                       "flow and balance sheet, analyst estimates, indicators and daily share prices. " +
                       "This updates every Graphs card; exchanges outside the GuruFocus subscription are " +
@@ -566,8 +472,7 @@ export default function PortfolioFundamentalsRefresh({
                       "plausibly have filed since we last looked — one API call each, and none for a " +
                       "company whose next quarter cannot be out yet.") +
                 " Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, " +
-                "and carry on if you close this." +
-                extraTitle
+                "and carry on if you close this."
         }
         className={`${
           prominent

@@ -6,18 +6,26 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 
-def annual_priorities(payloads, snapshot, companies, growth_rows=()):
+def annual_priorities(payloads, snapshot, companies, growth_rows=(), *, fetchable=None):
     """Rank companies by the thin chart periods their missing inputs could fill."""
     from routers._benchmark_snapshots import _capital, _value, derived_specs
     from routers._fundamental_blend import _weight_at
 
     caps = payloads['universe-period-caps'].get('caps', {})
-    by_isin = {c['isin']: cid for cid, c in companies.items() if c.get('isin')}
+    by_isin = {c['isin']: cid for cid, c in companies.items()
+               if c.get('isin') and (fetchable is None or cid in fetchable)}
     specs = {path: dict(variants) for path, (_, variants) in derived_specs().items()}
     specs['cash-return-inputs'].update(invested_capital=_capital, roic=lambda r, p: _value(r, 'roic', p))
     years = [str(year) for year in range(2017, datetime.now(timezone.utc).year)]
     priority = Counter()
     coverage = {}
+
+    def add_priority(count, candidates):
+        gap = 500 - count
+        score = 1 + (500 / gap if 0 < gap <= len(candidates) else 0)
+        for cid in candidates:
+            priority[cid] += score
+
     for path, variants in specs.items():
         rows = payloads[path]['rows']
         for metric, value_of in variants.items():
@@ -34,13 +42,10 @@ def annual_priorities(payloads, snapshot, companies, growth_rows=()):
                 }, year)]
                 count = actual.get(year, 0)
                 counts[year] = count
-                # Continue filling beyond the display floor, with priority
-                # given to periods that have enough weighted names to reach it.
-                score = 1 + (500 - count if count < 500 <= len(weighted) else 0)
-                for row in weighted:
-                    cid = by_isin.get(row.get('isin'))
-                    if cid is not None and value_of(row, year) is None:
-                        priority[cid] += score
+                add_priority(count, {
+                    cid for row in weighted if (cid := by_isin.get(row.get('isin'))) is not None
+                    and value_of(row, year) is None
+                })
     observed = {(row['company_id'], row['metric_code'], str(row['target_date'])[:4])
                 for row in growth_rows if row.get('numeric_value') is not None}
     growth_codes = {row['metric_code'] for row in growth_rows}
@@ -52,10 +57,7 @@ def annual_priorities(payloads, snapshot, companies, growth_rows=()):
         for year, count in coverage[metric].items():
             weighted = [cid for isin, cid in by_isin.items()
                         if _weight_at({'weights': caps.get(isin, {})}, year)]
-            score = 1 + (500 - count if count < 500 <= len(weighted) else 0)
-            for cid in weighted:
-                if (cid, metric, year) not in observed:
-                    priority[cid] += score
+            add_priority(count, {cid for cid in weighted if (cid, metric, year) not in observed})
     return priority, coverage
 
 
@@ -87,7 +89,10 @@ def run(ctx, *, reserve, statements_only=False):
 
     def measure(payloads, snapshot):
         nonlocal priority, annual_before
-        priority, annual_before = annual_priorities(payloads, snapshot, companies, growth_rows)
+        priority, annual_before = annual_priorities(
+            payloads, snapshot, companies, growth_rows,
+            fetchable={cid for cid, company in companies.items() if not eligible(company)},
+        )
 
     asyncio.run(warm._warm_one('ACWI', 'annual', warm._generation, on_publish=measure))
     if not annual_before:
@@ -161,11 +166,20 @@ def run(ctx, *, reserve, statements_only=False):
         if not saved or saved['built_at'] < began:
             raise RuntimeError(f'ACWI {cadence} rebuild did not publish; the last complete charts remain available')
         snapshots[cadence] = {'built_at': saved['built_at'], 'coverage': saved['growth'].get('member_counts', {})}
+    if not annual_after:
+        raise RuntimeError('Annual ACWI charts published without a verified coverage receipt')
+    remaining_gaps = {
+        metric: {year: {'usable': count, 'short_of_500': 500 - count}
+                 for year, count in counts.items() if count < 500}
+        for metric, counts in annual_after.items()
+        if any(count < 500 for count in counts.values())
+    }
     result = {'members': len(members), 'attempted': receipt.get('attempted', 0), 'loaded': receipt.get('loaded', 0),
               'unavailable': receipt.get('failed', 0) + sum(c['status'] == 'unavailable' for c in skipped),
               'recently_checked': sum(c['status'] == 'recent' for c in skipped), 'quota_deferred': len(deferred),
               'receipt': receipt, 'coverage_before': before, 'coverage_after': after, 'snapshots': snapshots,
               'annual_chart_coverage_before': annual_before, 'annual_chart_coverage_after': annual_after,
+              'remaining_annual_chart_gaps': remaining_gaps,
               'note': 'Stored figures, usable chart contributors, and latest-year reporters are different counts. '
                       'Non-positive histories and missing weights can exclude a company even when data exists. '
                       'A year that has not yet been reported cannot be fetched or filled with projections.'}

@@ -40,6 +40,33 @@ def _run(name: str, hours_ago: float, status: str = "ok", err: str | None = None
             "finished_at": None}
 
 
+@pytest.mark.parametrize("heartbeat_minutes,status", [(1, "running"), (6, "interrupted"), (None, "interrupted")])
+def test_running_job_uses_heartbeat_instead_of_the_jobs_refresh_interval(heartbeat_minutes, status):
+    run = {**_run("j", 28, "running"), "scheduled_record": True}
+    if heartbeat_minutes is not None:
+        run["summary"] = {"heartbeat_at": (NOW - timedelta(minutes=heartbeat_minutes)).isoformat()}
+    row, = build_rows([_spec()], [_reg("j")], [run], NOW, scheduler_running=True,
+                      scheduler_booted_at=NOW - timedelta(hours=1))
+    assert row["status"] == status
+
+
+def test_heartbeat_batch_only_updates_open_receipts(monkeypatch):
+    import job_runlog
+    from tests._fake_supabase import FakeSupabase
+
+    db = FakeSupabase({"scheduled_job_run": [
+        {"id": 1, "status": "running"},
+        {"id": 2, "status": "ok", "summary": {"saved": 5}},
+        {"id": 3, "status": "running"},
+    ]})
+    monkeypatch.setattr(job_runlog, "_supabase", lambda: db)
+    job_runlog._write_heartbeats([1, 2])
+    rows = db.table("scheduled_job_run").select("*").execute().data
+    assert rows[0]["summary"]["heartbeat_at"]
+    assert rows[1]["summary"] == {"saved": 5}
+    assert "summary" not in rows[2]
+
+
 class TestTheDeclarationIsTheFixedPoint:
     def test_every_spec_declares_exactly_one_kind_of_trigger(self):
         for s in SCHEDULED_JOBS:

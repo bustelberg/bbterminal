@@ -255,6 +255,21 @@ class TestTheCancelledCardSaysWhatHappened:
 
 
 class TestBestEffortBenchmarkFill:
+    def test_vendor_outage_defers_the_batch_and_cools_down_later_attempts(self, rig, monkeypatch):
+        import routers._fundamental_backfill as backfill
+
+        monkeypatch.setattr(fill, '_vendor_retry_at', None)
+        monkeypatch.setattr(fill, 'FILL_WORKERS', 1)
+        monkeypatch.setattr(backfill, 'ingest_company', lambda *_a, **_kw:
+                            {'done': [], 'rows': 0, 'calls': 1, 'error': fill.VENDOR_EMPTY_MARKER})
+        ids = list(range(1, 101))
+        first, second = {}, {}
+        fill.fill_company_ids(FakeCtx(), 'ACWI', ids, force=True, best_effort=True, receipt=first)
+        fill.fill_company_ids(FakeCtx(), 'AEX', ids, force=True, best_effort=True, receipt=second)
+        assert (first['calls'], first['deferred']) == (20, 80)
+        assert (second['calls'], second['deferred']) == (0, 100)
+        assert first['vendor_retry_at'] == second['vendor_retry_at']
+
     def test_empty_companies_do_not_hide_later_available_companies(self, rig, monkeypatch):
         import routers._fundamental_backfill as backfill
         seen = []

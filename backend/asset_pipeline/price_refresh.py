@@ -343,20 +343,25 @@ def backfill_missing(isins: set[str]) -> dict:
     latest = latest_close_by_analysis(sorted({r["analysis_id"] for r in rows}))
     missing = [r for r in rows if r.get("yahoo_symbol") and r["analysis_id"] not in latest]
     done = failed = skipped = 0
+    failures = []
     for i, r in enumerate(missing):
         try:
             store.store_series(r["analysis_id"], r["yahoo_symbol"], None)
             done += 1
         except YahooThrottled as e:
             failed += 1
+            failures.append({"isin": r["isin"], "symbol": r["yahoo_symbol"], "error": str(e)})
             skipped = len(missing) - i - 1
             log.warning("[price_refresh] backfill paused; %d deferred: %s", skipped, e)
             break
         except Exception as e:  # noqa: BLE001
             failed += 1
+            failures.append({"isin": r["isin"], "symbol": r["yahoo_symbol"],
+                             "error": f"{type(e).__name__}: {e}"})
             log.warning("[price_refresh] price backfill %s failed: %s", r["isin"], e)
         time.sleep(DEFAULT_SLEEP_S)
-    return {"missing": len(missing), "backfilled": done, "failed": failed, "skipped": skipped}
+    return {"missing": len(missing), "backfilled": done, "failed": failed, "skipped": skipped,
+            "failures": failures}
 
 
 def backfill_full_histories(isins: set[str]) -> dict:

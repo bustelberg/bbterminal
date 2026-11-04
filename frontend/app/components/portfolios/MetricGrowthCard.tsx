@@ -11,7 +11,6 @@ import { AboutCard, AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { type ChartKey } from './longEquityCopy';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
-import HoldingsIngestPanel from './HoldingsIngestPanel';
 import MissingFundamentals from './MissingFundamentals';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
@@ -210,8 +209,8 @@ export function pctSince(step: Step | null | undefined, ltmXs?: ReadonlySet<numb
 export { Stat } from './CardStats';
 
 export default function MetricGrowthCard({
-  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin: _ingestIsin, onIngested,
-  blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
+  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName,
+  blendNotes, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
   benchNotes, memberCounts, benchCounts, coverageLabel, chartStatistics, benchStatistics,
 }: {
   cfg: MetricCfg;
@@ -230,15 +229,6 @@ export default function MetricGrowthCard({
   // Portfolio only: why a metric the holdings DO carry produced no blended line. Absent for a
   // metric nobody reports — that one really is "not ingested". See `blendNotes`.
   blendNotes?: Record<string, BlendNote>;
-  // Reload just the metrics fetch (the four growth cards share it), NOT the whole tab — the
-  // derived cards each refetch their own inputs on a re-key and none of that is needed here.
-  onReloadMetrics?: () => void;
-  // Single-company only: its ISIN + a callback to reload the tab's metrics after an ingest, so an
-  // empty card can fetch this company's financials from GuruFocus (which brings every growth line
-  // at once — revenue and shares are the same 192-company set). A portfolio ingests per-row in the
-  // drill-down instead, so this is left undefined there.
-  ingestIsin?: string;
-  onIngested?: () => void;
   /**
    * The selected index blended the SAME way this card's own series is — one
    * `fundamental-blend-metrics` call in the tab, every code in it, so all three growth cards read
@@ -819,16 +809,8 @@ export default function MetricGrowthCard({
             See per holding
           </button>
         </div>
-      ) : points.length === 0 && isAgg ? (
-        // A portfolio has no single ISIN to fetch — it has N of them, each with its own outcome.
-        // The panel runs them one at a time and REPORTS per holding; it stays on screen until the
-        // reader chooses "Reload", so a partial success can't hide the holdings that came back
-        // empty. Reload is metrics-only: the derived cards' inputs are untouched by this run.
-        <HoldingsIngestPanel target={holdingsTarget} metric={cfg.benchmarkMetric}
-          noun={cfg.noun} onIngested={onReloadMetrics ?? onIngested} />
       ) : points.length === 0 ? (
-        <MissingFundamentals message={`No ${cfg.noun} ingested for this company.`}
-          target={holdingsTarget} name={holdingsName} onDone={onIngested} />
+        <MissingFundamentals message={`No ${cfg.noun} ingested for this ${isAgg ? 'portfolio' : 'company'}.`} />
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -970,8 +952,8 @@ export default function MetricGrowthCard({
               narrowed={statSpan != null && reported.length > ownStat.length} />
           </div>
 
-          <div>
-            <ResponsiveContainer width="100%" height={320}>
+          <div className="w-full min-w-0">
+            <ResponsiveContainer width="100%" minWidth={0} height={320}>
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }}
                 onClick={() => setShowHoldings(true)}>

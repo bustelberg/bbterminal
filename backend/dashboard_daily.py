@@ -247,6 +247,13 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
               and not is_excluded_portfolio(r["portefeuille"])
               and (not dashboard_only or is_dashboard_account(r['portefeuille']))]
     links = {r["portefeuille"]: r for r in list_account_links()["accounts"]}
+    overview_keys = {
+        prepared.holdings_key(pid, "ACWI", look)
+        for row in roster
+        if (pid := (links.get(row["portefeuille"]) or {}).get("model_portfolio_id")) is not None
+        for look in (False, True)
+    }
+    overview_states = prepared.overview_freshness(sorted(overview_keys))
     models = {r["id"]: r for r in rows("airs_model_portfolio", "id,portfolio_type,positions_scanned_at,positions_error")}
     checks = {r["portefeuille"]: r for r in rows("airs_price_check", "portefeuille,checked_at")}
     execution = {r["isin"]: r for r in rows("asset_execution", "isin,status,analysis_id,yahoo_symbol,currency")}
@@ -320,8 +327,14 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
             if needs_composition and (model.get("positions_error") or str(model.get("positions_scanned_at") or "")[:10] < day):
                 issues.append("model composition not successfully scanned today")
             for look in (False, True):
-                if prepared.read("holdings", prepared.holdings_key(pid, "ACWI", look))[1] is None:
-                    issues.append(f"Analyse snapshot missing or outdated (look-through={look})")
+                state = overview_states.get(prepared.holdings_key(pid, "ACWI", look), "missing")
+                if state != "current":
+                    reason = {
+                        "older": "older bundle still serving",
+                        "missing": "no bundle published",
+                        "unavailable": "bundle metadata could not be checked",
+                    }[state]
+                    issues.append(f"Analyse: {reason} (look-through={look})")
         if str((checks.get(name) or {}).get("checked_at") or "")[:10] < day:
             issues.append("price checks not saved today")
         report = monthly.get(name) or {}

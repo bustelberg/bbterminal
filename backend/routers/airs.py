@@ -890,6 +890,7 @@ class CompositionHolding(BaseModel):
 
     name: str | None = None
     isin: str | None = None
+    in_both: bool = False
     # Share of the complete current AIRS book, or of the visible model axis on fallback.
     # Σ over a bucket == that bucket's `portfolio_pct`.
     weight_pct: float = 0.0

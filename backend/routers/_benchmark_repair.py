@@ -30,7 +30,9 @@ def audit(label: str, cadence: str, report=None) -> dict:
     ids = [row['company_id'] for row in members]
     if not ids:
         raise ValueError(f'No companies were found for {label}')
-    keys = tuple(dict.fromkeys((*_KEYS, *CORE, 'eps_nri_estimate')))
+    keys = tuple(dict.fromkeys((*_KEYS, *CORE, 'eps_nri_estimate', 'long_term_debt',
+                                'goodwill', 'noncurrent_liabilities', 'total_equity',
+                                'sbc', 'ocf', 'capex', 'gross_profit', 'net_income')))
     codes = {key: tuple(_metric_codes(key)) for key in keys}
     if cadence == 'quarterly':
         codes = {key: tuple(code.replace('annuals__', 'quarterly__') for code in values)

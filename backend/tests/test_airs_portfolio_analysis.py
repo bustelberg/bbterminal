@@ -1088,3 +1088,17 @@ class TestTheAllocationBarAlwaysShowsTheFourClasses:
         describe, and four 0.00% bars would dress a failed load as a real allocation."""
         assert pa._weigh_alloc([]) == []
         assert pa._weigh_alloc([(0.0, "Equity")]) == []
+def test_acwi_overlap_uses_snapshot_issuer_even_without_matching_isin():
+    from routers._airs_portfolio_analysis import _mark_acwi_sector_overlap
+
+    portfolio = {"Technology": [
+        {"name": "Nvidia", "isin": "PORTFOLIO-NVDA"},
+        {"name": "Microsoft", "isin": "PORTFOLIO-MSFT"},
+        {"name": "Unrelated Software", "isin": "OTHER"},
+    ]}
+    benchmark = {"Technology": [
+        {"name": "NVIDIA CORP", "isin": "BENCHMARK-NVDA", "_snapshot_issuer": "nvidia"},
+    ], "Unclassified": [{"name": "MICROSOFT CORP", "isin": None, "_snapshot_issuer": "microsoft"}]}
+    _mark_acwi_sector_overlap(portfolio, benchmark, "2026-11-02")
+    assert [row["in_both"] for row in portfolio["Technology"]] == [True, True, False]
+    assert benchmark["Unclassified"][0]["in_both"] is True

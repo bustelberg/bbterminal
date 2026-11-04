@@ -2,12 +2,10 @@
 
 import { savedBenchmarkSeries } from './benchmarkSnapshot';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
@@ -16,6 +14,7 @@ import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import MissingFundamentals from './MissingFundamentals';
+import { useChartHoldingsInputs } from './CompanyChartInputs';
 import { fcfLabel } from './sbcCorrection';
 import MarginInputsModal from './MarginInputsModal';
 import { marginByYear, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
@@ -48,29 +47,9 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
   /** Re-key the card after its drill-down refresh has populated new inputs. */
   onRefreshed?: () => void;
 }) {
-  const [data, setData] = useState<MarginInputs | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      setData(null); setErr(null);
-      try {
-        const r = await apiFetch(`${API_URL}/api/earnings/margin-inputs`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
-        });
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as MarginInputs);
-      } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; };
-  }, [holdingsTarget]);
+  const { data, error: err } = useChartHoldingsInputs<MarginInputs>('margin-inputs', holdingsTarget);
 
   const marginByYr = useMemo(
     () => marginByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
@@ -103,8 +82,7 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
       ) : (err || benchErr) ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : marginByYr.size === 0 ? (
-          <MissingFundamentals message="No revenue / FCF ingested to compute a margin."
-            target={holdingsTarget} name={holdingsName} />
+          <MissingFundamentals message="No revenue / FCF ingested to compute a margin." />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

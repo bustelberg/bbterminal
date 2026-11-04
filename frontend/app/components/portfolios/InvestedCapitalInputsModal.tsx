@@ -11,7 +11,6 @@ import {
 } from './RatioInputsTable';
 import { inputsBody, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
-import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
 /** The base inputs behind Invested capital — the two components (Non-current liabilities, Total
  * equity) plus their sum (Invested capital), each in the company's own reporting currency
@@ -85,7 +84,6 @@ export default function InvestedCapitalInputsModal({ target, portfolioName, benc
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
   const [bench, setBench] = useState<CashReturnInputs | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
-  const [benchReloadKey, setBenchReloadKey] = useState(0);
   const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
@@ -102,7 +100,7 @@ export default function InvestedCapitalInputsModal({ target, portfolioName, benc
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchKey, benchReloadKey]);
+  }, [benchKey]);
 
   /** Fetch a `no_data` holding's financials, then reload. Throws the stated reason otherwise, which
    *  the row renders — a fetch that loaded financials carrying none of these lines is a real
@@ -163,8 +161,7 @@ export default function InvestedCapitalInputsModal({ target, portfolioName, benc
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
-                <BenchmarkFundamentalsRefresh benchTarget={benchTarget} benchLabel={benchLabel}
-                  onDone={() => setBenchReloadKey((k) => k + 1)} />
+
               </div>
               {!bench && !benchErr && <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>}
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}

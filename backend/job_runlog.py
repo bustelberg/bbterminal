@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import logging
+from threading import Event, Lock, Thread
 from collections import deque
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -41,6 +42,9 @@ from typing import Any, Iterator
 
 _log = logging.getLogger(__name__)
 _active_run: ContextVar[RunRecord | None] = ContextVar("active_scheduled_run", default=None)
+_heartbeat_lock = Lock()
+_heartbeat_ids: set[int] = set()
+_heartbeat_thread: Thread | None = None
 
 
 def record_progress(done: int, total: int, message: str) -> None:
@@ -94,6 +98,34 @@ def _supabase():
     return supabase
 
 
+def _write_heartbeats(ids: list[int]) -> None:
+    (_supabase().table("scheduled_job_run")
+     .update({"summary": {"heartbeat_at": datetime.now(timezone.utc).isoformat()}})
+     .in_("id", ids).eq("status", "running").execute())
+
+
+def _heartbeat() -> None:
+    tick = Event()
+    while not tick.wait(60):
+        with _heartbeat_lock:
+            ids = sorted(_heartbeat_ids)
+        if ids:
+            try:
+                _write_heartbeats(ids)
+            except Exception as exc:
+                _log.warning("[runlog] heartbeat failed for %d active runs: %s", len(ids), exc)
+
+
+def _register_heartbeat(row_id: int) -> None:
+    global _heartbeat_thread
+    with _heartbeat_lock:
+        _heartbeat_ids.add(row_id)
+        if _heartbeat_thread is None or not _heartbeat_thread.is_alive():
+            worker = Thread(target=_heartbeat, daemon=True, name="scheduled-job-heartbeats")
+            worker.start()
+            _heartbeat_thread = worker
+
+
 @contextmanager
 def record_run(job_id: str, triggered_by: str = "auto") -> Iterator[RunRecord]:
     """Record one run of `job_id`, whatever happens inside.
@@ -105,13 +137,19 @@ def record_run(job_id: str, triggered_by: str = "auto") -> Iterator[RunRecord]:
     rec = RunRecord(job_id, None)
     try:
         rows = (_supabase().table("scheduled_job_run")
-                .insert({"job_id": job_id, "triggered_by": triggered_by})
+                .insert({"job_id": job_id, "triggered_by": triggered_by,
+                         "summary": {"heartbeat_at": datetime.now(timezone.utc).isoformat()}})
                 .execute().data or [])
         rec.row_id = rows[0]["id"] if rows else None
     except Exception as e:  # noqa: BLE001 — see the module note: never break the job
         _log.warning("[runlog] could not open a run row for %s: %s: %s",
                      job_id, type(e).__name__, e)
 
+    if rec.row_id is not None:
+        try:
+            _register_heartbeat(rec.row_id)
+        except RuntimeError as exc:
+            _log.warning("[runlog] could not start heartbeat for %s: %s", job_id, exc)
     parent = _active_run.get()
     token = _active_run.set(rec)
     try:
@@ -123,6 +161,9 @@ def record_run(job_id: str, triggered_by: str = "auto") -> Iterator[RunRecord]:
         rec.detail = f"{type(e).__name__}: {str(e)[:400]}"
         raise
     finally:
+        if rec.row_id is not None:
+            with _heartbeat_lock:
+                _heartbeat_ids.discard(rec.row_id)
         _active_run.reset(token)
         duration = round((perf_counter() - rec.started) * 1000)
         rec.summary = {

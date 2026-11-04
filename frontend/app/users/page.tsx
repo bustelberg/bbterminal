@@ -7,6 +7,15 @@ import { dialog } from '../../lib/dialog';
 import LoadingDots from '../components/LoadingDots';
 import { API_URL } from '../../lib/apiUrl';
 
+const userDateFormatter = new Intl.DateTimeFormat('nl-NL', {
+  day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+});
+
+function formatUserDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : userDateFormatter.format(date).replace('.', '');
+}
+
 /**
  *  There is no password field here and there will not be one, hash included. Asked for
  * (2026-09-08) and declined in `routers/auth.py::_user_detail`: a bcrypt hash is not information
@@ -421,10 +430,10 @@ ${r.status}: ${body?.detail ?? ''}`);
                     : <span className={u.sessions > 0 ? 'text-fg' : 'text-fg-faint'}>{u.sessions}</span>}
                 </td>
                 <td className="px-3 py-2 text-fg-subtle font-mono text-xs">
-                  {u.created_at ? u.created_at.slice(0, 10) : '—'}
+                  {u.created_at ? formatUserDate(u.created_at) : '—'}
                 </td>
                 <td className="px-3 py-2 text-fg-subtle font-mono text-xs">
-                  {u.last_sign_in_at ? u.last_sign_in_at.slice(0, 10) : 'never'}
+                  {u.last_sign_in_at ? formatUserDate(u.last_sign_in_at) : 'never'}
                 </td>
                 <td className="px-5 py-2 text-right">
                   <div className="inline-flex gap-2">

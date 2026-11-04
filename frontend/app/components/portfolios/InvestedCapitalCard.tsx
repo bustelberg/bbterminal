@@ -2,12 +2,10 @@
 
 import { savedBenchmarkSeries } from './benchmarkSnapshot';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
@@ -19,6 +17,7 @@ import { cagrPct } from './lineCagr';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import MissingFundamentals from './MissingFundamentals';
+import { useChartHoldingsInputs } from './CompanyChartInputs';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
 import { investedCapitalIndexByYear, investedCapitalSeries } from './investedCapitalData';
 import { paddedLogDomain, stepChanges, xToPeriod, type Step } from './marginData';
@@ -51,29 +50,9 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
    */
   benchTarget?: BenchTarget | null;
 }) {
-  const [data, setData] = useState<CashReturnInputs | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      setData(null); setErr(null);
-      try {
-        const r = await apiFetch(`${API_URL}/api/earnings/cash-return-inputs`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
-        });
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as CashReturnInputs);
-      } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; };
-  }, [holdingsTarget]);
+  const { data, error: err } = useChartHoldingsInputs<CashReturnInputs>('cash-return-inputs', holdingsTarget);
 
   const { points, currency, isIndex } = useMemo(() => {
     const rows = data?.rows ?? [];
@@ -204,8 +183,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
       ) : (err || benchErr) ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : points.length === 0 ? (
-        <MissingFundamentals message={`No invested-capital figures ingested for this ${isAgg ? 'portfolio' : 'company'}.`}
-          target={holdingsTarget} name={holdingsName} />
+        <MissingFundamentals message={`No invested-capital figures ingested for this ${isAgg ? 'portfolio' : 'company'}.`} />
       ) : (
         <>
           <div className="flex flex-wrap gap-2">

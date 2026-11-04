@@ -18,6 +18,7 @@ import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import MissingFundamentals from './MissingFundamentals';
+import { useCompanyChartInput } from './CompanyChartInputs';
 import DividendYieldInputsModal from './DividendYieldInputsModal';
 import DailyToggle from './DailyToggle';
 import { coverageByYear, dividendYieldByYear, type DividendYieldInputs } from './dividendYieldData';
@@ -49,8 +50,8 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
-  const [data, setData] = useState<DividendYieldInputs | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [fetchedData, setData] = useState<DividendYieldInputs | null>(null);
+  const [fetchedError, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
   const dailyCache = useRef(new Map<string, DividendYieldInputs>());
   /**
@@ -68,7 +69,13 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
     () => (daily ? { ...holdingsTarget, cadence: 'daily' } : holdingsTarget),
     [holdingsTarget, daily]);
 
+  const bundled = useCompanyChartInput<DividendYieldInputs>('dividend-yield-inputs', 'own', !daily);
+  const hasBundle = bundled !== null;
+  const data = bundled ? bundled.data : fetchedData;
+  const err = bundled ? bundled.error : fetchedError;
+
   useEffect(() => {
+    if (hasBundle) return;
     let alive = true;
     const key = JSON.stringify(target);
     const cached = dailyCache.current.get(key);
@@ -105,7 +112,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
       }
     })();
     return () => { alive = false; controller.abort(); };
-  }, [target, daily]);
+  }, [target, daily, hasBundle]);
 
   const yieldByYr = useMemo(() => dividendYieldByYear(data?.rows ?? []), [data]);
   const covByYr = useMemo(() => coverageByYear(data?.rows ?? []), [data]);
@@ -148,8 +155,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
       ) : (err || benchErr) ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err || benchErr}</p>
       ) : yieldByYr.size === 0 ? (
-          <MissingFundamentals message="No dividend / price figures ingested to compute a yield."
-            target={holdingsTarget} name={holdingsName} />
+          <MissingFundamentals message="No dividend / price figures ingested to compute a yield." />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

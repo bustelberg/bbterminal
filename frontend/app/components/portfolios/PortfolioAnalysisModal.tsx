@@ -969,19 +969,22 @@ function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, ben
   const directWeight = holdings.reduce((sum, holding) => sum + (holding.weight_pct ?? 0), 0);
   const lookedThroughWeight = Math.max(0, (row.portfolio_pct ?? 0) - directWeight);
   const companies = new Map<string, {
-    name: string; via: Set<string>; portfolio?: number; benchmark?: number;
+    name: string; via: Set<string>; portfolio?: number; benchmark?: number; inBoth?: boolean;
   }>();
   for (const [side, entries] of [['portfolio', holdings], ['benchmark', benchmarkHoldings]] as const) {
     entries.forEach((holding, index) => {
       const isin = holding.isin?.trim().toUpperCase();
       const key = isin || `${side}-${index}`;
-      const company = companies.get(key) ?? { name: holding.name || '—', via: new Set<string>() };
+      const company = companies.get(key) ?? { name: holding.name || '—', via: new Set<string>(), inBoth: false };
+      company.inBoth ||= holding.in_both;
       for (const name of holding.via_names ?? []) company.via.add(name);
       company[side] = (company[side] ?? 0) + (holding.weight_pct ?? 0);
       companies.set(key, company);
     });
   }
   const entries = [...companies.entries()];
+  const overlaps = (company: (typeof entries)[number][1]) =>
+    company.inBoth || (company.portfolio != null && company.benchmark != null);
   const labels = copy.axes.sectorHoldings;
   const formatter = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
@@ -1002,7 +1005,7 @@ function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, ben
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto px-5 pb-5">
-          {entries.some(([, company]) => company.portfolio != null && company.benchmark != null) && (
+          {entries.some(([, company]) => overlaps(company)) && (
             <p className="mb-2 flex items-center gap-1.5 pt-3 text-[11px] text-fg-faint">
               <BenchmarkMembershipMark member label={labels.overlap} />
               {labels.overlap}
@@ -1036,7 +1039,7 @@ function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, ben
                       </thead>
                       <tbody>
                         {holdings.map(([key, company], index) => {
-                          const overlap = company.portfolio != null && company.benchmark != null;
+                          const overlap = overlaps(company);
                           return (
                             <tr key={key} className={`border-t border-neutral-800/20 ${overlap ? 'bg-accent-500/15' : ''}`}>
                               <td className="py-1 pr-1 text-right font-mono tabular-nums text-fg-faint">{index + 1}</td>
