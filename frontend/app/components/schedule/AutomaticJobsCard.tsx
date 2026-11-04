@@ -270,12 +270,27 @@ function Row({ j, panel, ctx }: {
         <tr className="bg-inset/60">
           <td colSpan={7} className="px-3 py-2 space-y-1">
             {j.reason && <p className={`text-[12px] ${tone.text}`}>{j.reason}</p>}
-            {j.last_detail && (
+            {failure ? (
+              <div className="text-[12px] text-fg-soft">
+                <p>{failure.detail}</p>
+                {failure.causes.length > 0 && (
+                  <ul className="list-disc pl-4">
+                    {failure.causes.map(({ message, affected, affected_count }) => (
+                      <li key={message}>
+                        {message}
+                        {affected && ` (${affected.join(', ')}${affected_count > affected.length ? ` +${affected_count - affected.length} more` : ''})`}
+                      </li>
+                    ))}
+                    {failure.additional_causes && <li>{failure.additional_causes} more causes in the full receipt</li>}
+                  </ul>
+                )}
+              </div>
+            ) : j.last_detail && (
               <p className="text-[12px] text-fg-soft font-mono">{j.last_detail}</p>
             )}
             {summary && <p className="text-[12px] text-fg-muted font-mono">{summary}</p>}
             {j.last_summary && Object.values(j.last_summary).some(value => value !== null && typeof value === 'object') && (
-              <details open={j.last_status === 'error'} className="text-xs text-fg-muted">
+              <details className="text-xs text-fg-muted">
                 <summary className="cursor-pointer py-1">Source dates, coverage and per-portfolio results</summary>
                 <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-page p-3 text-[11px]">{JSON.stringify(j.last_summary, null, 2)}</pre>
               </details>

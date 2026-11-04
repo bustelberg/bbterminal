@@ -18,7 +18,7 @@ describe('scheduled job receipt summary', () => {
   });
 });
 
-it('copies full failure receipts even when scheduler registration overrides the run status', () => {
+it('copies compact causes even when scheduler registration overrides the run status', () => {
   const job: JobRow = {
     id: 'daily', label: 'Daily refresh', fills: '', cadence: '', registered: false,
     observable: true, runnable: true, status: 'missing', reason: 'Not registered',
@@ -26,10 +26,10 @@ it('copies full failure receipts even when scheduler registration overrides the 
     last_summary: { errors: { audit: { missing: ['BOOK'] } } },
   };
   expect(jobFailure(job)).toEqual({
-    id: 'daily', label: 'Daily refresh', status: 'missing', last_status: 'error',
+    id: 'daily', status: 'missing', last_status: 'error',
     last_run_at: job.last_run_at, reason: 'Not registered', detail: 'Refresh failed',
-    summary: job.last_summary,
+    causes: [{ message: 'BOOK', affected: ['missing'], affected_count: 1 }],
   });
   expect(jobFailure({ ...job, last_status: 'done' })).toBeNull();
-  expect(jobFailure({ ...job, status: 'error', last_status: 'running' })?.reason).toBe('Not registered');
+  expect(jobFailure({ ...job, status: 'error', last_status: 'running' })?.detail).toBe('Refresh failed');
 });

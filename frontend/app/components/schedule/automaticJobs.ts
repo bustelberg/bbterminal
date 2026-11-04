@@ -48,15 +48,58 @@ export type JobsPayload = {
 
 export function jobFailure(job: JobRow) {
   if (job.status !== 'error' && job.last_status !== 'error' && job.last_status !== 'failed') return null;
+  const causes = new Map<string, Set<string>>();
+  const clean = (message: string) => message.replace(/^(?:(?:IncompleteRefresh|RuntimeError|ValueError):\s*)+/, '').trim();
+  const detail = clean(job.last_detail ?? '').replace(/; see per-portfolio receipt$/, '');
+
+  function collect(value: unknown, scope = '', diagnostic = false) {
+    if (typeof value === 'string') {
+      const scopedError = value.match(/^([^:]+): ((?:RuntimeError|ValueError): .+)$/);
+      const message = clean(scopedError?.[2] ?? value);
+      if (!diagnostic || !message || message === detail) return;
+      const scopes = causes.get(message) ?? new Set<string>();
+      const affected = scopedError?.[1] ?? scope;
+      if (affected) scopes.add(affected);
+      causes.set(message, scopes);
+    } else if (Array.isArray(value)) {
+      value.forEach(item => collect(item, scope, diagnostic));
+    } else if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const name = record.portefeuille ?? record.symbol ?? record.isin;
+      const location = typeof name === 'string' ? name : scope;
+      for (const [key, item] of Object.entries(record)) {
+        if (key === 'source_jobs' && item && typeof item === 'object') {
+          for (const [source, run] of Object.entries(item)) {
+            if (run && run.status !== 'ok') collect(run, source);
+          }
+        } else if (['error', 'errors', 'issues', 'global_issues', 'account_errors', 'skipped', 'message', 'missing'].includes(key)) {
+          collect(item, key === 'missing' ? key : location, true);
+        } else if (key === 'detail' || key === 'reason') {
+          if (diagnostic || ['error', 'failed', 'missed', 'interrupted'].includes(String(record.status))) {
+            collect(item, location, true);
+          }
+        } else if (item && typeof item === 'object') {
+          collect(item, typeof name === 'string' || key === 'summary' ? location : key, diagnostic && Array.isArray(item));
+        } else if (diagnostic && typeof item === 'string') {
+          collect(item, key, true);
+        }
+      }
+    }
+  }
+
+  collect(job.last_summary);
   return {
     id: job.id,
-    label: job.label,
     status: job.status,
     last_run_at: job.last_run_at ?? null,
-    last_status: job.last_status ?? null,
-    reason: job.reason,
-    detail: job.last_detail ?? null,
-    summary: job.last_summary ?? null,
+    ...(job.last_status && job.last_status !== job.status ? { last_status: job.last_status } : {}),
+    ...(job.status !== 'error' ? { reason: job.reason } : {}),
+    detail: (causes.size ? detail.split(' · failed ')[0] : detail) || job.reason,
+    causes: [...causes].slice(0, 12).map(([message, scopes]) => ({
+      message,
+      ...(scopes.size ? { affected: [...scopes].slice(0, 5), affected_count: scopes.size } : {}),
+    })),
+    ...(causes.size > 12 ? { additional_causes: causes.size - 12 } : {}),
   };
 }
 
