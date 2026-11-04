@@ -3,12 +3,42 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from math import isclose
 
 from deps import supabase
 from routers._airs_monthly_positions import position_boundary, position_performance, section_data
+from routers._airs_monthly_reconciliation import reconcile_positions
 from routers._airs_strategy_map import dynamic_account_for_holding, nickname_for_holding
 
 log = logging.getLogger(__name__)
+
+
+def _attribute_certificate(wrapper, sections, positions, closing_date):
+    calculation = wrapper.get("contribution_calculation")
+    performance = section_data(sections, "performance") or {}
+    if (not calculation or calculation["trades"] or str(performance.get("periode", ""))[:10] != closing_date
+            or calculation["opening_date"] != section_data(sections, "opening")["as_of"]
+            or calculation["closing_date"] != closing_date):
+        return None
+
+    checked = [dict(position) for position in positions]
+    reconciliation = reconcile_positions(sections, performance, checked)
+    if reconciliation["status"] != "reconciled":
+        return None
+    scale = calculation["opening_value_eur"] / calculation["portfolio_opening_capital_eur"]
+    position_pp = [row["contribution_pp"] * scale for row in checked]
+    accounting = [(row["kind"], row["contribution_pp"] * scale) for row in reconciliation["adjustments"]]
+    explained_eur = (sum(position_pp) + sum(value for _, value in accounting)) * calculation["portfolio_opening_capital_eur"] / 100
+    if not isclose(explained_eur, calculation["result_eur"], rel_tol=0, abs_tol=.01):
+        return None
+    for position, contribution in zip(positions, position_pp):
+        position.update(contribution_pp=contribution, attribution_kind="underlying")
+    return [
+        {"name": wrapper["name"], "isin": None, "status": "held", "return_pct": None,
+         "start_date": None, "end_date": None, "contribution_pp": value,
+         "certificate": wrapper["name"], "attribution_kind": kind}
+        for kind, value in accounting if value
+    ]
 
 
 def _child_reports(account: str, months: dict[str, str]) -> dict:
@@ -67,6 +97,14 @@ def _constituents(wrapper: dict, snapshot: dict, report: dict, month: str) -> li
         position["is_cash"] = not position.get("isin") and position["name"].casefold() in {"effectenrekening", "liquiditeiten"}
         if position["is_cash"]:
             position["return_pct"] = None
+    accounting = _attribute_certificate(wrapper, sections, positions, closing["as_of"])
+    if accounting is not None:
+        return positions + accounting
+    if positions and wrapper.get("contribution_pp") is not None:
+        positions.append({
+            **wrapper, "opening_weight_pct": None, "return_pct": None, "start_date": None, "end_date": None,
+            "start_price_eur": None, "end_price_eur": None, "attribution_kind": "certificate",
+        })
     return positions
 
 

@@ -11,6 +11,7 @@ export type Sheet = { columns: string[]; rows: Record<string, unknown>[]; kinds:
 export type Journal = { boekdatum: string | null; fonds: string; grootboek: string; omschrijving: string; amount_eur: number };
 export type MonthlyPosition = { name: string; isin: string | null; return_pct: number | null;
   certificate?: string;
+  attribution_kind?: 'underlying' | 'certificate' | 'opbrengsten' | 'mutatie_opgelopen_rente';
   via?: { label: string; weight_pct: number | null }[];
   ambiguous_valuation_dates?: string[];
   opening_weight_pct?: number | null; contribution_pp?: number | null; is_cash?: boolean;

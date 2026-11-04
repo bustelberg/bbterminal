@@ -8,6 +8,8 @@ describe('cash and certificate accounting', () => {
     expect(source).toContain('const certificateAdjustments = realised?.certificate_adjustments ?? []');
     expect(source).toContain('heldSum.contribution = add2(heldSum.contribution, sum(certificateAdjustments.map((a) => a.contribution_pct)))');
     expect(source).toContain('heldSum.result = add2(heldSum.result, sum(certificateAdjustments.map((a) => a.result_eur)))');
+    expect(source).toContain('soldContribution, certificateContribution], reportedReturn, comparable');
+    expect(source).toContain('...sold.map((position) => position.contribution_pct), certificateContribution]');
     expect(source).not.toContain('certificateAdjustments.map((adjustment)');
     expect(source).not.toContain('Return shown separately');
     expect(source).toContain('Missing from calculation');

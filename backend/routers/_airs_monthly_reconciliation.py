@@ -52,7 +52,7 @@ def reconcile_positions(sections: dict, performance: dict | None, positions: lis
         b = [r for r in after if r['name'] == row['name']]
         # Cash balance changes include the other side of purchases/sales and
         # distributions; never count them a second time as investment gains.
-        cash = row['name'] == 'Effectenrekening' and not row.get('isin')
+        cash = row['name'].casefold() in {'effectenrekening', 'liquiditeiten'} and not row.get('isin')
         if cash:
             row['is_cash'] = True
             row['return_pct'] = None

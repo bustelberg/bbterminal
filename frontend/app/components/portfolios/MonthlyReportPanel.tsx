@@ -8,6 +8,7 @@ import type { MonthlyPosition, PerformanceBundle } from './monthlyReport';
 import InfoTip from '../InfoTip';
 import { profileBenchmarkLabel } from './analyseCopy';
 import ViaChips from './ViaChips';
+import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { invalidatePerformanceBundle, loadPerformanceBundle, readPerformanceBundle } from './monthlyReportPrefetch';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
@@ -22,7 +23,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   const [bundle, setBundle] = useState<PerformanceBundle | null>(() => portefeuille ? readPerformanceBundle(portefeuille) : null);
   const [yearSelection, setYearSelection] = useState<string | null>(null);
   const [monthSelection, setMonthSelection] = useState<string | null>(null);
-  const [lookThrough, setLookThrough] = useState(false);
+  const [lookThrough, setLookThrough] = useState(() => defaultLookThroughCertificates(name, portefeuille));
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,7 +249,11 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
               {showConstituents && <th className="px-3 py-3 text-left text-xs font-medium text-fg-subtle">Via</th>}
               {[text('Opening weight (%)', 'Begingewicht (%)'), text('Return in EUR (%)', 'Rendement in EUR (%)'), text('Contribution (pp)', 'Bijdrage (pp)'), text('Holding period', 'Periode in portefeuille')].map((label, i) => <th key={label} className={`px-3 py-3 text-xs font-medium text-fg-subtle ${i < 3 ? 'text-right' : 'text-left'}`}>{label}</th>)}
             </tr></thead><tbody>{positions.map((position, i) => <tr key={`${position.isin || position.name}-${i}`} className="border-t border-neutral-800/40">
-              <td className="px-3 py-3 font-medium text-fg-muted">{position.name}{position.status === 'bought' || position.status === 'sold' ? <span className="ml-2 text-[10px] text-fg-faint">{position.status === 'bought' ? text('Bought', 'Aangekocht') : text('Sold', 'Verkocht')}</span> : null}</td>
+              <td className="px-3 py-3 font-medium text-fg-muted">{position.attribution_kind === 'opbrengsten'
+                ? `${text('Income', 'Inkomsten')} · ${position.name}`
+                : position.attribution_kind === 'mutatie_opgelopen_rente'
+                  ? `${text('Accrued interest change', 'Mutatie opgelopen rente')} · ${position.name}`
+                  : position.name}{position.status === 'bought' || position.status === 'sold' ? <span className="ml-2 text-[10px] text-fg-faint">{position.status === 'bought' ? text('Bought', 'Aangekocht') : text('Sold', 'Verkocht')}</span> : null}</td>
               {showConstituents && <td className="px-3 py-3"><ViaChips names={position.certificate ? [position.certificate] : []}
                 weights={position.via} weightTitle={position.certificate
                   ? text(`This row: ${position.certificate}. Percentages are opening weights within each selection.`, `Deze regel: ${position.certificate}. Percentages zijn begingewichten binnen elke selectie.`)
@@ -263,9 +268,11 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
                 <p className="text-fg-subtle">{text('Includes currency movements; excludes income.', 'Inclusief valuta-effecten; exclusief inkomsten.')}</p>
               </div>} />}</td>
               <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.contribution_pp)}`}>{pp(position.contribution_pp)}{position.certificate
-                ? <InfoTip className="ml-2" text={text('AIRS reports the contribution at certificate level.', 'AIRS rapporteert de bijdrage op certificaatniveau.')} />
+                ? <InfoTip className="ml-2" text={position.attribution_kind
+                  ? text('Calculated from the underlying AIRS monthly report and reconciled to the certificate result.', 'Berekend uit het onderliggende AIRS-maandrapport en aangesloten op het certificaatresultaat.')
+                  : text('An underlying contribution could not be verified for this month.', 'Een onderliggende bijdrage kon voor deze maand niet worden vastgesteld.')} />
                 : <InfoTip className="ml-2" wide content={contributionDetails(position)} />}</td>
-              <td className="px-3 py-3 text-xs text-fg-subtle">{!position.is_cash && (position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : unavailable(position.reason))}
+              <td className="px-3 py-3 text-xs text-fg-subtle">{!position.is_cash && (position.start_date && position.end_date ? `${holdingDate(position.start_date)} to ${holdingDate(position.end_date)}` : !position.attribution_kind && unavailable(position.reason))}
                 {!!position.ambiguous_valuation_dates?.length && <span className="block">{position.ambiguous_valuation_dates.map(shortDate).join(', ')}</span>}
               </td>
             </tr>)}{reconciliation?.adjustments.map((adjustment) => <tr key={adjustment.kind} className="border-t border-neutral-800/40 text-fg-muted">
@@ -279,7 +286,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
                 [text('Unexplained difference', 'Onverklaard verschil'), pp(reconciliation.difference_pp)],
               ].map(([label, value]) => <tr key={label}><th colSpan={showConstituents ? 4 : 3} className="px-3 py-2 text-left font-medium">{label}</th><td className="px-3 py-2 text-right font-mono">{value}</td><td /></tr>)}
               {showConstituents && <tr><td colSpan={6} className="px-3 pb-2 text-xs text-fg-subtle">
-                {text('AIRS totals use the portfolio’s direct holdings and certificate-level contributions.', 'De AIRS-totalen gebruiken directe posities en bijdragen op certificaatniveau.')}
+                {text('Underlying contributions are shown when they reconcile to AIRS. Otherwise the contribution stays on the certificate row.', 'Onderliggende bijdragen worden getoond als ze aansluiten op AIRS. Anders blijft de bijdrage op de certificaatregel.')}
               </td></tr>}
             </tfoot>}</table></div>}
         </div>

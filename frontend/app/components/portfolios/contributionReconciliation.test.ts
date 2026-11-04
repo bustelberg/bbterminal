@@ -6,6 +6,13 @@ it('shows the actual unexplained remainder, not just the certificate adjustment'
   expect(reconcile([6, 1], 5.8, true)?.missing).toBe(-1.2);
 });
 
+it('leaves only the remainder after the separately displayed certificate result', () => {
+  const shown = [5.09, 0.12, -0.03, 0, -0.52];
+  expect(reconcile(shown, 5.41, true)?.missing).toBe(0.75);
+  expect(reconcile([...shown, 0.75], 5.41, true)?.missing).toBe(0);
+  expect(reconcile([...shown, 0.60], 5.41, true)?.missing).toBe(0.15);
+});
+
 it('makes the displayed rounded contributions sum exactly to the reported total', () => {
   expect(reconcile([1.234, 2.345], 4.126, true)).toEqual({ calculated: 3.58, reported: 4.13, missing: 0.55 });
   expect(reconcile([0.1, 0.2], 0.3, true)?.missing).toBe(0);

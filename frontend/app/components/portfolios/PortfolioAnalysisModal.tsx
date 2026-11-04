@@ -422,11 +422,15 @@ function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
   );
 }
 
-function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, reportedReturn, comparable = false }: {
+type CertificateAdjustments = NonNullable<NonNullable<ModelPortfolioAnalysis['realised']>['certificate_adjustments']>;
+
+function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateAdjustments = [],
+  reportedReturn, comparable = false }: {
   slices: AllocSlice[];
   /**  The year's contribution from positions SOLD OUT during it. They have no asset class, so no
    *  bar can carry them — without this the slices are a set of parts that misses its own total. */
   soldContribution?: number | null;
+  certificateAdjustments?: CertificateAdjustments;
   reportedReturn?: number | null;
   comparable?: boolean;
   selected?: string | null;
@@ -453,8 +457,9 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
   // the holdings table below already follows it; this now does too, so the bar and the table
   // cannot present the same classes in two sequences.
   const ordered = slices;
+  const certificateContribution = sum(certificateAdjustments.map((a) => a.contribution_pct));
   const reconciliation = contributionReconciliation(
-    [...slices.map((slice) => slice.contribution_pct), soldContribution], reportedReturn, comparable);
+    [...slices.map((slice) => slice.contribution_pct), soldContribution, certificateContribution], reportedReturn, comparable);
   const toggle = onSelect ? (b: string) => onSelect(selected === b ? null : b) : undefined;
   const bandOf = new Map((bands ?? []).map((b) => [b.bucket, b]));
   /** Held outside the permitted range — the finding this whole overlay exists to surface. Only a
@@ -663,6 +668,16 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             <span className={`ml-auto font-mono tabular-nums ${retTone(soldContribution)}`}>
               {ppt(soldContribution)}
             </span>
+          </div>
+        )}
+        {reconciliation && certificateContribution != null && Math.abs(certificateContribution) >= 0.005 && (
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-fg-faint">{copy.lang === 'nl' ? 'Bekende bijdragen' : 'Known contributions'}
+              <InfoTip className="ml-1" text={copy.lang === 'nl'
+                ? 'Totaal inclusief het gemeten resultaat van de certificaten en verkochte posities.'
+                : 'Total including the measured result of certificates and sold positions.'} />
+            </span>
+            <span className="ml-auto font-mono tabular-nums">{ppt(reconciliation.calculated)}</span>
           </div>
         )}
         {reconciliation && reconciliation.missing !== 0 && (
@@ -2124,6 +2139,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   };
   const heldSum = sumResults(holdings);
   const certificateAdjustments = realised?.certificate_adjustments ?? [];
+  const certificateContribution = sum(certificateAdjustments.map((a) => a.contribution_pct));
   heldSum.unrealised = add2(heldSum.unrealised, sum(certificateAdjustments.map((a) => a.unrealised_eur)));
   heldSum.realised = add2(heldSum.realised, sum(certificateAdjustments.map((a) => a.realised_result_eur)));
   heldSum.result = add2(heldSum.result, sum(certificateAdjustments.map((a) => a.result_eur)));
@@ -2164,7 +2180,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   const reconciliationKnown = realised?.reconciles === true || realised?.reconciles === false;
   const displayedReconciliation = contributionReconciliation(
     [...holdingsForCertificateScope(holdings, lookThrough).map((holding) => holding.contribution_pct),
-      ...sold.map((position) => position.contribution_pct)], realised?.book_ytd_pct, reconciliationKnown);
+      ...sold.map((position) => position.contribution_pct), certificateContribution], realised?.book_ytd_pct, reconciliationKnown);
 
   const cmp = (a: BookHolding, b: BookHolding) => {
     // The two text columns sort as text.  An unclassified row sorts LAST either way, like an
@@ -3909,6 +3925,7 @@ export default function PortfolioAnalysisModal({
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
+                  certificateAdjustments={data.realised?.certificate_adjustments}
                   reportedReturn={data.realised?.book_ytd_pct}
                   comparable={data.realised?.reconciles === true || data.realised?.reconciles === false}
                   /* Summed here rather than server-side: it is the same `closed_out` set the
