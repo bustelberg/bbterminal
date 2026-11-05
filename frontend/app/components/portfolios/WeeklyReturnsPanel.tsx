@@ -3,6 +3,7 @@
 import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RiskBundleContext } from './riskBundleContext';
 import { API_URL } from '../../../lib/apiUrl';
+import { apiFetch } from '../../../lib/apiFetch';
 import { startJob } from '../../../lib/stores/jobs';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { useLang } from '../../../lib/i18n';
@@ -211,14 +212,16 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   const selectedId = selection && selection.account === portefeuille ? selection.id : null;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
+  const [liveData, setLiveData] = useState<WeeklyReturns | null>(null);
   const options = bundle?.options ?? [];
   const chosen = options.find((item) => item.id === selectedId);
   const data = useMemo(() => {
+    if (liveData?.portefeuille === portefeuille && liveData.selected?.id === selectedId) return liveData;
     const series = selectedId && bundle?.instruments[selectedId];
     if (!bundle || !series) return undefined;
     return { portefeuille: bundle.portefeuille, start_date: bundle.start_date,
       through: bundle.through, options: bundle.options, ...series };
-  }, [bundle, selectedId]);
+  }, [bundle, selectedId, liveData, portefeuille]);
   useEffect(() => { onData(data ?? null); }, [data, onData]);
   const ytd = useMemo(() => periodReturn(data), [data]);
   const selectedReturn = useMemo(() => linked.window ? periodReturn(data, linked.window) : null, [data, linked.window]);
@@ -237,11 +240,34 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     const instrument = chosen;
     choose(instrument);
     setBusy(true); setNotice(null);
+    let pending = false;
+    let reading: Promise<void> | null = null;
+    // Read committed observations as progress arrives. Coalesce overlapping updates
+    // and keep reads ordered so an older response cannot replace a newer series.
+    function refreshSeries(): Promise<void> {
+      pending = true;
+      if (reading) return reading;
+      reading = (async () => {
+        while (pending) {
+          pending = false;
+          const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns?instrument_id=${encodeURIComponent(instrument.id)}`, { cache: 'no-store', noReadCache: true });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          setLiveData(await response.json() as WeeklyReturns);
+        }
+      })().finally(() => { reading = null; });
+      return reading;
+    }
     try {
       const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?instrument_id=${encodeURIComponent(instrument.id)}`,
-        `${instrument.name} · AIRS`);
+        `${instrument.name} · AIRS`, undefined, (progress) => {
+          if (progress.done && progress.done > 0) void refreshSeries().catch(() => {
+            // A transient read failure must not interrupt collection; retry on
+            // the next progress event and once more when the job finishes.
+          });
+        });
       const job = await done;
       invalidateReadCache('selected AIRS instrument history saved');
+      await refreshSeries();
       riskBundle?.reload?.();
       if (job.status !== 'done') setNotice({ id: instrument.id, text: nl ? 'Niet alles kon worden geladen. Zie Details.' : 'Some history could not be loaded. See Details.' });
     } catch (error) { setNotice({ id: instrument.id, text: error instanceof Error ? error.message : String(error) }); }
@@ -263,11 +289,11 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
         {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Ontbrekende geschiedenis laden' : 'Load missing history')}
       </button>
     </div>
-    <div className="h-9 shrink-0 overflow-y-auto">
+    <div className="max-h-9 shrink-0 overflow-y-auto">
       {riskBundle?.error && <p role="alert" className="text-xs text-neg-300">{riskBundle.error}</p>}
       {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
     </div>
-    <div className="flex aspect-[3/1] min-h-40 items-center [&>svg]:h-full [&>svg]:w-full">
+    <div className="flex aspect-[3/1] min-h-28 items-center [&>svg]:h-full [&>svg]:w-full">
       {data ? <ReturnChart data={data} nl={nl} scale={scale} linked={linked} /> : <svg viewBox="0 0 960 320" className="h-full w-full text-fg-subtle" role="img"
         aria-label={nl ? 'Lege rendementsgrafiek' : 'Empty return chart'}>
         <line x1="65" x2="925" y1="142.5" y2="142.5" stroke="currentColor" opacity=".4" />
@@ -306,14 +332,14 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   const scale = Math.max(1, ...[first, second].flatMap((data) =>
     weeklyBars(data?.selected?.weeks ?? []).map((value) => Math.abs(value ?? 0)))) * 1.1;
   if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
-  return <div className="flex min-w-0 flex-col gap-2">
+  return <div className="flex w-full min-w-0 flex-col gap-2">
     <div className="flex h-6 shrink-0 items-center justify-between gap-2 text-xs text-fg-muted">
       <span>{window ? `${day(weekStart(window[0]) < '2026-01-01' ? '2026-01-01' : weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
       {window && <button type="button" className="text-accent-300 hover:underline" onClick={() => onWindow(null)}>{lang === 'nl' ? 'Selectie wissen' : 'Clear selection'}</button>}
     </div>
-    <div className="flex min-w-0 flex-col gap-2">
+    <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
       <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} linked={linked} />
-      <div className="flex self-center flex-wrap items-center justify-center gap-2 rounded-xl border border-neutral-800/40 bg-elevated px-4 py-1 text-center"
+      <div className="flex self-center justify-self-center flex-wrap items-center justify-center gap-2 rounded-xl border border-neutral-800/40 bg-elevated px-4 py-1 text-center md:max-w-32 md:flex-col md:px-3 md:py-3"
         title={lang === 'nl'
           ? 'Correlatie van wekelijkse koersrendementen: −1 tegenovergesteld, 0 geen lineair verband, +1 gelijkgericht. Alleen overeenkomende koersdatums; minimaal 3 weken. Volgt de geselecteerde periode.'
           : 'Weekly price-return correlation: −1 opposite, 0 no linear relationship, +1 together. Matching price dates only; at least 3 weeks. Follows the selected period.'}>

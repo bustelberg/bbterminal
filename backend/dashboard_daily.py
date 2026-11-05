@@ -223,6 +223,10 @@ def prepare_month(account: str, today=None, *, month: str | None = None, complet
     payload = {"start": start, "end": end, "opening_date": opening, "performance_basis": "year_start",
                "sections": sections, "source": "AIRS", "fetched_at": fetched, "positions": positions,
                "reconciliation": reconcile_positions(sections, performance, positions)}
+    from routers._airs_monthly_positions import missing_position_returns
+    unavailable = missing_position_returns(positions)
+    if unavailable:
+        errors['positions'] = f'{len(unavailable)} monthly position returns unavailable'
     supabase.table("airs_monthly_report").upsert({
         "portefeuille": account, "month": start, "datum_tot": end, "fetched_at": fetched,
         "report": payload, "performance": performance, "performance_basis": "year_start",
@@ -343,7 +347,8 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
         elif any(s.get("status") == "error" for s in ((report.get("report") or {}).get("sections") or {}).values()):
             issues.append("current monthly report has missing source sections")
         month_payload = report.get("report") or {}
-        unavailable = sum(p.get("return_pct") is None and not p.get("is_cash") for p in month_payload.get("positions") or [])
+        from routers._airs_monthly_positions import missing_position_returns
+        unavailable = len(missing_position_returns(month_payload.get('positions') or []))
         if unavailable:
             issues.append(f"{unavailable} monthly position returns unavailable")
         accounts.append({"portefeuille": name, "holdings_as_of": as_of, "return_as_of": perf,

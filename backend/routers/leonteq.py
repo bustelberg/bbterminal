@@ -17,13 +17,145 @@ What lives here:
 from __future__ import annotations
 
 import asyncio
+from datetime import date
+from decimal import Decimal
 from typing import Any
+from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Path, Query
+from pydantic import BaseModel, Field
 
 from deps import supabase
 
 router = APIRouter(tags=["leonteq"])
+
+
+@router.get('/api/leonteq/airs/model-portfolios/compositions')
+async def saved_airs_compositions():
+    from leonteq.airs_models import saved_compositions
+
+    return await asyncio.to_thread(saved_compositions)
+
+
+class HoldingConnectionRequest(BaseModel):
+    leonteq_name: str = Field(min_length=1, max_length=300)
+    airs_portfolio_id: int = Field(ge=1)
+    leonteq_key: str = Field(min_length=1, max_length=512)
+    airs_key: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+@router.get('/api/leonteq/portfolio-links/holdings')
+async def read_holding_connections(leonteq_name: str = Query(min_length=1, max_length=300), airs_portfolio_id: int = Query(ge=1)):
+    from leonteq.holding_connections import read
+
+    return await asyncio.to_thread(read, leonteq_name, airs_portfolio_id)
+
+
+@router.put('/api/leonteq/portfolio-links/holdings')
+async def save_holding_connection(body: HoldingConnectionRequest):
+    from leonteq.holding_connections import save
+
+    return await asyncio.to_thread(save, body.leonteq_name, body.airs_portfolio_id, body.leonteq_key, body.airs_key)
+
+
+class PortfolioLinkRequest(BaseModel):
+    leonteq_name: str = Field(min_length=1, max_length=300)
+    airs_portfolio_id: int = Field(ge=1)
+    kind: Literal['fixed', 'dynamic'] = 'fixed'
+
+
+@router.get('/api/leonteq/portfolio-links')
+async def portfolio_link_options(kind: Literal['fixed', 'dynamic'] = 'fixed'):
+    from leonteq.portfolio_links import options
+
+    return await asyncio.to_thread(options, kind)
+
+
+@router.put('/api/leonteq/portfolio-links')
+async def connect_portfolios(body: PortfolioLinkRequest):
+    from leonteq.portfolio_links import connect
+
+    return await asyncio.to_thread(connect, body.leonteq_name, body.airs_portfolio_id, body.kind)
+
+
+@router.delete('/api/leonteq/portfolio-links')
+async def disconnect_portfolios(body: PortfolioLinkRequest):
+    from leonteq.portfolio_links import disconnect
+
+    return await asyncio.to_thread(disconnect, body.leonteq_name, body.airs_portfolio_id)
+
+
+class PercentageEditRequest(BaseModel):
+    datum: date
+    expected_percentage: Decimal = Field(allow_inf_nan=False)
+    percentage: Decimal = Field(ge=0, le=100, max_digits=12, decimal_places=6, allow_inf_nan=False)
+
+
+@router.patch('/api/leonteq/airs/model-portfolios/{portfolio_id}/positions/{row_id}/percentage')
+async def edit_airs_percentage(body: PercentageEditRequest, portfolio_id: int = Path(ge=1), row_id: int = Path(ge=1)):
+    from leonteq.airs_edit import update_percentage
+
+    return await asyncio.to_thread(update_percentage, portfolio_id, row_id, body.datum.isoformat(),
+                                   body.expected_percentage, body.percentage)
+
+
+@router.get('/api/leonteq/airs/model-portfolios/{portfolio_id}/composition')
+async def airs_model_composition(portfolio_id: int = Path(ge=1), datum: date | None = None, refresh: bool = False, saved_only: bool = False):
+    from leonteq.airs_models import composition
+
+    return await asyncio.to_thread(composition, portfolio_id, datum.isoformat() if datum else None, refresh, saved_only)
+
+
+@router.post('/api/leonteq/airs/model-portfolios/refresh/job')
+async def refresh_airs_model_list():
+    import jobs as job_registry
+    from leonteq.airs_models import refresh_models
+
+    job, reused = job_registry.start('airs.models.list', 'AIRS model portfolios', refresh_models)
+    return {'job_id': job.id, 'label': 'AIRS model portfolios', 'already_running': reused}
+
+
+class PortfolioLoadRequest(BaseModel):
+    refresh: bool = False
+
+
+@router.get('/api/leonteq/portfolios/snapshot')
+async def saved_portfolio_list():
+    from leonteq.portfolio_cache import saved_portfolios
+
+    return await asyncio.to_thread(saved_portfolios)
+
+
+@router.post('/api/leonteq/portfolios/login')
+async def check_portfolio_login(request: PortfolioLoadRequest | None = None):
+    """Return the saved AMC list; only a cache miss or explicit refresh logs in."""
+    from leonteq.portfolio_cache import portfolios
+
+    return await asyncio.to_thread(portfolios, bool(request and request.refresh))
+
+
+class PortfolioCompositionRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    refresh: bool = False
+    saved_only: bool = False
+
+
+class MonthlyPerformanceRequest(PortfolioCompositionRequest):
+    airs_portfolio_id: int = Field(ge=1)
+
+
+@router.post('/api/leonteq/portfolios/monthly-performance')
+async def monthly_performance(request: MonthlyPerformanceRequest):
+    from leonteq.monthly_performance import comparison
+    return await asyncio.to_thread(comparison, request.name, request.airs_portfolio_id, request.refresh)
+
+
+@router.post('/api/leonteq/portfolios/composition')
+async def portfolio_composition(request: PortfolioCompositionRequest):
+    """Read the selected AMC index's current positions using backend credentials."""
+    from leonteq.composition_cache import composition
+
+    return await asyncio.to_thread(composition, request.name, request.refresh, request.saved_only)
 
 _FROZEN_YAHOO_LABEL = "LEONTEQ (as of 2026-06-17)"
 # Human-confirmed exceptions to the automated Yahoo/OpenFIGI name comparison.

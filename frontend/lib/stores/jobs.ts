@@ -164,6 +164,13 @@ const localCancels = new Map<string, () => void>();
  *
  * `run` returns the card's summary line. Throwing marks the card failed with the message.
  */
+export class ExpectedJobFailure extends Error {
+  constructor(message: string, public readonly guidance = '') {
+    super(message);
+    this.name = 'ExpectedJobFailure';
+  }
+}
+
 export function startLocalJob(
   title: string, kind: string,
   run: (signal: AbortSignal, report: (progress: { done: number; total: number; message?: string }) => void) => Promise<string | void>,
@@ -197,9 +204,9 @@ export function startLocalJob(
         : {
           status: 'failed',
           summary: e instanceof Error ? e.message : String(e),
-          message: 'see the console',
+          message: e instanceof ExpectedJobFailure ? e.guidance : 'see the console',
         });
-      if (!ctrl.signal.aborted) traceError('jobs', `local job ${kind} failed`, e);
+      if (!ctrl.signal.aborted && !(e instanceof ExpectedJobFailure)) traceError('jobs', `local job ${kind} failed`, e);
     } finally {
       localCancels.delete(id);
     }

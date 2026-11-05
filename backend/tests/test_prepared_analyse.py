@@ -85,6 +85,21 @@ def test_busy_sources_do_not_start_a_preparation_connection(monkeypatch):
     connect.assert_not_called()
 
 
+def test_source_churn_prioritises_oldest_portfolio_and_keeps_variants_together(store, monkeypatch):
+    from routers import _airs_portfolio_analysis as A
+    calls = []
+    monkeypatch.setattr(A, 'compute_portfolio_analysis', lambda pid, *_: calls.append(pid) or {'portfolio_id': pid, 'book_holdings': []})
+    for pid, prepared_at in [(1, '2026-11-05T13:00:00Z'), (2, '2026-11-05T10:00:00Z')]:
+        for look in (False, True):
+            store.table('analyse_prepared_snapshot').insert({'cache_key': P.holdings_key(pid, 'ACWI', look),
+                'scope': 'holdings', 'source_version': 9, 'code_version': 'code-v1',
+                'calculation_day': '2026-11-05', 'prepared_at': prepared_at, 'payload': {}}).execute()
+    result = P.prepare(portfolio_ids=[1, 2], benchmark=False, max_portfolios=1, max_seconds=60)
+    assert calls == [2, 2]
+    assert result['batch_exhausted']
+    assert result['holdings'] == 2
+
+
 def test_cancelled_and_exhausted_batches_do_not_calculate(store, monkeypatch):
     from routers import _active_share as A
     calculate = Mock(side_effect=AssertionError('should not calculate'))

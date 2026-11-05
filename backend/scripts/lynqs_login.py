@@ -8,10 +8,12 @@ an unfamiliar server IP can trip the account's new-location security (2FA /
 verification / lock) and Imperva will likely block a datacenter IP anyway - so
 this is intentionally a local, headed, human-in-the-loop tool.
 
-Credentials come from the environment (never hardcoded / committed):
-    # PowerShell
-    $env:LYNQS_USER = 'reinierschep'
-    $env:LYNQS_PASS = '...'
+Credentials come from backend/.env (backend/.env.local overrides it) or the
+environment, never hardcoded / committed:
+    LEONTEQ_USER=your-username
+    LEONTEQ_PASSWORD=your-password
+
+Run from backend/:
     uv run python scripts/lynqs_login.py --probe            # login + probe, headed
     uv run python scripts/lynqs_login.py --cookie-out lynqs_cookie.txt   # just capture cookie
 
@@ -28,12 +30,15 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:  # pragma: no cover
     sync_playwright = None
 
 EPORTAL = "https://www.lynqs.com/eportal/"
+INDICES = EPORTAL + "#/amc/indices"
 SEARCH_PATH = "/eportal/amc-gateway/api/v2/instruments/search"
 FIELDS = ["id", "ticker", "name", "productType", "ric", "isin", "currency"]
 
@@ -157,16 +162,21 @@ def main() -> None:
 
     if sync_playwright is None:
         sys.exit("playwright is required (a backend dependency). Run via `uv run`; browsers: `uv run playwright install chromium`.")
-    user, password = os.environ.get("LYNQS_USER", ""), os.environ.get("LYNQS_PASS", "")
+    backend_dir = Path(__file__).resolve().parents[1]
+    load_dotenv(backend_dir / ".env")
+    load_dotenv(backend_dir / ".env.local", override=True)
+    # Retain the existing names for local workflows already using the helper.
+    user = os.environ.get("LEONTEQ_USER") or os.environ.get("LYNQS_USER", "")
+    password = os.environ.get("LEONTEQ_PASSWORD") or os.environ.get("LYNQS_PASS", "")
     if not user or not password:
-        sys.exit("Set LYNQS_USER and LYNQS_PASS in the environment first.")
+        sys.exit("Fill LEONTEQ_USER and LEONTEQ_PASSWORD in backend/.env first.")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=args.headless)
         context = browser.new_context()
         page = context.new_page()
-        print(f"[login] opening {EPORTAL} ...", flush=True)
-        page.goto(EPORTAL, wait_until="domcontentloaded", timeout=60000)
+        print(f"[login] opening {INDICES} ...", flush=True)
+        page.goto(INDICES, wait_until="domcontentloaded", timeout=60000)
 
         # Best-effort auto-fill of the Keycloak form; fall back to manual.
         try:

@@ -13,50 +13,82 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import math
+import threading
+import time
 from datetime import datetime
 
 import requests
-
-from common.retry import retry
 
 log = logging.getLogger(__name__)
 
 _ECB_BASE = "https://data-api.ecb.europa.eu/service/data/EXR"
 
 
+class ECBTemporarilyUnavailable(requests.RequestException):
+    """Shared service cooldown; callers must retain their stored rates."""
+
+
+class _EcbRetryGate:
+    """Serialize ECB requests and share outage backoff across currencies in this process."""
+
+    def __init__(self, clock=time.monotonic, sleep=time.sleep):
+        self._lock = threading.Lock()
+        self._clock, self._sleep = clock, sleep
+        self._failures = 0
+        self._resume_at = 0.0
+
+    def get(self, url, *, timeout, max_attempts):
+        if max_attempts < 1:
+            raise ValueError('max_attempts must be at least 1')
+        with self._lock:
+            remaining = self._resume_at - self._clock()
+            if self._failures >= 3 and remaining > 0:
+                raise ECBTemporarilyUnavailable(
+                    f'ECB shared cooldown: retry in {math.ceil(remaining)}s after {self._failures} service failures')
+            for attempt in range(1, max_attempts + 1):
+                # Hold the gate during backoff so only one recovery probe can run.
+                remaining = self._resume_at - self._clock()
+                if remaining > 0:
+                    self._sleep(remaining)
+                try:
+                    response = requests.get(url, timeout=timeout)
+                    if 500 <= response.status_code < 600:
+                        raise requests.HTTPError(f'{response.status_code} from ECB', response=response)
+                    response.raise_for_status()
+                except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as error:
+                    transient = isinstance(error, (requests.ConnectionError, requests.Timeout)) or (
+                        error.response is not None and 500 <= error.response.status_code < 600)
+                    if not transient:
+                        raise
+                    self._failures += 1
+                    delay = min(60, 2 ** min(self._failures, 6))
+                    try:
+                        if error.response is not None:
+                            retry_after = float(error.response.headers.get('Retry-After', 0))
+                            if math.isfinite(retry_after):
+                                delay = max(delay, retry_after)
+                    except (ValueError, TypeError):
+                        pass
+                    self._resume_at = self._clock() + delay
+                    log.warning('ECB shared backoff: service failure %d (%s); all currencies paused for %gs%s',
+                                self._failures, error, delay,
+                                '; queued requests deferred' if self._failures >= 3 else '')
+                    if self._failures >= 3 or attempt == max_attempts:
+                        raise
+                else:
+                    self._failures = 0
+                    self._resume_at = 0.0
+                    return response
+        raise AssertionError('unreachable')
+
+
+_ecb_gate = _EcbRetryGate()
+
+
 def _ecb_get(url: str, *, timeout: int = 90, max_attempts: int = 3) -> requests.Response:
-    """GET an ECB endpoint with retry on transient timeouts / connection errors / 5xx.
-
-    The ECB data API is free but flaky — read timeouts and 502/503 responses
-    happen regularly, especially when several full-history fetches run in
-    parallel (as `sync_fx_rates_to_db` does). 4xx responses are not retried
-    since they signal a malformed request. Exponential backoff (2s, 4s) via
-    `common.retry.retry`.
-    """
-    def _once() -> requests.Response:
-        resp = requests.get(url, timeout=timeout)
-        if 500 <= resp.status_code < 600:
-            raise requests.HTTPError(f"{resp.status_code} from ECB", response=resp)
-        resp.raise_for_status()
-        return resp
-
-    def _retryable(e: BaseException) -> bool:
-        if isinstance(e, (requests.ConnectionError, requests.Timeout)):
-            return True
-        return (
-            isinstance(e, requests.HTTPError)
-            and e.response is not None
-            and 500 <= e.response.status_code < 600
-        )
-
-    return retry(
-        _once,
-        attempts=max_attempts,
-        base_delay=2,
-        backoff="exponential",
-        should_retry=_retryable,
-        description=f"ECB GET {url}",
-    )
+    """GET with process-wide outage backoff instead of independent per-pair retries."""
+    return _ecb_gate.get(url, timeout=timeout, max_attempts=max_attempts)
 
 # All active ECB currencies (as of Apr 2026)
 ECB_CURRENCIES = [

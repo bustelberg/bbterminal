@@ -85,6 +85,7 @@ def save_positions(portfolio_id: int, datum: str | None, rows: list[dict],
             isin = None
         payload.append({
             "portfolio_id": portfolio_id,
+            "airs_row_id": int(r['id']) if r.get('id') is not None else None,
             "datum": datum or "",
             "isin": isin or None,
             "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else None),
@@ -95,6 +96,7 @@ def save_positions(portfolio_id: int, datum: str | None, rows: list[dict],
             "sector": (str(r["Beleggingssector"]).strip()
                        if r.get("Beleggingssector") else None),
             "regio": (str(r["regio"]).strip() if r.get("regio") else None),
+            "afm_categorie": (str(r["afmCategorie"]).strip() if r.get("afmCategorie") else None),
         })
 
     for i in range(0, len(payload), IN_CHUNK_SIZE):
@@ -113,6 +115,7 @@ def save_positions(portfolio_id: int, datum: str | None, rows: list[dict],
         # no others exist.
         "positions_dates": dates or None,
         "positions_scanned_at": _now(),
+        "positions_schema_version": 3,
         "positions_error": None,
     }).eq("id", portfolio_id).execute())
 
@@ -164,7 +167,7 @@ def load_portfolios() -> list[dict]:
     return rows
 
 
-def load_positions(portfolio_id: int) -> dict | None:
+def load_positions(portfolio_id: int, *, model: dict | None = None, stored_rows: list[dict] | None = None) -> dict | None:
     """The cached composition, in the SAME shape the live fetch returns — or None if we have
     never stored one (so the caller can fall back to AIRS).
 
@@ -176,14 +179,14 @@ def load_positions(portfolio_id: int) -> dict | None:
     answer — not None. "We looked and there is nothing" is a cached fact; re-scraping AIRS to
     rediscover it every time would be the whole bug this cache exists to fix.
     """
-    p = (supabase.table("airs_model_portfolio")
-         .select("id,name,positions_datum,positions_dates,positions_scanned_at")
+    p = [model] if model is not None else (supabase.table("airs_model_portfolio")
+         .select("id,name,positions_datum,positions_dates,positions_scanned_at,positions_schema_version")
          .eq("id", portfolio_id).limit(1).execute().data or [])
     if not p or not p[0].get("positions_scanned_at"):
         return None                                   # never scanned — nothing to serve
     row = p[0]
 
-    stored = (supabase.table("airs_model_portfolio_position")
+    stored = stored_rows if stored_rows is not None else (supabase.table("airs_model_portfolio_position")
               .select("*").eq("portfolio_id", portfolio_id).execute().data or [])
     return {
         "portfolio": row["name"],
@@ -191,8 +194,10 @@ def load_positions(portfolio_id: int) -> dict | None:
         "datum": row.get("positions_datum"),
         "dates": row.get("positions_dates") or [],
         "cached_at": row.get("positions_scanned_at"),
+        "schema_version": row.get("positions_schema_version", 1),
         # Back to AIRS's column names — see the docstring.
         "rows": [{
+            "id": r.get('airs_row_id'),
             "Fonds": r.get("fonds"),
             "ISINCode": r.get("isin"),
             "Percentage": r.get("percentage"),
@@ -200,5 +205,6 @@ def load_positions(portfolio_id: int) -> dict | None:
             "Beleggingscategorie": r.get("categorie"),
             "Beleggingssector": r.get("sector"),
             "regio": r.get("regio"),
+            "afmCategorie": r.get("afm_categorie"),
         } for r in stored],
     }

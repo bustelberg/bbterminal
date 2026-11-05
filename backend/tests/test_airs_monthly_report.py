@@ -271,7 +271,8 @@ def collection(monkeypatch):
 
 def test_collection_uses_exact_windows_and_never_overwrites_current_data(collection):
     db, lock, calls, ctx = collection
-    report.collect_report('BOOK', '2026-04', ctx)
+    with pytest.raises(UserFacingJobError, match='position returns unavailable'):
+        report.collect_report('BOOK', '2026-04', ctx)
     assert not lock.locked()
     assert len(calls) == 4
     assert ('download_vermogensoverzicht_sync', 'BOOK', '2026-03-31', '2026-03-31') in calls
@@ -401,7 +402,8 @@ def test_historical_valuation_walks_back_without_claiming_the_requested_date(col
             raise airs_scanner.AirsNoData('no valuation')
         return b'sheet'
     monkeypatch.setattr(airs_scanner, 'download_vermogensoverzicht_sync', valuation)
-    report.collect_report('BOOK', '2026-04', ctx)
+    with pytest.raises(UserFacingJobError, match='position returns unavailable'):
+        report.collect_report('BOOK', '2026-04', ctx)
     closing = db.tables['airs_monthly_report'][0]['report']['sections']['closing']['data']
     assert closing['requested_date'] == '2026-04-30'
     assert closing['as_of'] == '2026-04-29'

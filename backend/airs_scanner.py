@@ -312,12 +312,14 @@ class _AirsSession:
                 # session and try again a couple of times with a short backoff. A
                 # non-transient error (or the last attempt) re-raises to the caller.
                 resp = None
-                for attempt in range(_MAX_TRANSIENT_RETRIES + 1):
+                retry_safe = getattr(job, 'retry_safe', True)
+                max_retries = _MAX_TRANSIENT_RETRIES if retry_safe else 0
+                for attempt in range(max_retries + 1):
                     try:
                         resp = job(page)
                         break
                     except Exception as e:
-                        if attempt >= _MAX_TRANSIENT_RETRIES or not _is_transient_conn_error(e):
+                        if attempt >= max_retries or not _is_transient_conn_error(e):
                             raise
                         time.sleep(_TRANSIENT_BACKOFF_S[min(attempt, len(_TRANSIENT_BACKOFF_S) - 1)])
                         close_session()
@@ -325,7 +327,7 @@ class _AirsSession:
 
                 # If we got HTML back (session expired / login bounce), re-login
                 # once and re-run the job from scratch.
-                if _looks_like_html(resp.body):
+                if retry_safe and _looks_like_html(resp.body):
                     close_session()
                     ensure_logged_in()
                     resp = job(page)
@@ -1274,7 +1276,7 @@ def _parse_positions_xls(body: bytes) -> list[dict]:
 
 
 def fetch_portfolio_positions_sync(
-    portfolio_id: int, *, datum: str | None = None,
+    portfolio_id: int, *, datum: str | None = None, metadata: dict | None = None,
 ) -> dict:
     """One model portfolio's positions, ISIN and all.
 
@@ -1282,15 +1284,20 @@ def fetch_portfolio_positions_sync(
     snapshot dates NEWEST-FIRST and returns the first that has rows — see the header for
     why asking for "today" silently yields an empty table.
     """
-    edit_html = _decode_html(_session.get_response(
-        f"{BASE_URL}/{MODEL_PORTFOLIO_EDIT_PATH}?action=edit&id={portfolio_id}"))
-    name = parse_portfolio_full_name(edit_html)
+    # Reuse metadata only within one locked operation, never across sessions/runs.
+    if metadata is not None:
+        name = metadata['portfolio']
+        dates = metadata['dates']
+    else:
+        edit_html = _decode_html(_session.get_response(
+            f"{BASE_URL}/{MODEL_PORTFOLIO_EDIT_PATH}?action=edit&id={portfolio_id}"))
+        name = parse_portfolio_full_name(edit_html)
+        dates = parse_fixed_datum_options(edit_html)
     if not name:
         raise RuntimeError(
             f"portfolio {portfolio_id}: no Portefeuille field on its edit page "
             "(session expired, or the id doesn't exist)")
 
-    dates = parse_fixed_datum_options(edit_html)
     candidates = [datum] if datum else sorted(set(dates), reverse=True)[:_MAX_DATUM_ATTEMPTS]
 
     rows: list[dict] = []

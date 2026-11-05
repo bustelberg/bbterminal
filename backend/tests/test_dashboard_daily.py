@@ -367,6 +367,39 @@ def test_watchdog_does_not_start_additional_airs_passes(monkeypatch):
     assert S._body_job_watchdog()[1]["restarted"] == 0
 
 
+def test_freshness_repairs_publication_only_failure_and_reaudits(monkeypatch):
+    from unittest.mock import Mock
+    from routers import _prepared_analyse as prepared
+    stale = {'incomplete': 1, 'checked': 1, 'empty_roster': False, 'global_issues': [],
+             'accounts': [{'issues': ['Analyse: older bundle still serving (look-through=False)'], 'unmapped_isins': []}]}
+    current = {**stale, 'incomplete': 0, 'accounts': [{'issues': [], 'unmapped_isins': []}]}
+    audit = Mock(side_effect=[stale, current])
+    repair = Mock(return_value={'holdings': 2})
+    monkeypatch.setattr(D, 'freshness', audit)
+    monkeypatch.setattr(prepared, 'run_controlled', repair)
+    _, result = S._body_dashboard_freshness()
+    assert result['incomplete'] == 0
+    assert result['analyse_repair'] == {'holdings': 2}
+    assert audit.call_count == 2
+    repair.assert_called_once()
+
+
+def test_missing_position_marks_trigger_month_repair_even_when_all_sections_are_ok(monkeypatch):
+    from routers import _airs_monthly_report as monthly
+    db = FakeSupabase({
+        'airs_holding': [
+            {'portefeuille': 'BOOK', 'as_of_date': '2026-09-30', 'holding_name': 'Stock', 'isin': 'TEST', 'quantity': 1, 'current_value_eur': 100},
+            {'portefeuille': 'BOOK', 'as_of_date': '2026-10-29', 'holding_name': 'Effectenrekening', 'isin': None, 'quantity': 0, 'current_value_eur': 110}],
+        'airs_transactie_snapshot': [{'portefeuille': 'BOOK', 'datum_van': '2026-01-01', 'datum_tot': '2026-10-30', 'columns': [], 'kinds': {}, 'rows': []}],
+    })
+    monkeypatch.setattr(D, 'supabase', db)
+    monkeypatch.setattr(monthly, '_monthly_rows', lambda *_: [{'month': '2026-10', 'periode': '2026-10-29', 'rendement': 10}])
+    result = D.prepare_month('BOOK', date(2026, 10, 30))
+    assert result['errors'] == {'positions': '1 monthly position returns unavailable'}
+    saved = db.tables['airs_monthly_report'][0]['report']
+    assert all(section['status'] == 'ok' for section in saved['sections'].values())
+
+
 def test_airs_lease_deduplicates_an_attempt_across_replicas_but_allows_manual_retry(monkeypatch):
     import common.pg as pg
     import psycopg

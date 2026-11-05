@@ -301,7 +301,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
     return stored
 
 
-def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
+def extend_series(analysis_id: int, symbol: str, since: str, *, window: dict | None = None) -> int | None:
     """Fetch ONLY the bars after `since` and append them. Returns rows stored, or None when the
     caller must fall back to a full `store_series` (see below).
 
@@ -330,7 +330,7 @@ def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
     # Start a few days before the last stored close: Yahoo's window is inclusive-ish and a
     # re-fetched overlapping bar is an idempotent upsert, whereas a missed one is a hole.
     start = datetime.fromisoformat(since).replace(tzinfo=timezone.utc) - timedelta(days=5)
-    w = yahoo.chart_window(symbol, int(start.timestamp()), int(time.time()), "1d")
+    w = window if window is not None else yahoo.chart_window(symbol, int(start.timestamp()), int(time.time()), "1d")
     if not w:
         return 0
 

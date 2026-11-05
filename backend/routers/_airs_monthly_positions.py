@@ -12,6 +12,12 @@ def _positive(value) -> bool:
     return isinstance(value, (float, int)) and math.isfinite(value) and value > 0
 
 
+def missing_position_returns(positions: list[dict]) -> list[dict]:
+    return [row for row in positions if row.get('return_pct') is None
+            and not row.get('is_cash')
+            and not (not row.get('isin') and (row.get('name') or '').casefold() in {'effectenrekening', 'liquiditeiten'})]
+
+
 def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
     """One comparable security mark; explicit interest components remain separate.
 

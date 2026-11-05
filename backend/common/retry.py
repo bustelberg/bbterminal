@@ -1,11 +1,10 @@
 """Shared retry-with-backoff primitive + the default transient-error heuristic.
 
-One backoff loop, four bindings. Before this module each of these rolled its
+One backoff loop, three bindings. Before this module each of these rolled its
 own attempt loop / sleep / error sniff:
 
   * `ingest.prices._retry_transient`        — Supabase Storage + metric upsert
   * `momentum.data._helpers._query_with_retry` — Supabase metric reads
-  * `fx_rates._ecb_get`                      — flaky ECB FX API
   * `leonteq.api_client._post_with_retry`    — Leonteq website API
 
 They now keep their public signatures (so call sites are untouched) but
@@ -16,7 +15,9 @@ predicates.
 
 NOT in scope: `ingest._gurufocus_http.cf_get` rotates Cloudflare impersonation
 profiles instead of sleeping between identical retries — a different control
-flow that this `time.sleep`-based loop doesn't model.
+flow that this `time.sleep`-based loop doesn't model. `fx_rates._ecb_get` also
+uses a separate shared outage gate: correlated ECB failures must back off
+across currencies, rather than giving every pair its own retry loop.
 """
 from __future__ import annotations
 

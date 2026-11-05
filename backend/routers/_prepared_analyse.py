@@ -175,6 +175,19 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
     if holdings:
         work += [('holdings', holdings_key(pid, 'ACWI', look), pid, look)
                  for pid in (portfolio_ids or []) for look in (False, True)]
+    if holdings and portfolio_ids:
+        # Revisions invalidate the whole roster. Starting each bounded batch at
+        # the same model starves the tail when sources change between ticks.
+        # Keep both variants together and give the oldest publication priority.
+        keys = [key for scope, key, _, _ in work if scope == 'holdings']
+        published = {}
+        for offset in range(0, len(keys), 200):
+            stored = (supabase.table('analyse_prepared_snapshot').select('cache_key,prepared_at')
+                      .eq('scope', 'holdings').in_('cache_key', keys[offset:offset + 200]).execute().data or [])
+            published.update({row['cache_key']: row.get('prepared_at') or '' for row in stored})
+        oldest = {pid: min(published.get(holdings_key(pid, 'ACWI', look), '') for look in (False, True))
+                  for pid in portfolio_ids}
+        work.sort(key=lambda item: (0, '') if item[2] is None else (1, oldest[item[2]]))
     for index, (scope, key, pid, look) in enumerate(work):
         if should_stop and should_stop():
             result['cancelled'] = True

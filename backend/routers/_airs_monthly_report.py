@@ -172,6 +172,8 @@ def _enrich_snapshot(bundle, start, month, standard_months):
     # Earlier bundles discarded the AIRS component label. Offer a dated re-read when
     # those source rows cannot safely be matched; a new calculation cannot recreate it.
     if bundle:
+        from routers._airs_monthly_positions import missing_position_returns
+        has_errors = has_errors or bool(missing_position_returns(bundle.get('report', {}).get('positions', [])))
         has_errors = has_errors or any(row.get('reason') == 'ambiguous_position'
                                       for row in bundle.get('report', {}).get('positions', []))
         sections = bundle.get("report", {}).get("sections", {})
@@ -511,7 +513,9 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
     }, on_conflict="portefeuille,month").execute()
     ctx.progress(4, 4, 'Finishing update…')
     failures = sum(s["status"] == "error" for s in sections.values())
-    if failures:
+    from routers._airs_monthly_positions import missing_position_returns
+    unavailable = missing_position_returns(payload['positions'])
+    if failures or unavailable:
         from jobs import UserFacingJobError
-        raise UserFacingJobError(f"Saved a partial report for {month}: {failures} AIRS report(s) failed. Open Report for details.")
+        raise UserFacingJobError(f"Saved a partial report for {month}: {failures} AIRS report(s) failed; {len(unavailable)} position returns unavailable. Open Report for details.")
     return 'Performance updated.'

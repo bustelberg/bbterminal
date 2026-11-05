@@ -40,6 +40,7 @@ export type NavKey =
   | '/fx-rates'
   | '/timezone'
   | '/airs-portfolio'
+  | '/leonteq-portfolios'
   | '/debet-calculation'
   | '/request_gurufocus'
   | '/benchmarks'
@@ -92,6 +93,7 @@ const EN: SidebarCopy = {
     '/fx-rates': 'FX Rates',
     '/timezone': 'Trading Hours',
     '/airs-portfolio': 'AIRS Portfolio',
+    '/leonteq-portfolios': 'Leonteq Portfolios',
     '/debet-calculation': 'Debit calculations',
     '/request_gurufocus': 'Request GuruFocus',
     '/benchmarks': 'Benchmarks',
@@ -144,6 +146,7 @@ const NL: SidebarCopy = {
     '/fx-rates': 'Wisselkoersen',
     '/timezone': 'Handelstijden',
     '/airs-portfolio': 'AIRS-portefeuille',
+    '/leonteq-portfolios': 'Leonteq-portefeuilles',
     '/debet-calculation': 'Debetberekeningen',
     '/request_gurufocus': 'GuruFocus opvragen',
     '/benchmarks': 'Benchmarks',

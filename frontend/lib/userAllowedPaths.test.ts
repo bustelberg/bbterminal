@@ -66,7 +66,7 @@ describe('isUserAllowedPath', () => {
   })
 
   it('blocks admin-only pages', () => {
-    for (const p of ['/airs-check', '/airs-check/details', '/companies', '/airs-portfolio', '/backtest', '/acwi', '/leonteq', '/benchmarks', '/api']) {
+    for (const p of ['/airs-check', '/airs-check/details', '/companies', '/airs-portfolio', '/backtest', '/acwi', '/leonteq', '/leonteq-portfolios', '/leonteq-portfolios/details', '/benchmarks', '/api']) {
       expect(isUserAllowedPath(p)).toBe(false)
     }
   })

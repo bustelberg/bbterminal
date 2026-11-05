@@ -41,6 +41,7 @@ import logging
 import os
 import threading
 import time
+import traceback
 from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
 
@@ -57,7 +58,35 @@ from routers.ingest_runs import kick_off_refresh
 # APScheduler, so it is safe for both this module and the admin router to import.
 from scheduled_jobs import BY_ID, ORPHAN_MARKER, SCHEDULED_JOBS
 
+_MAX_LOG_MESSAGE_CHARS = 2000
+_LOG_TRUNCATION_SUFFIX = '… [truncated; full receipt is stored with the job]'
+
+
+class _BoundedSchedulerLog(logging.Filter):
+    """Bound the complete event, including exception text, before handlers emit it."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            # A malformed logging call must not crash the scheduled job itself.
+            message = f'{record.msg} [logging format error; args={record.args!r}]'
+        if record.exc_info:
+            message += '\n' + ''.join(traceback.format_exception(*record.exc_info))
+        elif record.exc_text:
+            message += '\n' + record.exc_text
+        if record.stack_info:
+            message += '\n' + record.stack_info
+        if len(message) > _MAX_LOG_MESSAGE_CHARS:
+            message = message[:_MAX_LOG_MESSAGE_CHARS - len(_LOG_TRUNCATION_SUFFIX)] + _LOG_TRUNCATION_SUFFIX
+        record.msg, record.args = message, ()
+        # The exception/stack is already included inside the same size budget.
+        record.exc_info = record.exc_text = record.stack_info = None
+        return True
+
+
 _log = logging.getLogger(__name__)
+_log.addFilter(_BoundedSchedulerLog())
 _scheduler: BackgroundScheduler | None = None
 
 # Scheduled work used to create a new daemon thread on every tick.  That makes an
@@ -1725,10 +1754,11 @@ class _LogCtx:
         #  WARNING for the milestones, not INFO. uvicorn leaves the root logger at WARNING in
         # production, so an info line from a QUARTERLY job is invisible exactly where someone asks
         # "did it run?" — and the next chance to find out is three months away.
+        context = f'{self._label} · {kind}' if self._label else kind
         if kind in ("start", "error", "done"):
-            _log.warning("[benchmark_fundamentals] %s: %s", kind, message)
+            _log.warning("[benchmark_fundamentals] %s: %s", context, message)
         else:
-            _log.info("[benchmark_fundamentals] %s: %s", kind, message)
+            _log.info("[benchmark_fundamentals] %s: %s", context, message)
         if self._step is not None and message:
             #  NO done/total — this relay has no idea how many lines are coming, and inventing a
             # denominator would draw a progress bar that jumps backwards. `_reporter` takes 0/0
@@ -2239,6 +2269,19 @@ def _body_dashboard_freshness(ctx=None) -> tuple[str, dict]:
 
     from dashboard_daily import freshness
     result = freshness(dashboard_only=True)
+    # If source coverage is complete and only publication lags, catch up now
+    # rather than failing repeatedly while two-model background batches run.
+    publication_issues = [issue for account in result['accounts'] for issue in account['issues']]
+    if (result['incomplete'] and not result['empty_roster'] and not result['global_issues']
+            and publication_issues and all(issue.startswith('Analyse:') for issue in publication_issues)
+            and not any(account.get('unmapped_isins') for account in result['accounts'])):
+        from routers._prepared_analyse import run_controlled
+        try:
+            repair = run_controlled(busy=_analyse_sources_busy, should_stop=lambda: _cancel_requested(ctx),
+                                    on_step=_reporter(ctx), max_portfolios=max(2, result['checked']), max_seconds=900)
+        except Exception as exc:
+            repair = {'errors': {'repair': f'{type(exc).__name__}: {exc}'}}
+        result = {**freshness(dashboard_only=True), 'analyse_repair': repair}
     if result["incomplete"] or result["empty_roster"] or result["global_issues"]:
         issues = Counter(issue for account in result["accounts"] for issue in set(account["issues"]))
         reasons = list(result["global_issues"][:2])

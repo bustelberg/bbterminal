@@ -537,12 +537,26 @@ def refresh_risk_trackers() -> dict:
     return {"trackers": len(isins), **repaired}
 
 
+class NewerCloseAvailable(RuntimeError):
+    def __init__(self, symbol, stored, available, window):
+        super().__init__(f'Yahoo offers a {available} close, but storage still ends at {stored}')
+        self.available = available
+        self.window = window
+
+
 def _unavailable_close(symbol: str, stored: str, expected: str) -> dict:
     """Check what the vendor offers before claiming storage failed or the price is current."""
     from datetime import datetime, timedelta, timezone
     from asset_pipeline import yahoo
-    raw = yahoo.chart_window(symbol, int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp()),
-                             int(time.time()), '1d')
+    start = int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp())
+    end = int(time.time())
+    raw = None
+    for attempt in range(2):
+        # Use Yahoo's shared pacer/circuit breaker, not an unbounded local
+        # retry loop. Throttling propagates immediately to the caller.
+        raw = yahoo.chart_window(symbol, start, end, '1d')
+        if raw:
+            break
     if not raw:
         raise RuntimeError('Yahoo did not return a price-availability response')
     closes = (((raw.get('indicators') or {}).get('quote') or [{}])[0]).get('close') or []
@@ -550,7 +564,7 @@ def _unavailable_close(symbol: str, stored: str, expected: str) -> dict:
             if i < len(closes) and closes[i] is not None and yahoo.is_closed_bar(stamp)]
     available = max(days, default=None)
     if available and available > stored:
-        raise RuntimeError(f'Yahoo offers a {available} close, but storage still ends at {stored}')
+        raise NewerCloseAvailable(symbol, stored, available, raw)
     return {'status': 'unavailable', 'vendor_latest_close': available,
             'reason': f'Yahoo has no newer completed close for this listing (expected comparison date {expected}). '
                       'The stored price remains marked stale.'}
@@ -619,6 +633,23 @@ def refresh_stale(
             if outcome['still_stale']:
                 try:
                     outcome.update(_unavailable_close(sym, now, latest_all))
+                except NewerCloseAvailable as available:
+                    try:
+                        # The diagnostic may succeed after the first chart request
+                        # returned empty. Persist that exact response, once.
+                        if store.extend_series(aid, sym, now, window=available.window) is None:
+                            store.store_series(aid, sym, None)
+                        stored = (supabase.table('asset_price').select('target_date').eq('analysis_id', aid)
+                                  .not_.is_('close', 'null').order('target_date', desc=True).limit(1).execute().data or [])
+                        now = stored[0]['target_date'] if stored else now
+                        if now < available.available:
+                            raise RuntimeError(f'Yahoo offers a {available.available} close, but storage still ends at {now}')
+                        outcome.update(latest_close=now, status='moved',
+                                       still_stale=_days_between(latest_all, now) >= stale_days,
+                                       reason='Recovered newer close from the availability response')
+                    except Exception as exc:
+                        outcome.update(status='error', error=f'{type(exc).__name__}: {exc}')
+                        failed += 1
                 except Exception as exc:
                     outcome.update(status='error', error=f'{type(exc).__name__}: {exc}')
                     failed += 1
@@ -629,7 +660,7 @@ def refresh_stale(
         else:
             unchanged += 1
             if on_progress:
-                on_progress(f"[{i}/{len(stale)}] {sym}: {was} — Yahoo has nothing newer")
+                on_progress(f"[{i}/{len(stale)}] {sym}: {was} — {outcome.get('error') or outcome.get('reason') or 'No newer stored close'}")
         time.sleep(sleep_s)
 
     return {"considered": considered, "stale": total_stale, "moved": moved,

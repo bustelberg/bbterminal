@@ -174,3 +174,41 @@ def test_newer_vendor_price_not_saved_remains_a_real_failure(monkeypatch):
         'timestamp': [stamp('2026-11-02T14:30:00+00:00')], 'indicators': {'quote': [{'close': [100]}]}})
     with pytest.raises(RuntimeError, match='storage still ends'):
         price_refresh._unavailable_close('STOCK', '2026-10-30', '2026-11-02')
+
+
+@pytest.mark.parametrize('persisted', [True, False])
+def test_available_newer_close_gets_one_verified_recovery_attempt(monkeypatch, persisted):
+    from unittest.mock import Mock
+    db = FakeSupabase({'asset_price': [{'analysis_id': 1, 'target_date': '2026-10-16', 'close': 100}]})
+    monkeypatch.setattr(price_refresh, 'supabase', db)
+    monkeypatch.setattr(price_refresh, 'find_stale', lambda *a, **kw: ([{
+        'isin': 'US69932A2042', 'yahoo_symbol': 'PSKY', 'analysis_id': 1, 'last_close': '2026-10-16',
+    }], '2026-11-04', 1))
+    window = {'timestamp': [1]}
+    monkeypatch.setattr(price_refresh, '_unavailable_close', Mock(side_effect=price_refresh.NewerCloseAvailable('PSKY', '2026-10-16', '2026-10-22', window)))
+    def extend(aid, symbol, since, **kwargs):
+        if kwargs and persisted:
+            db.table('asset_price').insert({'analysis_id': aid, 'target_date': '2026-10-22', 'close': 101}).execute()
+        return 0
+    attempt = Mock(side_effect=extend)
+    monkeypatch.setattr(store, 'extend_series', attempt)
+    result = price_refresh.refresh_stale(sleep_s=0)
+    assert attempt.call_count == 2
+    assert attempt.call_args.kwargs == {'window': window}
+    assert result['failed'] == (0 if persisted else 1)
+    assert result['moved'] == (1 if persisted else 0)
+    assert result['results'][0]['still_stale'] is True
+    assert result['results'][0]['status'] == ('moved' if persisted else 'error')
+
+
+def test_availability_retries_empty_response_once_without_hiding_outage(monkeypatch):
+    from unittest.mock import Mock
+    valid = {'timestamp': [stamp('2026-10-30T14:30:00+00:00')], 'indicators': {'quote': [{'close': [100]}]}}
+    fetch = Mock(side_effect=[None, valid])
+    monkeypatch.setattr(yahoo, 'chart_window', fetch)
+    assert price_refresh._unavailable_close('BMW3.DE', '2026-10-30', '2026-11-04')['status'] == 'unavailable'
+    assert fetch.call_count == 2
+    fetch.side_effect = [None, None]
+    with pytest.raises(RuntimeError, match='price-availability response'):
+        price_refresh._unavailable_close('BMW3.DE', '2026-10-30', '2026-11-04')
+    assert fetch.call_count == 4
