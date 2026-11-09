@@ -218,6 +218,7 @@ _REAL_ESTATE_SECTOR = "real estate"
 
 _ALTERNATIVE_FUND_NAMES = {
     "high income quality fund", "alternatieventopselectie", "alternatieventopselectie index",
+    "aqr apex ucits fund iaeft eur acc",
 }
 
 

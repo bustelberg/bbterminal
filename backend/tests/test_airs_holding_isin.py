@@ -198,6 +198,16 @@ class TestTheClassComesFromTheGridAndTheName:
         assert classify_bucket(asset_class, True, 'TEST', name,
                                {'name': 'Certificate', 'asset_class': 'equity'}) == BUCKET_ALTS
 
+    @pytest.mark.parametrize('asset_class', [None, 'Equity', 'Bonds'])
+    @pytest.mark.parametrize('name_field', ['holding', 'name', 'leonteq_name'])
+    def test_aqr_apex_is_always_alternatives(self, asset_class, name_field):
+        name = '  AQR Apex UCITS Fund IAEFT EUR Acc  '
+        grid = {'asset_class': 'equity'}
+        holding_name = name if name_field == 'holding' else 'Fund'
+        if name_field != 'holding':
+            grid[name_field] = name.lower()
+        assert classify_bucket(asset_class, True, 'TEST', holding_name, grid) == BUCKET_ALTS
+
     def test_the_etf_wrapper_never_changes_the_bucket(self):
         """ THE INVARIANT THE MERGE CREATED, AND THE ONE A REVERT WOULD BREAK FIRST. `is_etf` may
         still decide Equity-vs-Unclassified in the fallback, but it may never move a holding

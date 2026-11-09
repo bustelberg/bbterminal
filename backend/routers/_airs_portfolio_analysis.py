@@ -3632,7 +3632,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:cash-currency:forced-alternatives:v17"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:cash-currency:forced-alternatives:v18"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({
