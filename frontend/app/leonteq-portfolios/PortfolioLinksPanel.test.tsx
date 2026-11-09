@@ -6,6 +6,10 @@ import PortfolioLinksPanel from './PortfolioLinksPanel';
 import { apiFetch } from '../../lib/apiFetch';
 
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+vi.mock('./refreshProgress', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./refreshProgress')>(),
+  refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
+}));
 vi.mock('../../lib/i18n', () => ({ useLang: () => ['en'] }));
 
 it('switches to dynamic connection options', async () => {
@@ -17,7 +21,7 @@ it('switches to dynamic connection options', async () => {
   const root = createRoot(host);
   try {
     await act(async () => root.render(<PortfolioLinksPanel />));
-    await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Dynamic')!.click());
+    await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Leonteq to AIRS Dynamic')!.click());
     expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('/portfolio-links?kind=dynamic'), { cache: 'no-store', noReadCache: true });
     expect(host.textContent).toContain('Dynamic AIRS portfolio');
   } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
@@ -28,8 +32,11 @@ it('saves and removes a selected connection and disables duplicate links', async
   vi.mocked(apiFetch).mockResolvedValueOnce({ ok: true, json: async () => ({
     leonteq_portfolios: [{ name: 'AI-TopSelectie', sponsor: 'Bustelberg B.V.' }],
     airs_portfolios: [{ id: 1, name: 'Fixed model', omschrijving: 'Fixed portfolio', portfolio_type: 'fixed (13.7)' }], links: [],
-  }) } as Response).mockResolvedValueOnce({ ok: true, json: async () => saved } as Response)
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ deleted: true }) } as Response);
+  }) } as Response).mockImplementation(async (_url, init) => {
+    if (init?.method === 'PUT') return { ok: true, json: async () => saved } as Response;
+    if (init?.method === 'DELETE') return { ok: true, json: async () => ({ deleted: true }) } as Response;
+    return { ok: false } as Response;
+  });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement('div'); document.body.appendChild(host);
   const root = createRoot(host);
@@ -55,10 +62,12 @@ it('saves and removes a selected connection and disables duplicate links', async
     const save = host.querySelector<HTMLButtonElement>('button[type=submit]')!;
     expect(save.disabled).toBe(false);
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('/api/leonteq/portfolio-links'), {
+    expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/api/leonteq/portfolio-links'), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leonteq_name: 'AI-TopSelectie', airs_portfolio_id: 1 }),
     });
     expect(host.querySelector('table')?.textContent).toContain('Fixed model');
+    expect(host.querySelector('thead')?.textContent).toContain('Holdings connected');
+    expect(host.querySelector('table')?.textContent).toContain('Not verified');
     expect(host.textContent).toContain('Connection saved.');
     expect(save.disabled).toBe(true);
     expect(inputs[0].value).toBe('');
@@ -87,13 +96,13 @@ it('saves and removes a selected connection and disables duplicate links', async
   }
 });
 
-it.each([true, false])('opens connected holdings independently and preserves the other side on failure: leonteq=%s', async (success) => {
+it.each([['fixed', true], ['fixed', false], ['dynamic', true], ['dynamic', false]] as const)('opens %s connected holdings independently: leonteq=%s', async (kind, success) => {
   const link = { leonteq_name: 'MomentumTopSelectie Index', airs_portfolio_id: 7, airs_name: 'MoTopSelectie_FX', updated_at: '2026-11-05T12:00:00Z' };
   let finishLeonteq!: (response: Response) => void;
   const leonteqResponse = new Promise<Response>((resolve) => { finishLeonteq = resolve; });
   vi.mocked(apiFetch).mockImplementation(async (url) => {
     if (url.includes('/portfolio-links/holdings?')) return { ok: true, json: async () => ({ rules: [] }) } as Response;
-    if (url.endsWith('/portfolio-links')) return { ok: true, json: async () => ({ leonteq_portfolios: [], airs_portfolios: [], links: [link] }) } as Response;
+    if (url.endsWith('/portfolio-links') || url.endsWith('/portfolio-links?kind=dynamic')) return { ok: true, json: async () => ({ leonteq_portfolios: [], airs_portfolios: [], links: [link] }) } as Response;
     if (url.endsWith('/portfolios/composition')) return leonteqResponse;
     return { ok: true, json: async () => ({ portfolio: 'MoTopSelectie_FX', portfolio_id: 7, datum: '2026-07-05', dates: [],
       cached_at: '2026-11-05T12:00:00Z', rows: [{ Fonds: 'Apple', Percentage: 4.95, ISINCode: 'US0378331005' },
@@ -105,7 +114,12 @@ it.each([true, false])('opens connected holdings independently and preserves the
   const root = createRoot(host);
   try {
     await act(async () => root.render(<PortfolioLinksPanel />));
-    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label^="View holdings for"]')!.click());
+    if (kind === 'dynamic') await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Leonteq to AIRS Dynamic')!.click());
+    await act(async () => {
+      const button = host.querySelector<HTMLButtonElement>('button[aria-label^="View holdings for"]')!;
+      if (kind === 'dynamic') button.closest('tr')!.click();
+      else button.click();
+    });
     expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/model-portfolios/7/composition'), { cache: 'no-store', noReadCache: true });
     expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/portfolios/composition'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'MomentumTopSelectie Index', refresh: false }),
@@ -123,7 +137,7 @@ it.each([true, false])('opens connected holdings independently and preserves the
       const matched = host.querySelector('section[aria-labelledby="matched-holdings-heading"]')!;
       expect(matched.textContent).toContain('US0378331005');
       expect(matched.textContent).toContain('APPLE INC');
-      expect(matched.textContent).toContain('4.9%');
+      expect(matched.textContent).toContain('4.90%');
       expect(matched.textContent).toContain('4.95%');
       expect(matched.querySelectorAll('tbody tr')).toHaveLength(1);
       const left = host.querySelector('section[aria-label="Leonteq · Unmatched holdings"]')!;

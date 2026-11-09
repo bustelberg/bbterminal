@@ -7,6 +7,8 @@ import { useLang } from '../../lib/i18n';
 import SearchablePortfolioPicker from './SearchablePortfolioPicker';
 import ConnectionHoldingsView, { type ConnectionHoldingsCache } from './ConnectionHoldingsView';
 import type { HoldingRule } from './matchHoldings';
+import { reloadWithProgress } from './refreshProgress';
+import HoldingsConnectionStatus from './HoldingsConnectionStatus';
 
 type Link = { leonteq_name: string; airs_portfolio_id: number; airs_name: string | null; updated_at: string };
 type Options = {
@@ -51,8 +53,10 @@ function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
     if (inFlight.current) return;
     inFlight.current = true; setLoading(true); setError(null); setNotice(null);
     try {
-      const options = await readOptions(kind);
-      if (alive.current) setData(options);
+      const options = await reloadWithProgress(nl ? 'Koppelingen · Keuzelijsten vernieuwen' : 'Connections · Reload options',
+        () => readOptions(kind), nl ? 'Opgeslagen Leonteq- en AIRS-portefeuilles en koppelingen laden…' : 'Loading saved Leonteq and AIRS portfolios and connections…',
+        nl ? 'Portefeuilles en koppelingen bijgewerkt.' : 'Portfolio options and connections updated.');
+      if (alive.current) { holdingsCache.current.clear(); rulesCache.current.clear(); setData(options); }
     } catch {
       if (alive.current) setError('load');
     } finally {
@@ -92,7 +96,7 @@ function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
   const targetOptions = (data?.airs_portfolios ?? []).filter((row) => !connectedTargets.has(row.id));
   const valid = sourceOptions.some((row) => row.name === source)
     && targetOptions.some((row) => row.id === Number(target));
-  if (selected && kind === 'fixed') return <ConnectionHoldingsView key={JSON.stringify([selected.leonteq_name, selected.airs_portfolio_id])}
+  if (selected) return <ConnectionHoldingsView key={JSON.stringify([selected.leonteq_name, selected.airs_portfolio_id])}
     link={selected} cache={holdingsCache.current} rulesCache={rulesCache.current} onBack={() => setSelected(null)} />;
   return <section className="space-y-5" aria-labelledby="portfolio-connections-heading" aria-busy={loading || busy}>
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -127,16 +131,17 @@ function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
     {notice && <p role="status" className="text-sm text-pos-300">{notice === 'connected' ? (nl ? 'Koppeling opgeslagen.' : 'Connection saved.') : (nl ? 'Koppeling verwijderd.' : 'Connection removed.')}</p>}
     <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
       <table className="w-full text-sm"><caption className="sr-only">{nl ? 'Opgeslagen portefeuille-koppelingen' : 'Saved portfolio connections'}</caption>
-        <thead className="bg-elevated text-xs text-fg-muted"><tr>{[nl ? 'Leonteq-portefeuille' : 'Leonteq portfolio', nl ? kind === 'fixed' ? 'Vaste AIRS-portefeuille' : 'Dynamische AIRS-portefeuille' : kind === 'fixed' ? 'Fixed AIRS portfolio' : 'Dynamic AIRS portfolio', nl ? 'Actie' : 'Action'].map((label) => <th scope="col" key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}</tr></thead>
+        <thead className="bg-elevated text-xs text-fg-muted"><tr>{[nl ? 'Leonteq-portefeuille' : 'Leonteq portfolio', nl ? kind === 'fixed' ? 'Vaste AIRS-portefeuille' : 'Dynamische AIRS-portefeuille' : kind === 'fixed' ? 'Fixed AIRS portfolio' : 'Dynamic AIRS portfolio', nl ? 'Posities gekoppeld' : 'Holdings connected', nl ? 'Actie' : 'Action'].map((label) => <th scope="col" key={label} className="px-4 py-3 text-left font-medium">{label}</th>)}</tr></thead>
         <tbody className="divide-y divide-neutral-800/30">{data?.links.map((link) => <tr key={JSON.stringify([link.leonteq_name, link.airs_portfolio_id])}
-          onClick={() => { if (!busy && !loading) if (kind === 'fixed') setSelected(link); }} className="cursor-pointer hover:bg-elevated/40">
-          <th scope="row" className="px-4 py-3 text-left font-medium">{kind === 'dynamic' ? link.leonteq_name : <button type="button" disabled={loading || busy} onClick={() => setSelected(link)} className="text-accent-300 hover:underline"
-            aria-label={`${nl ? 'Posities bekijken voor' : 'View holdings for'} ${link.leonteq_name} · ${link.airs_name ?? link.airs_portfolio_id}`}>{link.leonteq_name}</button>}</th>
+          onClick={() => { if (!busy && !loading) setSelected(link); }} className="cursor-pointer hover:bg-elevated/40">
+          <th scope="row" className="px-4 py-3 text-left font-medium"><button type="button" disabled={loading || busy} onClick={() => setSelected(link)} className="text-accent-300 hover:underline"
+            aria-label={`${nl ? 'Posities bekijken voor' : 'View holdings for'} ${link.leonteq_name} · ${link.airs_name ?? link.airs_portfolio_id}`}>{link.leonteq_name}</button></th>
           <td className="px-4 py-3">{link.airs_name ?? `AIRS #${link.airs_portfolio_id}`}</td>
+          <td className="px-4 py-3"><HoldingsConnectionStatus link={link} nl={nl} cache={holdingsCache.current} rulesCache={rulesCache.current} /></td>
           <td className="px-4 py-3"><button type="button" disabled={loading || busy} onClick={(event) => { event.stopPropagation(); void change('DELETE', link.leonteq_name, link.airs_portfolio_id); }}
             aria-label={`${nl ? 'Koppeling verwijderen voor' : 'Remove connection for'} ${link.leonteq_name} · ${link.airs_name ?? link.airs_portfolio_id}`} className="text-fg-muted hover:text-neg-300 disabled:opacity-50">{nl ? 'Ontkoppelen' : 'Disconnect'}</button></td>
         </tr>)}
-          {!loading && !data?.links.length && <tr><td colSpan={3} className="px-4 py-8 text-center text-fg-muted">{nl ? 'Nog geen koppelingen opgeslagen.' : 'No connections saved yet.'}</td></tr>}
+          {!loading && !data?.links.length && <tr><td colSpan={4} className="px-4 py-8 text-center text-fg-muted">{nl ? 'Nog geen koppelingen opgeslagen.' : 'No connections saved yet.'}</td></tr>}
         </tbody>
       </table>
     </div>
@@ -147,7 +152,7 @@ export default function PortfolioLinksPanel() {
   const [kind, setKind] = useState<'fixed' | 'dynamic'>('fixed');
   return <div className="space-y-4">
     <div className="inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs" aria-label="Connection type">
-      {(['fixed', 'dynamic'] as const).map((value) => <button key={value} type="button" aria-pressed={kind === value} onClick={() => setKind(value)} className={`shrink-0 px-3 py-1.5 font-medium transition-colors ${kind === value ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}>{value === 'fixed' ? 'Fixed' : 'Dynamic'}</button>)}
+      {(['fixed', 'dynamic'] as const).map((value) => <button key={value} type="button" aria-pressed={kind === value} onClick={() => setKind(value)} className={`shrink-0 px-3 py-1.5 font-medium transition-colors ${kind === value ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}>{value === 'fixed' ? 'Leonteq to AIRS Fixed' : 'Leonteq to AIRS Dynamic'}</button>)}
     </div>
     <LinksPanel key={kind} kind={kind} />
   </div>;

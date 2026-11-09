@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { useLang } from '../../lib/i18n';
+import { refreshRequest } from './refreshProgress';
 
 type Position = {
   id?: number | null;
@@ -17,11 +18,13 @@ export type AirsComposition = {
   cache_upgrade_available?: boolean;
 };
 
-async function read(id: number, datum = '', refresh = false): Promise<AirsComposition> {
+async function read(id: number, datum = '', refresh = false, name?: string, nl = false): Promise<AirsComposition> {
   const params = new URLSearchParams();
   if (datum) params.set('datum', datum);
   if (refresh) params.set('refresh', 'true');
-  const response = await apiFetch(`${API_URL}/api/leonteq/airs/model-portfolios/${id}/composition${params.size ? `?${params}` : ''}`, { cache: 'no-store', noReadCache: true });
+  const url = `${API_URL}/api/leonteq/airs/model-portfolios/${id}/composition${params.size ? `?${params}` : ''}`;
+  const init = { cache: 'no-store' as const, noReadCache: true };
+  const response = refresh ? await refreshRequest(url, init, `AIRS · ${name ?? id}`, name, nl) : await apiFetch(url, init);
   if (!response.ok) throw new Error(response.status === 409 ? 'busy' : 'failed');
   return await response.json() as AirsComposition;
 }
@@ -67,7 +70,7 @@ export default function AirsCompositionView({ id, name, cache, onBack }: {
     if (saved && !refresh) { setBusy(false); return; }
     setBusy(true);
     try {
-      const result = await read(id, nextDate, refresh);
+      const result = await read(id, nextDate, refresh, name, nl);
       cache.set(key, result);
       if (alive.current && request === generation.current) setData(result);
     } catch (cause) {

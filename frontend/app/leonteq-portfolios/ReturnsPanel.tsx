@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { ExpectedJobFailure, startLocalJob } from '../../lib/stores/jobs';
 import type { PortfolioConnection } from './ConnectionHoldingsView';
 import MonthlyReturns, { monthlyFailure, queueMonthly, type MonthlyData } from './MonthlyReturns';
+import { refreshRequest } from './refreshProgress';
 
 type LeonteqSnapshot = { success: boolean; retrieved_at?: string; portfolios?: { name: string; ytd: string | null }[] };
 type AirsReturn = { dynamic_portefeuille: string; ytd_pct: number | null; periode?: string | null; as_of?: string | null };
@@ -67,10 +68,10 @@ export default function ReturnsPanel() {
           const result = await queueMonthly(() => {
             setStates((current) => ({ ...current, [keyFor(link)]: 'Refreshing' }));
             setProgress(`${index + 1}/${links.length} · Refreshing ${link.leonteq_name} → ${link.airs_name}`);
-            return apiFetch(`${API_URL}/api/leonteq/portfolios/monthly-performance`, {
+            return refreshRequest(`${API_URL}/api/leonteq/portfolios/monthly-performance`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: link.leonteq_name, airs_portfolio_id: link.airs_portfolio_id, refresh: true }),
-          }); });
+          }, `Returns · ${link.leonteq_name}`); });
           const data = await result.json().catch(() => ({})) as MonthlyData;
           diagnostic = { http_status: result.status, response: { success: data.success, status: data.status,
             refresh_error: data.refresh_error, refresh_errors: data.refresh_errors, saved_data: data.saved_data,

@@ -26,6 +26,18 @@ def test_options_only_offer_fixed_models(store):
     assert [row['id'] for row in links.options()['airs_portfolios']] == [1, 4]
 
 
+def test_single_dynamic_comparison_does_not_reload_the_portfolio_catalogues(store, monkeypatch):
+    store.tables[links.TABLE] = [{'account_key': 'account-a', 'leonteq_name': 'AI', 'airs_portfolio_id': 2}]
+    store.tables['airs_model_portfolio'] = [{'id': 2, 'name': 'Dynamic', 'portfolio_type': 'normaal'}]
+    monkeypatch.setattr(links, 'saved_portfolios', lambda: pytest.fail('Comparison loaded the entire catalogue'))
+    assert links.linked_dynamic('AI', 2)['airs_name'] == 'Dynamic'
+    with pytest.raises(HTTPException):
+        links.linked_dynamic('Other', 2)
+    monkeypatch.setattr(links, '_account_key', lambda: 'other-account')
+    with pytest.raises(HTTPException):
+        links.linked_dynamic('AI', 2)
+
+
 def test_dynamic_connections_are_saved_and_separate_from_fixed(store):
     assert [row['id'] for row in links.options('dynamic')['airs_portfolios']] == [2]
     links.connect('AI-TopSelectie', 1)

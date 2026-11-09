@@ -1696,8 +1696,7 @@ class ModelPortfolioAnalysis(BaseModel):
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/overview-bundle",
-            response_model=ModelPortfolioAnalysis,
-            responses={202: {"description": "The prepared overview is pending."}})
+            response_model=ModelPortfolioAnalysis)
 async def airs_model_portfolio_overview_bundle(portfolio_id: int, look_through: bool = False):
     import time
 
@@ -1707,10 +1706,18 @@ async def airs_model_portfolio_overview_bundle(portfolio_id: int, look_through: 
     key = prepared.holdings_key(portfolio_id, 'ACWI', look_through)
     payload = await asyncio.to_thread(prepared.read_overview, key)
     if payload is None:
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(status_code=202, content={'ready': False},
-                            headers={'Cache-Control': 'no-store'})
+        # A newer AIRS snapshot must not remain hidden behind yesterday's prepared bundle.
+        # Share the normal holdings calculation/cache, then attach the same AIRS return series.
+        from routers._airs_portfolio_analysis import compute_portfolio_analysis_async
+        from routers._airs_value_series import with_return_series
+        version = await asyncio.to_thread(prepared.source_version, 'holdings')
+        code = prepared.code_version()
+        payload = await compute_portfolio_analysis_async(portfolio_id, 'ACWI', 'book', 'book',
+            look_through=look_through, include_axes=False, include_holding_risk=False)
+        payload = await asyncio.to_thread(with_return_series, payload, 'ACWI')
+        payload = {**payload, 'details_pending': False}
+        if version is not None:
+            await asyncio.to_thread(prepared.save, 'holdings', key, payload, version, code)
     return {**payload, 'timings_ms': {'prepared_lookup': round((time.perf_counter() - started) * 1000)}}
 
 

@@ -4,6 +4,21 @@ from fastapi import HTTPException
 from leonteq import monthly_performance as monthly
 from tests._fake_supabase import FakeSupabase
 
+
+def test_monthly_airs_cancellation_keeps_its_cancelled_status(monkeypatch):
+    import airs_vermogen
+    import airs_scanner
+    from jobs import JobCancelled
+
+    lock = Mock()
+    monkeypatch.setattr(airs_vermogen, '_LOCK', lock)
+    monkeypatch.setattr(airs_vermogen, '_acquire_session', lambda **_: True)
+    monkeypatch.setattr(airs_vermogen, 'latest_completed_market_date', lambda: '2026-11-06')
+    monkeypatch.setattr(airs_scanner, 'download_portfolio_sync', Mock(side_effect=JobCancelled('Stopped')))
+    with pytest.raises(JobCancelled):
+        monthly._refresh_airs('Dynamic')
+    lock.release.assert_called_once()
+
 def test_details_table_preserves_missing_zero_and_negative_returns():
     table = [['Year', *[m.title() for m in monthly.MONTHS], 'Total'],
              ['2026', '-', '0%', '-1.2%', '0.69%', '1.94%', '1.57%', '-0.22%', '2.29%', '-5.13%', '3.59%', '2%', '-', '6.68%']]
@@ -14,7 +29,8 @@ def test_details_table_preserves_missing_zero_and_negative_returns():
     assert rows[2]['return_pct'] == -1.2
     assert rows[10]['return_pct'] == 2
     table[1][3] = 'unknown'
-    with pytest.raises(ValueError): monthly.parse_tables([table])
+    with pytest.raises(ValueError):
+        monthly.parse_tables([table])
 
 
 def test_details_waits_for_populated_rows_before_parsing_asia_returns():
@@ -46,7 +62,10 @@ def test_comparison_caches_details_and_reads_latest_monthly_airs_return(monkeypa
     airs_refresh = Mock()
     monkeypatch.setattr(monthly, '_refresh_airs', airs_refresh)
     monkeypatch.setattr(monthly, '_account_key', lambda: 'account')
-    monkeypatch.setattr(portfolio_links, 'options', lambda kind: {'links': [{'leonteq_name': 'Source', 'airs_portfolio_id': 2, 'airs_name': 'Dynamic'}]})
+    db.tables['leonteq_airs_portfolio_link'] = [{'account_key': 'account', 'leonteq_name': 'Source', 'airs_portfolio_id': 2}]
+    db.tables['airs_model_portfolio'] = [{'id': 2, 'name': 'Dynamic', 'portfolio_type': 'normaal'}]
+    monkeypatch.setattr(portfolio_links, 'supabase', db)
+    monkeypatch.setattr(portfolio_links, '_account_key', lambda: 'account')
     login = Mock(return_value={'success': True, 'months': [{'month': '2026-11', 'return_pct': 2}, {'month': '2026-10', 'return_pct': 0}], 'yearly_totals': {'2026': 6.68}, 'retrieved_at': '2026-11-05T13:00:00Z'})
     monkeypatch.setattr(portal_login, 'check_performance', login)
     assert monthly.comparison('Source', 2)['months'][0]['difference_pp'] == .5
@@ -64,7 +83,37 @@ def test_comparison_caches_details_and_reads_latest_monthly_airs_return(monkeypa
     assert result['refresh_errors'][0]['code'] == 'timeout'
     assert result['saved_data'] is True
     assert result['months'][0]['leonteq_pct'] == 2
-    with pytest.raises(HTTPException): monthly.comparison('Unknown', 2)
+    with pytest.raises(HTTPException):
+        monthly.comparison('Unknown', 2)
+
+
+def test_explicit_refresh_reads_both_independent_sources_concurrently(monkeypatch):
+    from threading import Barrier
+    from leonteq import portfolio_links, portal_login
+    from leonteq.progress import observe, report
+
+    monkeypatch.setattr(monthly, 'supabase', FakeSupabase({}))
+    monkeypatch.setattr(monthly, '_account_key', lambda: 'account')
+    monkeypatch.setattr(portfolio_links, 'linked_dynamic', lambda *args: {'airs_name': 'Dynamic'})
+    rendezvous = Barrier(2, timeout=3)
+    messages = []
+
+    def airs(_name):
+        rendezvous.wait()
+        report('AIRS complete')
+
+    def leonteq(_name):
+        rendezvous.wait()
+        report('Leonteq complete')
+        return {'success': True, 'months': [], 'yearly_totals': {}, 'retrieved_at': '2026-11-09'}
+
+    monkeypatch.setattr(monthly, '_refresh_airs', airs)
+    monkeypatch.setattr(portal_login, 'check_performance', leonteq)
+    with observe(lambda en, nl: messages.append(en)):
+        result = monthly.comparison('Source', 2, refresh=True)
+    assert result['success'] is True
+    assert not result['refresh_errors']
+    assert 'AIRS complete' in messages and 'Leonteq complete' in messages
 
 
 def test_refresh_downloads_only_performance_and_releases_session(monkeypatch):

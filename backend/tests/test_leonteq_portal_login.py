@@ -83,6 +83,7 @@ def test_portfolio_read_keeps_live_fields_and_reports_retrieval_time():
     assert result['success'] is True
     assert result['portfolios'] == rows
     assert result['retrieved_at']
+    assert all('highcharts' not in str(call) for call in page.locator.call_args_list)
 
 
 def test_unreadable_table_is_not_reported_as_success():

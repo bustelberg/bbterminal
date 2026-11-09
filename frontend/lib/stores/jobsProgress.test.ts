@@ -1,10 +1,23 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { runSSE } from '../stream';
 import { apiFetch } from '../apiFetch';
-import { attachRunningJobs, jobsStore, watchJob, type JobProgress } from './jobs';
+import { attachRunningJobs, jobsStore, watchJob, startLocalJob, type JobProgress } from './jobs';
 
 vi.mock('../stream', () => ({ runSSE: vi.fn() }));
 vi.mock('../apiFetch', () => ({ apiFetch: vi.fn() }));
+
+it('retains quick reload progress in the generic popup Details', async () => {
+  const id = startLocalJob('Connections', 'options', async (_signal, report) => {
+    report({ done: 0, total: 1, message: 'Reading saved connections…' });
+    report({ done: 1, total: 1, message: 'Connections updated.' });
+    return 'Ready';
+  }, { cancellable: false });
+  await Promise.resolve();
+  const job = jobsStore.get().jobs.find(job => job.id === id)!;
+  expect(job.status).toBe('done');
+  expect(job.details).toEqual(['Reading saved connections…', 'Connections updated.']);
+  expect(job.cancellable).toBe(false);
+});
 
 it('does not turn silent Risk warmups into popups when running jobs are reattached', async () => {
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify([

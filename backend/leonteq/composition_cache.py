@@ -47,6 +47,8 @@ def composition(name: str, refresh: bool = False, saved_only: bool = False) -> d
         return {'success': False, 'status': 'not_cached'}
     result = check_login(name)
     if result.get('success'):
+        from leonteq.progress import report
+        report(f'Saving the refreshed holdings for {name}…', f'Bijgewerkte posities opslaan voor {name}…')
         persisted = _write(account_key, name, result)
         return {**result, 'cached': False, 'snapshot_saved': persisted}
     if saved:

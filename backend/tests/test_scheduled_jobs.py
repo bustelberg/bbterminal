@@ -135,7 +135,8 @@ class TestOptInJobs:
             assert by_id[stage].after_job == "dashboard_market"
             assert by_id[stage].trigger is None
         assert by_id["benchmark_fundamentals_fill"].max_age_hours == 30
-        assert by_id["dashboard_market"].trigger == {"hour": 6, "minute": 0, "timezone": "Europe/Amsterdam"}
+        assert by_id["dashboard_market"].trigger is None
+        assert by_id["dashboard_market"].after_job == "airs_vermogen_refresh"
         assert by_id["history_drift_check"].trigger == {
             "day_of_week": "mon", "hour": 7, "minute": 0, "timezone": "UTC",
         }

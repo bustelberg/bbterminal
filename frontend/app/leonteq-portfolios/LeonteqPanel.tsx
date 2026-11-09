@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { useLang } from '../../lib/i18n';
+import PortfolioSourceHeader from './PortfolioSourceHeader';
+import { refreshRequest } from './refreshProgress';
 import CompositionTable, { type CompositionResult } from './CompositionTable';
 
 type Portfolio = {
@@ -82,7 +84,8 @@ export default function LeonteqPanel() {
     }
     setCompositionBusy(true);
     try {
-      const response = await apiFetch(`${API_URL}/api/leonteq/portfolios/composition`, {
+      const fetcher = refresh ? (url: string, init: Parameters<typeof apiFetch>[1]) => refreshRequest(url, init, `Leonteq · ${name}`, name, nl) : apiFetch;
+      const response = await fetcher(`${API_URL}/api/leonteq/portfolios/composition`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, refresh }),
       });
       const data = response.status === 403 ? { success: false, status: 'forbidden' }
@@ -108,9 +111,9 @@ export default function LeonteqPanel() {
     setBusy(true);
     setListError(null);
     try {
-      const response = await apiFetch(`${API_URL}/api/leonteq/portfolios/login`, {
+      const response = await refreshRequest(`${API_URL}/api/leonteq/portfolios/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh }),
-      });
+      }, nl ? 'Leonteq · Portefeuilles vernieuwen' : 'Leonteq · Refresh portfolios', undefined, nl);
       if (response.status === 403) {
         setResult({ success: false, status: 'forbidden' });
       } else {
@@ -128,22 +131,22 @@ export default function LeonteqPanel() {
   }
 
   return <div className="space-y-6">
-    <section className="space-y-4 rounded-xl border border-neutral-800/40 bg-elevated p-5" aria-busy={busy}>
-      <h2 className="font-medium">{nl ? 'LYNQS-portefeuilles' : 'LYNQS portfolios'}</h2>
-      <div className="flex flex-wrap items-center gap-4">
-        <button type="button" disabled={busy} onClick={() => void checkLogin(Boolean(result?.success))}
-          className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50">
-          {busy ? (result?.success ? (nl ? 'Vernieuwen…' : 'Refreshing…') : (nl ? 'Bezig met inloggen…' : 'Logging in…'))
-            : result?.success ? (nl ? 'Vernieuwen uit LYNQS' : 'Refresh from LYNQS') : (nl ? 'Portefeuilles laden' : 'Load portfolios')}
-        </button>
+    <section className="space-y-4" aria-label="Leonteq" aria-busy={busy}>
+      {!selected && <PortfolioSourceHeader title="Leonteq" count={portfolios.length}
+        retrievedAt={result?.retrieved_at} nl={nl} query={query} onQueryChange={setQuery}
+        searchLabel={nl ? 'Zoeken op indexnaam of sponsor' : 'Search index name or sponsor'}
+        searchPlaceholder={nl ? 'Zoek op indexnaam of sponsor…' : 'Search index name or sponsor…'}
+        refreshLabel={busy ? (result?.success ? (nl ? 'Vernieuwen…' : 'Refreshing…') : (nl ? 'Bezig met inloggen…' : 'Logging in…'))
+          : result?.success ? (nl ? 'Vernieuwen uit LYNQS' : 'Refresh from LYNQS') : (nl ? 'Portefeuilles laden' : 'Load portfolios')}
+        refreshDisabled={busy} onRefresh={() => void checkLogin(Boolean(result?.success))}>
         <a href="https://www.lynqs.com/eportal/#/amc/indices" target="_blank" rel="noopener noreferrer"
           className="text-sm text-accent-300 hover:underline">{nl ? 'LYNQS openen' : 'Open LYNQS'}</a>
-      </div>
+      </PortfolioSourceHeader>}
       <div role="status" aria-live="polite" className="text-sm">
         {busy ? <p className="text-fg-muted">{result?.success
           ? (nl ? 'De opgeslagen lijst blijft zichtbaar terwijl LYNQS wordt bijgewerkt…' : 'The saved list remains visible while fetching the latest data from LYNQS…')
           : (nl ? 'Verbinding maken en de indicespagina controleren…' : 'Connecting and checking access to the indices page…')}</p>
-          : result ? <div className={`rounded-lg border p-3 ${result.success ? 'border-pos-300/30 text-pos-300' : 'border-neg-300/30 text-neg-300'}`}>
+          : result ? <div className={result.success ? 'text-fg-muted' : 'text-neg-300'}>
             <p className="font-semibold">{result.cached ? (nl ? 'Opgeslagen portefeuilles' : 'Saved portfolios') : result.success ? (nl ? 'Inloggen gelukt' : 'Login successful') : (nl ? 'Inloggen niet gelukt' : 'Login unsuccessful')}</p>
             <p className="mt-1">{result.cached
               ? (nl ? 'Direct geladen uit de opgeslagen lijst. Vernieuwen haalt de nieuwste gegevens uit LYNQS op.' : 'Loaded directly from the saved list. Refresh retrieves the latest data from LYNQS.')
@@ -168,17 +171,7 @@ export default function LeonteqPanel() {
       </div>
       {composition?.success && <CompositionTable data={composition} nl={nl} />}
     </section>}
-    {result?.success && !selected && <section className="space-y-4" aria-labelledby="indices-heading">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 id="indices-heading" className="text-lg font-semibold">AMC Indices <span className="text-sm font-normal text-fg-muted">({portfolios.length})</span></h2>
-          {result.retrieved_at && <p className="mt-1 text-xs text-fg-muted">{nl ? 'Opgehaald op' : 'Retrieved at'} {new Date(result.retrieved_at).toLocaleString(nl ? 'nl-NL' : 'en-GB')}</p>}
-        </div>
-        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
-          aria-label={nl ? 'Zoeken op indexnaam of sponsor' : 'Search index name or sponsor'}
-          placeholder={nl ? 'Zoek op indexnaam of sponsor…' : 'Search index name or sponsor…'}
-          className="w-72 max-w-full rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm" />
-      </div>
+    {result?.success && !selected && <section className="space-y-4" aria-label="AMC Indices">
       <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
         <table className="w-full whitespace-nowrap text-sm">
           <caption className="sr-only">{nl ? 'Leonteq AMC Indices-portefeuilles' : 'Leonteq AMC Indices portfolios'}</caption>

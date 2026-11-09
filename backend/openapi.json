@@ -9744,6 +9744,47 @@
         "title": "HistoricalPortfolioHolding",
         "type": "object"
       },
+      "HoldingConnectionRequest": {
+        "properties": {
+          "airs_key": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Key"
+          },
+          "airs_portfolio_id": {
+            "minimum": 1.0,
+            "title": "Airs Portfolio Id",
+            "type": "integer"
+          },
+          "leonteq_key": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Leonteq Key",
+            "type": "string"
+          },
+          "leonteq_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Leonteq Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "leonteq_name",
+          "airs_portfolio_id",
+          "leonteq_key"
+        ],
+        "title": "HoldingConnectionRequest",
+        "type": "object"
+      },
       "HoldingIsinOverride": {
         "properties": {
           "holding_name": {
@@ -12695,6 +12736,37 @@
         "title": "MonthStatInfo",
         "type": "object"
       },
+      "MonthlyPerformanceRequest": {
+        "properties": {
+          "airs_portfolio_id": {
+            "minimum": 1.0,
+            "title": "Airs Portfolio Id",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
+          },
+          "saved_only": {
+            "default": false,
+            "title": "Saved Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "airs_portfolio_id"
+        ],
+        "title": "MonthlyPerformanceRequest",
+        "type": "object"
+      },
       "OptimizeRequest": {
         "properties": {
           "backtest_run_id": {
@@ -12946,6 +13018,48 @@
           "annual"
         ],
         "title": "OptimizeResponse",
+        "type": "object"
+      },
+      "PercentageEditRequest": {
+        "properties": {
+          "datum": {
+            "format": "date",
+            "title": "Datum",
+            "type": "string"
+          },
+          "expected_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Expected Percentage"
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,6}|(?=[\\d.]{1,13}0*$)\\d{0,6}\\.\\d{0,6}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Percentage"
+          }
+        },
+        "required": [
+          "datum",
+          "expected_percentage",
+          "percentage"
+        ],
+        "title": "PercentageEditRequest",
         "type": "object"
       },
       "PerformanceResponse": {
@@ -13827,6 +13941,31 @@
         "title": "PortfolioCompanyMetricsRow",
         "type": "object"
       },
+      "PortfolioCompositionRequest": {
+        "properties": {
+          "name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
+          },
+          "saved_only": {
+            "default": false,
+            "title": "Saved Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PortfolioCompositionRequest",
+        "type": "object"
+      },
       "PortfolioConcentration": {
         "description": "`C\u2081\u2080 = \u03a3 w\u208d\u1d62\u208e` and `HHI = \u03a3 w\u1d62\u00b2` \u2014 see `routers/_portfolio_concentration.py`.\n\n ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would\nunderstate concentration exactly at the top, where the ten largest are decided.\n\n BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the\nstock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of\neverything including cash and funds (true in absolute terms). Choosing one silently would be\npicking a side of a real question.",
         "properties": {
@@ -14626,6 +14765,36 @@
         "title": "PortfolioLinkModel",
         "type": "object"
       },
+      "PortfolioLinkRequest": {
+        "properties": {
+          "airs_portfolio_id": {
+            "minimum": 1.0,
+            "title": "Airs Portfolio Id",
+            "type": "integer"
+          },
+          "kind": {
+            "default": "fixed",
+            "enum": [
+              "fixed",
+              "dynamic"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "leonteq_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Leonteq Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "leonteq_name",
+          "airs_portfolio_id"
+        ],
+        "title": "PortfolioLinkRequest",
+        "type": "object"
+      },
       "PortfolioLinksOverview": {
         "properties": {
           "holdings": {
@@ -14648,6 +14817,17 @@
           "holdings"
         ],
         "title": "PortfolioLinksOverview",
+        "type": "object"
+      },
+      "PortfolioLoadRequest": {
+        "properties": {
+          "refresh": {
+            "default": false,
+            "title": "Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "PortfolioLoadRequest",
         "type": "object"
       },
       "PortfolioMemberIn": {
@@ -14712,6 +14892,112 @@
           }
         },
         "title": "PortfolioPerfSources",
+        "type": "object"
+      },
+      "PortfolioRefreshRequest": {
+        "properties": {
+          "datum": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datum"
+          },
+          "holding_name": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holding Name"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "maxLength": 12,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "lang": {
+            "default": "en",
+            "enum": [
+              "en",
+              "nl"
+            ],
+            "title": "Lang",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "operation": {
+            "enum": [
+              "list",
+              "composition",
+              "airs",
+              "monthly",
+              "prices"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "portfolio_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Leonteq",
+                  "AIRS"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "PortfolioRefreshRequest",
         "type": "object"
       },
       "PortfolioSaveRequest": {
@@ -22833,9 +23119,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "202": {
-            "description": "The prepared overview is pending."
           },
           "422": {
             "content": {
@@ -33148,6 +33431,183 @@
         "summary": "Stream Job"
       }
     },
+    "/api/leonteq/airs/model-portfolios/compositions": {
+      "get": {
+        "operationId": "saved_airs_compositions_api_leonteq_airs_model_portfolios_compositions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Saved Airs Compositions",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/airs/model-portfolios/refresh/job": {
+      "post": {
+        "operationId": "refresh_airs_model_list_api_leonteq_airs_model_portfolios_refresh_job_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh Airs Model List",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/composition": {
+      "get": {
+        "operationId": "airs_model_composition_api_leonteq_airs_model_portfolios__portfolio_id__composition_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "datum",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datum"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "saved_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Saved Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Composition",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/positions/{row_id}/percentage": {
+      "patch": {
+        "operationId": "edit_airs_percentage_api_leonteq_airs_model_portfolios__portfolio_id__positions__row_id__percentage_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Row Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PercentageEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Airs Percentage",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
     "/api/leonteq/equities": {
       "get": {
         "description": "Every equity in the latest Leonteq scrape. Newest scrape only \u2014\nthe table is replace-all on every refresh.",
@@ -33203,6 +33663,438 @@
           }
         },
         "summary": "Overview",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolio-links": {
+      "delete": {
+        "operationId": "disconnect_portfolios_api_leonteq_portfolio_links_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect Portfolios",
+        "tags": [
+          "leonteq"
+        ]
+      },
+      "get": {
+        "operationId": "portfolio_link_options_api_leonteq_portfolio_links_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "fixed",
+              "enum": [
+                "fixed",
+                "dynamic"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Link Options",
+        "tags": [
+          "leonteq"
+        ]
+      },
+      "put": {
+        "operationId": "connect_portfolios_api_leonteq_portfolio_links_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect Portfolios",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolio-links/holdings": {
+      "get": {
+        "operationId": "read_holding_connections_api_leonteq_portfolio_links_holdings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "leonteq_name",
+            "required": true,
+            "schema": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Leonteq Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "airs_portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Airs Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Holding Connections",
+        "tags": [
+          "leonteq"
+        ]
+      },
+      "put": {
+        "operationId": "save_holding_connection_api_leonteq_portfolio_links_holdings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldingConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Holding Connection",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolios/composition": {
+      "post": {
+        "description": "Read the selected AMC index's current positions using backend credentials.",
+        "operationId": "portfolio_composition_api_leonteq_portfolios_composition_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioCompositionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Composition",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolios/login": {
+      "post": {
+        "description": "Return the saved AMC list; only a cache miss or explicit refresh logs in.",
+        "operationId": "check_portfolio_login_api_leonteq_portfolios_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PortfolioLoadRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Portfolio Login",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolios/monthly-performance": {
+      "post": {
+        "operationId": "monthly_performance_api_leonteq_portfolios_monthly_performance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonthlyPerformanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Monthly Performance",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolios/snapshot": {
+      "get": {
+        "operationId": "saved_portfolio_list_api_leonteq_portfolios_snapshot_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Saved Portfolio List",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/refresh/job": {
+      "post": {
+        "operationId": "start_portfolio_refresh_api_leonteq_refresh_job_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Portfolio Refresh",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/refresh/jobs/{job_id}/result": {
+      "get": {
+        "operationId": "portfolio_refresh_result_api_leonteq_refresh_jobs__job_id__result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Refresh Result",
         "tags": [
           "leonteq"
         ]

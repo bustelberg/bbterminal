@@ -11,7 +11,7 @@ it('saves and undoes a sold marking without writing a percentage to AIRS', async
   const link = { leonteq_name: 'Source', airs_portfolio_id: 1, airs_name: 'Fixed' };
   const cache: ConnectionHoldingsCache = new Map([
     ['leonteq:Source', { rows: [{ name: 'Apple', isin: 'US0378331005', weight: '5%' }] }],
-    ['airs:1', { rows: [{ name: 'Apple', isin: 'US0378331005', weight: '5%' }, { name: 'Inditex', isin: 'ES0148396007', weight: '1.35%' }] }],
+    ['airs:security-v2:1', { rows: [{ name: 'Apple', isin: 'US0378331005', weight: '5%' }, { name: 'Inditex', isin: 'ES0148396007', weight: '1.35%' }] }],
   ]);
   const rulesCache = new Map<string, HoldingRule[]>([[JSON.stringify(['Source', 1]), []]]);
   vi.mocked(apiFetch).mockImplementation(async (_url, options) => {

@@ -5,6 +5,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { useLang } from '../../lib/i18n';
 import { startJob } from '../../lib/stores/jobs';
+import PortfolioSourceHeader from './PortfolioSourceHeader';
 import AirsCompositionView, { type AirsComposition } from './AirsCompositionView';
 
 type Model = {
@@ -70,20 +71,15 @@ export default function AirsModelsPanel({ kind = 'fixed' }: { kind?: 'fixed' | '
 
   const typedRows = rows.filter((row) => kind === 'fixed' ? /^fixed\b/i.test(row.portfolio_type ?? '') : row.portfolio_type?.trim().toLowerCase() === 'normaal');
   const filtered = typedRows.filter((row) => `${row.name} ${row.omschrijving ?? ''} ${row.portfolio_type ?? ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
-  const scannedAt = rows.reduce<string | null>((latest, row) => row.scanned_at && (!latest || row.scanned_at > latest) ? row.scanned_at : latest, null);
+  const scannedAt = typedRows.reduce<string | null>((latest, row) => row.scanned_at && (!latest || row.scanned_at > latest) ? row.scanned_at : latest, null);
   if (selected) return <AirsCompositionView key={selected.id} id={selected.id} name={selected.name} cache={compositions.current} onBack={() => setSelected(null)} />;
-  return <section className="space-y-4" aria-labelledby={`airs-${kind}-heading`} aria-busy={loading || refreshing}>
-    <div className="flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <h2 id={`airs-${kind}-heading`} className="text-lg font-semibold">AIRS {kind === 'fixed' ? 'Fixed' : 'Dynamic'} <span className="text-sm font-normal text-fg-muted">({typedRows.length})</span></h2>
-        {scannedAt && <p className="mt-1 text-xs text-fg-muted">{nl ? 'Opgehaald op' : 'Retrieved at'} {new Date(scannedAt).toLocaleString(nl ? 'nl-NL' : 'en-GB')}</p>}
-      </div>
-      <button type="button" disabled={refreshing || loading} onClick={() => void refresh()} className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50">
-        {refreshing ? (nl ? 'Vernieuwen…' : 'Refreshing…') : (nl ? 'Vernieuwen uit AIRS' : 'Refresh from AIRS')}
-      </button>
-    </div>
-    <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={nl ? 'Modelportefeuilles zoeken' : 'Search model portfolios'}
-      placeholder={nl ? 'Zoek op portefeuille, omschrijving of type…' : 'Search portfolio, description or type…'} className="w-full max-w-md rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm" />
+  return <section className="space-y-4" aria-label={`AIRS ${kind === 'fixed' ? 'Fixed' : 'Dynamic'}`} aria-busy={loading || refreshing}>
+    <PortfolioSourceHeader title={`AIRS ${kind === 'fixed' ? 'Fixed' : 'Dynamic'}`} count={typedRows.length}
+      retrievedAt={scannedAt} nl={nl} query={query} onQueryChange={setQuery}
+      searchLabel={nl ? 'Modelportefeuilles zoeken' : 'Search model portfolios'}
+      searchPlaceholder={nl ? 'Zoek op portefeuille, omschrijving of type…' : 'Search portfolio, description or type…'}
+      refreshLabel={refreshing ? (nl ? 'Vernieuwen…' : 'Refreshing…') : (nl ? 'Vernieuwen uit AIRS' : 'Refresh from AIRS')}
+      refreshDisabled={refreshing || loading} onRefresh={() => void refresh()} />
     <div role="status" aria-live="polite" className="text-sm text-fg-muted">
       {loading ? (nl ? 'Opgeslagen modelportefeuilles laden…' : 'Loading saved model portfolios…')
         : refreshing ? (nl ? 'Modelportefeuilles ophalen uit AIRS; de opgeslagen lijst blijft zichtbaar…' : 'Reading model portfolios from AIRS; the saved list remains visible…') : null}

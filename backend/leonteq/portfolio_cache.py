@@ -38,6 +38,9 @@ def portfolios(refresh: bool = False) -> dict:
         return saved
     result = check_login()
     if result.get('success'):
+        from leonteq.progress import report
+        report(f'Saving {len(result.get("portfolios") or [])} portfolios…',
+               f'{len(result.get("portfolios") or [])} portefeuilles opslaan…')
         persisted = False
         try:
             supabase.table(TABLE).upsert({'account_key': _account_key(), 'payload': result,

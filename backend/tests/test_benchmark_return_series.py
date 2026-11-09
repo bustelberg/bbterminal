@@ -5,6 +5,23 @@ import pytest
 from tests._fake_supabase import FakeSupabase
 
 
+def test_headline_etf_return_stops_at_airs_date_even_when_newer_prices_exist(monkeypatch):
+    from routers import _benchmark_etf as etf, _benchmark_index as index
+
+    monkeypatch.setattr(etf, 'ensure_fresh', lambda _: (7, ('2026-11-09', 150)))
+    monkeypatch.setattr(etf, '_proxy_fetched_at', lambda _: None)
+    monkeypatch.setattr(etf, 'supabase', FakeSupabase({'benchmark_price': [
+        {'benchmark_id': 7, 'target_date': '2025-12-31', 'price': 100},
+        {'benchmark_id': 7, 'target_date': '2026-11-06', 'price': 110},
+        {'benchmark_id': 7, 'target_date': '2026-11-09', 'price': 150},
+    ]}))
+    monkeypatch.setattr(index, '_fx_to_eur', lambda *_: {})
+    monkeypatch.setattr(index, '_rate', lambda *_: 1)
+    result = etf.etf_returns('ACWI', ['2026-01-01'], end='2026-11-06')['2026-01-01']
+    assert result['as_of'] == '2026-11-06'
+    assert result['eur_pct'] == pytest.approx(10)
+
+
 @pytest.mark.parametrize('read_only', [False, True])
 def test_proxy_curve_uses_the_portfolios_exact_dates_and_prior_market_closes(monkeypatch, read_only):
     from routers import _benchmark_etf as etf

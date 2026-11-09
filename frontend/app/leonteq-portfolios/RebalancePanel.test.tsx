@@ -7,6 +7,10 @@ import RebalancePanel from './RebalancePanel';
 import { rebalancePlan, weight } from './rebalancePlan';
 
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+vi.mock('./refreshProgress', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./refreshProgress')>(),
+  refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
+}));
 it('uses the same saved preview in both modes without upgrading metadata or fetching live data', async () => {
   vi.mocked(apiFetch).mockImplementation(async (url) => ({ ok: true, json: async () => {
     if (url.endsWith('/portfolio-links')) return { links: [{ leonteq_name: 'Source', airs_name: 'Fixed', airs_portfolio_id: 1 }] };

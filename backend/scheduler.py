@@ -1073,11 +1073,18 @@ def list_scheduled_jobs() -> list[dict]:
         _log.warning("[scheduler] list_scheduled_jobs failed: %s: %s", type(e).__name__, e)
         return []
     by_id = {row["id"]: row for row in jobs}
-    for spec in BY_ID.values():
-        if spec.after_job and spec.after_job in by_id:
-            jobs.append({"id": spec.id, "fires": spec.id,
-                         "next_run_at": by_id[spec.after_job]["next_run_at"],
-                         "after_job": spec.after_job})
+    pending = [spec for spec in BY_ID.values() if spec.after_job]
+    while pending:
+        ready = [spec for spec in pending if spec.after_job in by_id]
+        if not ready:
+            break
+        for spec in ready:
+            row = {"id": spec.id, "fires": spec.id,
+                   "next_run_at": by_id[spec.after_job]["next_run_at"],
+                   "after_job": spec.after_job}
+            jobs.append(row)
+            by_id[spec.id] = row
+            pending.remove(spec)
     return jobs
 
 
@@ -2508,6 +2515,17 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             _log.exception(
                 "[scheduler] airs model-portfolio scan failed: %s: %s", type(e).__name__, e,
             )
+        # Refresh shared prices after AIRS has published its account valuation dates.
+        # Do not give the market stage an independent clock: preparation must follow both.
+        try:
+            if stop is not None and stop():
+                raise _Cancelled("stopped before market data; stored work is kept")
+            _run_body("dashboard_market", ctx)
+        except _Cancelled:
+            raise
+        except Exception as exc:
+            summary["market"] = getattr(exc, "summary", {"error": str(exc)})
+            failures.append(f"market: {exc}")
         # The last AIRS phase deliberately starts only after the account and composition browser
         # work is finished. A separate job would race the same AirSPMS session and either
         # job could leave a partial refresh behind.

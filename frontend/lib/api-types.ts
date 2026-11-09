@@ -7098,6 +7098,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/leonteq/airs/model-portfolios/compositions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Saved Airs Compositions */
+        get: operations["saved_airs_compositions_api_leonteq_airs_model_portfolios_compositions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/airs/model-portfolios/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Airs Model List */
+        post: operations["refresh_airs_model_list_api_leonteq_airs_model_portfolios_refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/composition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Airs Model Composition */
+        get: operations["airs_model_composition_api_leonteq_airs_model_portfolios__portfolio_id__composition_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/positions/{row_id}/percentage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Edit Airs Percentage */
+        patch: operations["edit_airs_percentage_api_leonteq_airs_model_portfolios__portfolio_id__positions__row_id__percentage_patch"];
+        trace?: never;
+    };
     "/api/leonteq/equities": {
         parameters: {
             query?: never;
@@ -7183,6 +7251,151 @@ export interface paths {
          *     GICS-style source but we defend against it).
          */
         get: operations["overview_api_leonteq_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolio-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Portfolio Link Options */
+        get: operations["portfolio_link_options_api_leonteq_portfolio_links_get"];
+        /** Connect Portfolios */
+        put: operations["connect_portfolios_api_leonteq_portfolio_links_put"];
+        post?: never;
+        /** Disconnect Portfolios */
+        delete: operations["disconnect_portfolios_api_leonteq_portfolio_links_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolio-links/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Holding Connections */
+        get: operations["read_holding_connections_api_leonteq_portfolio_links_holdings_get"];
+        /** Save Holding Connection */
+        put: operations["save_holding_connection_api_leonteq_portfolio_links_holdings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolios/composition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Portfolio Composition
+         * @description Read the selected AMC index's current positions using backend credentials.
+         */
+        post: operations["portfolio_composition_api_leonteq_portfolios_composition_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolios/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Portfolio Login
+         * @description Return the saved AMC list; only a cache miss or explicit refresh logs in.
+         */
+        post: operations["check_portfolio_login_api_leonteq_portfolios_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolios/monthly-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Monthly Performance */
+        post: operations["monthly_performance_api_leonteq_portfolios_monthly_performance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolios/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Saved Portfolio List */
+        get: operations["saved_portfolio_list_api_leonteq_portfolios_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Portfolio Refresh */
+        post: operations["start_portfolio_refresh_api_leonteq_refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/refresh/jobs/{job_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Portfolio Refresh Result */
+        get: operations["portfolio_refresh_result_api_leonteq_refresh_jobs__job_id__result_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -12600,6 +12813,17 @@ export interface components {
             /** Weight Pct */
             weight_pct: number;
         };
+        /** HoldingConnectionRequest */
+        HoldingConnectionRequest: {
+            /** Airs Key */
+            airs_key?: string | null;
+            /** Airs Portfolio Id */
+            airs_portfolio_id: number;
+            /** Leonteq Key */
+            leonteq_key: string;
+            /** Leonteq Name */
+            leonteq_name: string;
+        };
         /** HoldingIsinOverride */
         HoldingIsinOverride: {
             /** Holding Name */
@@ -13758,6 +13982,23 @@ export interface components {
             /** Return Before */
             return_before: number;
         };
+        /** MonthlyPerformanceRequest */
+        MonthlyPerformanceRequest: {
+            /** Airs Portfolio Id */
+            airs_portfolio_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh?: boolean;
+            /**
+             * Saved Only
+             * @default false
+             */
+            saved_only?: boolean;
+        };
         /** OptimizeRequest */
         OptimizeRequest: {
             /** Backtest Run Id */
@@ -13844,6 +14085,18 @@ export interface components {
             ytd_after?: number | null;
             /** Ytd Before */
             ytd_before?: number | null;
+        };
+        /** PercentageEditRequest */
+        PercentageEditRequest: {
+            /**
+             * Datum
+             * Format: date
+             */
+            datum: string;
+            /** Expected Percentage */
+            expected_percentage: number | string;
+            /** Percentage */
+            percentage: number | string;
         };
         /** PerformanceResponse */
         PerformanceResponse: {
@@ -14111,6 +14364,21 @@ export interface components {
             weight_pct: number;
             /** Yahoo Symbol */
             yahoo_symbol?: string | null;
+        };
+        /** PortfolioCompositionRequest */
+        PortfolioCompositionRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh?: boolean;
+            /**
+             * Saved Only
+             * @default false
+             */
+            saved_only?: boolean;
         };
         /**
          * PortfolioConcentration
@@ -14458,12 +14726,33 @@ export interface components {
             /** Positions */
             positions: number;
         };
+        /** PortfolioLinkRequest */
+        PortfolioLinkRequest: {
+            /** Airs Portfolio Id */
+            airs_portfolio_id: number;
+            /**
+             * Kind
+             * @default fixed
+             * @enum {string}
+             */
+            kind?: "fixed" | "dynamic";
+            /** Leonteq Name */
+            leonteq_name: string;
+        };
         /** PortfolioLinksOverview */
         PortfolioLinksOverview: {
             /** Holdings */
             holdings: components["schemas"]["PortfolioLinkHolding"][];
             /** Models */
             models: components["schemas"]["PortfolioLinkModel"][];
+        };
+        /** PortfolioLoadRequest */
+        PortfolioLoadRequest: {
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh?: boolean;
         };
         /** PortfolioMemberIn */
         PortfolioMemberIn: {
@@ -14486,6 +14775,32 @@ export interface components {
             model_scan?: string | null;
             /** Yf Close */
             yf_close?: string | null;
+        };
+        /** PortfolioRefreshRequest */
+        PortfolioRefreshRequest: {
+            /** Datum */
+            datum?: string | null;
+            /** Holding Name */
+            holding_name?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /**
+             * Lang
+             * @default en
+             * @enum {string}
+             */
+            lang?: "en" | "nl";
+            /** Name */
+            name?: string | null;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "list" | "composition" | "airs" | "monthly" | "prices";
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+            /** Source */
+            source?: ("Leonteq" | "AIRS") | null;
         };
         /** PortfolioSaveRequest */
         PortfolioSaveRequest: {
@@ -18190,13 +18505,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ModelPortfolioAnalysis"];
                 };
-            };
-            /** @description The prepared overview is pending. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -24921,6 +25229,117 @@ export interface operations {
             };
         };
     };
+    saved_airs_compositions_api_leonteq_airs_model_portfolios_compositions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    refresh_airs_model_list_api_leonteq_airs_model_portfolios_refresh_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_model_composition_api_leonteq_airs_model_portfolios__portfolio_id__composition_get: {
+        parameters: {
+            query?: {
+                datum?: string | null;
+                refresh?: boolean;
+                saved_only?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_airs_percentage_api_leonteq_airs_model_portfolios__portfolio_id__positions__row_id__percentage_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+                row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PercentageEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_equities_api_leonteq_equities_get: {
         parameters: {
             query?: never;
@@ -24977,6 +25396,351 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    portfolio_link_options_api_leonteq_portfolio_links_get: {
+        parameters: {
+            query?: {
+                kind?: "fixed" | "dynamic";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_portfolios_api_leonteq_portfolio_links_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_portfolios_api_leonteq_portfolio_links_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_holding_connections_api_leonteq_portfolio_links_holdings_get: {
+        parameters: {
+            query: {
+                leonteq_name: string;
+                airs_portfolio_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_holding_connection_api_leonteq_portfolio_links_holdings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_composition_api_leonteq_portfolios_composition_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioCompositionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_portfolio_login_api_leonteq_portfolios_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PortfolioLoadRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    monthly_performance_api_leonteq_portfolios_monthly_performance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonthlyPerformanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    saved_portfolio_list_api_leonteq_portfolios_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    start_portfolio_refresh_api_leonteq_refresh_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_refresh_result_api_leonteq_refresh_jobs__job_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -7,10 +7,42 @@ import { apiFetch } from '../../lib/apiFetch';
 import { startJob, type JobToast } from '../../lib/stores/jobs';
 
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+vi.mock('./refreshProgress', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./refreshProgress')>(),
+  refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
+}));
 vi.mock('../../lib/i18n', () => ({ useLang: () => ['en'] }));
 vi.mock('../../lib/stores/jobs', () => ({ startJob: vi.fn() }));
 vi.mock('./LeonteqPanel', () => ({ default: () => <div>Saved Leonteq portfolios</div> }));
 vi.mock('./PortfolioLinksPanel', () => ({ default: () => <div>Portfolio connections</div> }));
+vi.mock('./RebalancePanel', () => ({ default: ({ active }: { active: boolean }) => <div data-active={active}>Rebalance content</div> }));
+vi.mock('./ReturnsPanel', () => ({ default: () => <div>Returns content</div> }));
+
+it('nests Rebalance and Returns under Insights and remembers the selected insight', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const root = createRoot(host);
+  const button = (id: string) => host.querySelector<HTMLButtonElement>(`#${id}`)!;
+  try {
+    await act(async () => root.render(<Page />));
+    expect(host.textContent).not.toContain('Rebalance content');
+    expect(host.textContent).not.toContain('Returns content');
+    await act(async () => button('section-tab-insights').click());
+    expect(host.querySelector<HTMLElement>('#source-panel-insights')!.hidden).toBe(false);
+    expect(host.querySelector('[data-active=true]')?.textContent).toBe('Rebalance content');
+    expect(Array.from(host.querySelectorAll('[aria-label="Insights"] [role=tab]'), tab => tab.textContent))
+      .toEqual(['Rebalance', 'Returns', 'Prices']);
+    await act(async () => button('insight-tab-rebalance').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+    expect(button('insight-tab-returns').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(button('insight-tab-returns'));
+    expect(host.querySelector<HTMLElement>('#source-panel-returns')!.hidden).toBe(false);
+    await act(async () => button('section-tab-portfolios').click());
+    expect(host.querySelector<HTMLElement>('#source-panel-insights')!.hidden).toBe(true);
+    await act(async () => button('section-tab-insights').click());
+    expect(button('insight-tab-returns').getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector<HTMLElement>('#source-panel-returns')!.hidden).toBe(false);
+  } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
+});
 
 it('lists dynamic models separately without requesting fixed compositions', async () => {
   vi.mocked(apiFetch).mockResolvedValue({ ok: true, json: async () => [
@@ -23,7 +55,7 @@ it('lists dynamic models separately without requesting fixed compositions', asyn
   const root = createRoot(host);
   try {
     await act(async () => root.render(<Page />));
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('[role=tab]')[2].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('#source-tab-dynamic')!.click());
     expect(host.querySelector('table')?.textContent).toContain('Dynamic model');
     expect(host.querySelector('table')?.textContent).not.toContain('Fixed model');
     expect(host.querySelector('table')?.textContent).not.toContain('Multi model');
@@ -42,9 +74,11 @@ it('loads the AIRS table on selection, preserves it across tabs, and refreshes o
   const root = createRoot(host);
   try {
     await act(async () => root.render(<Page />));
-    const tabs = host.querySelectorAll<HTMLButtonElement>('[role=tab]');
-    expect(tabs).toHaveLength(6);
-    expect(Array.from(tabs, (tab) => tab.textContent)).toEqual(['Leonteq', 'AIRS Fixed', 'AIRS Dynamic', 'Connections', 'Rebalance', 'Returns']);
+    const tabs = host.querySelectorAll<HTMLButtonElement>('[aria-label="Portfolio source"] [role=tab]');
+    expect(Array.from(host.querySelectorAll('[aria-label="Portfolio page"] [role=tab]'), (tab) => tab.textContent))
+      .toEqual(['Portfolios', 'Connections', 'Insights']);
+    expect(tabs).toHaveLength(3);
+    expect(Array.from(tabs, (tab) => tab.textContent)).toEqual(['Leonteq', 'AIRS Fixed', 'AIRS Dynamic']);
     expect(apiFetch).not.toHaveBeenCalled();
     await act(async () => tabs[1].click());
     expect(tabs[1].getAttribute('aria-selected')).toBe('true');
@@ -52,9 +86,12 @@ it('loads the AIRS table on selection, preserves it across tabs, and refreshes o
     expect(host.querySelector('table')?.textContent).toContain('fixed (13.7)');
     expect(host.querySelector('table')?.textContent).toContain('2024-02-28');
     expect(apiFetch).toHaveBeenCalledTimes(2);
-    await act(async () => tabs[3].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('#section-tab-connections')!.click());
+    expect(host.querySelector<HTMLElement>('#source-panel-portfolios')!.hidden).toBe(true);
     expect(host.querySelector<HTMLElement>('#source-panel-airs')!.hidden).toBe(true);
-    await act(async () => tabs[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('#section-tab-portfolios')!.click());
+    expect(host.querySelector<HTMLElement>('#source-panel-portfolios')!.hidden).toBe(false);
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
     expect(apiFetch).toHaveBeenCalledTimes(2);
     const refresh = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Refresh from AIRS')!;
     await act(async () => refresh.click());
@@ -100,7 +137,7 @@ it('opens a preloaded composition without another request or loading screen', as
   const root = createRoot(host);
   try {
     await act(async () => root.render(<Page />));
-    await act(async () => host.querySelectorAll<HTMLButtonElement>('[role=tab]')[1].click());
+    await act(async () => host.querySelector<HTMLButtonElement>('#source-tab-airs')!.click());
     const calls = vi.mocked(apiFetch).mock.calls.length;
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="BUS_2.0_BOFF_FX · View composition"]')!.click());
     expect(apiFetch).toHaveBeenCalledTimes(calls);

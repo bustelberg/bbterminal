@@ -18,6 +18,18 @@ def _account() -> str:
     return key
 
 
+def linked_dynamic(name: str, portfolio_id: int) -> dict:
+    """Validate one comparison without loading both complete portfolio catalogues."""
+    link = (supabase.table(TABLE).select('leonteq_name,airs_portfolio_id')
+            .eq('account_key', _account()).eq('leonteq_name', name)
+            .eq('airs_portfolio_id', portfolio_id).limit(1).execute().data or [])
+    model = ((supabase.table('airs_model_portfolio').select('id,name,portfolio_type')
+              .eq('id', portfolio_id).limit(1).execute().data or []) if link else [])
+    if not model or (model[0].get('portfolio_type') or '').strip().lower() != 'normaal':
+        raise HTTPException(404, 'dynamic_connection_not_found')
+    return {**link[0], 'airs_name': model[0]['name']}
+
+
 def options(kind: str = 'fixed') -> dict:
     from airs_scanner import has_fixed_model
     from routers import _airs_portfolio_store as store

@@ -6,6 +6,10 @@ import { apiFetch } from '../../lib/apiFetch';
 import Page from './LeonteqPanel';
 
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+vi.mock('./refreshProgress', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./refreshProgress')>(),
+  refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
+}));
 vi.mock('../../lib/i18n', () => ({ useLang: () => ['en'] }));
 
 it.each([

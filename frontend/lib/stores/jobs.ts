@@ -189,8 +189,11 @@ export function startLocalJob(
   }));
   void (async () => {
     try {
-      const report = (progress: { done: number; total: number; message?: string }) =>
-        upsert(id, { done: progress.done, total: progress.total, message: progress.message ?? '' });
+      const report = (progress: { done: number; total: number; message?: string }) => {
+        const current = jobsStore.get().jobs.find((job) => job.id === id);
+        upsert(id, { done: progress.done, total: progress.total, message: progress.message ?? '',
+          ...(progress.message ? { details: [...(current?.details ?? []), progress.message].slice(-100) } : {}) });
+      };
       const summary = await run(ctrl.signal, report);
       //  The signal, not the error, decides. A cancelled fetch can resolve rather than throw
       // (a cacheable read is shared, so aborting one caller does not stop the request), and a card

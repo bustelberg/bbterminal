@@ -30,6 +30,18 @@ class TestRiskProfilePolicySource:
 
 
 class TestBookScorecardWindow:
+    def test_weighted_policy_proxies_are_capped_at_the_airs_valuation_date(self, monkeypatch):
+        from routers import _benchmark_etf as etf
+        from unittest.mock import Mock
+
+        proxy = Mock(return_value={'2026-01-01': {'eur_pct': 10, 'as_of': '2026-11-06'}})
+        monkeypatch.setattr(etf, 'etf_returns', proxy)
+        got = pa._scorecard_block_returns([], {}, '2026-01-01', 'Neutraal', '2026-11-06')
+        assert got['benchmark_ytd_pct'] == 10
+        assert got['benchmark_as_of'] == '2026-11-06'
+        assert all(call.kwargs == {'end': '2026-11-06'} for call in proxy.call_args_list)
+        assert proxy.call_count == 2
+
     def test_benchmark_uses_the_same_funded_book_window_as_the_chart(self, monkeypatch):
         from routers import _airs_value_series as series
 
@@ -55,9 +67,24 @@ class TestBookScorecardWindow:
 
         assert result["ytd_from"] == "2026-06-01"
         assert result["portfolio_as_of"] == "2026-09-24"
+        assert result["benchmark_as_of"] == "2026-09-24"
         assert result["portfolio_ytd_pct"] == 5.61
         assert result["benchmark_ytd_pct"] == 3.09
         assert result["ytd_excess_pct"] == pytest.approx(2.52)
+
+    def test_fallback_cannot_compare_an_airs_book_with_newer_benchmark_prices(self, monkeypatch):
+        from routers import _airs_value_series as series
+        from unittest.mock import Mock
+
+        monkeypatch.setattr(series, 'book_return_window', lambda *_: {
+            'return_from': '2026-01-01', 'return_as_of': '2026-11-06', 'benchmark': {}})
+        fallback = Mock(return_value={'2026-01-01': {'eur_pct': 4, 'as_of': '2026-11-06'}})
+        monkeypatch.setattr(pa, '_index_returns', fallback)
+        result = {'book_portefeuille': 'BOOK', 'book_ytd_pct': 5, 'benchmark_as_of': '2026-11-09'}
+        pa._apply_book_source(result, 'AEX')
+        fallback.assert_called_once_with('AEX', ['2026-01-01'], end='2026-11-06')
+        assert result['benchmark_as_of'] == result['portfolio_as_of'] == '2026-11-06'
+        assert result['ytd_excess_pct'] == 1
 
 
 class TestOneVocabulary:

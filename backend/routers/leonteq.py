@@ -30,6 +30,57 @@ from deps import supabase
 router = APIRouter(tags=["leonteq"])
 
 
+class PortfolioRefreshRequest(BaseModel):
+    operation: Literal['list', 'composition', 'airs', 'monthly', 'prices']
+    name: str | None = Field(default=None, min_length=1, max_length=300)
+    portfolio_id: int | None = Field(default=None, ge=1)
+    datum: date | None = None
+    lang: Literal['en', 'nl'] = 'en'
+    source: Literal['Leonteq', 'AIRS'] | None = None
+    isin: str | None = Field(default=None, max_length=12)
+    holding_name: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+@router.post('/api/leonteq/refresh/job')
+async def start_portfolio_refresh(body: PortfolioRefreshRequest):
+    import jobs
+    from fastapi import HTTPException
+    from leonteq.refresh_jobs import run
+
+    if (body.operation in ('composition', 'monthly') and not body.name
+            or body.operation in ('airs', 'monthly') and body.portfolio_id is None):
+        raise HTTPException(422, 'The portfolio identity is required for this refresh')
+    if body.source and (body.operation != 'prices' or not body.name or not body.portfolio_id or not body.holding_name):
+        raise HTTPException(422, 'The connection and holding identity are required for a row recheck')
+    label = ('All linked portfolio prices' if body.operation == 'prices' else f'AIRS #{body.portfolio_id}' if body.operation == 'airs'
+             else body.name or 'Leonteq portfolios')
+    identity = f'{body.operation}:{body.portfolio_id or ""}:{body.datum or "latest"}'
+    if body.source:
+        import hashlib
+        identity += ':' + hashlib.sha256(f'{body.name}:{body.source}:{body.isin}:{body.holding_name}'.encode()).hexdigest()[:20]
+    prefix = 'airs.leonteq.refresh' if body.operation in ('airs', 'monthly', 'prices') else 'leonteq.refresh'
+    job, reused = jobs.start(f'{prefix}.{identity}', label,
+        lambda ctx: run(ctx, body.operation, name=body.name, portfolio_id=body.portfolio_id,
+                          datum=body.datum.isoformat() if body.datum else None, lang=body.lang,
+                          source=body.source, isin=body.isin, holding_name=body.holding_name))
+    return {'job_id': job.id, 'already_running': reused}
+
+
+@router.get('/api/leonteq/refresh/jobs/{job_id}/result')
+async def portfolio_refresh_result(job_id: str):
+    import jobs
+    from fastapi import HTTPException
+    from leonteq.refresh_jobs import result_for
+
+    job = jobs.get(job_id)
+    if not job or not job.kind.startswith(('leonteq.refresh.', 'airs.leonteq.refresh.')):
+        raise HTTPException(404, 'Refresh result is no longer available. Reload the saved data.')
+    result = result_for(job_id)
+    if result is None:
+        raise HTTPException(409, job.summary or 'The refresh has not produced a result yet.')
+    return result
+
+
 @router.get('/api/leonteq/airs/model-portfolios/compositions')
 async def saved_airs_compositions():
     from leonteq.airs_models import saved_compositions

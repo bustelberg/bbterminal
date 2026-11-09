@@ -6,6 +6,10 @@ import { apiFetch } from '../../lib/apiFetch';
 import ReturnsPanel, { compareReturns } from './ReturnsPanel';
 import { jobsStore } from '../../lib/stores/jobs';
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+vi.mock('./refreshProgress', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./refreshProgress')>(),
+  refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
+}));
 const link = { leonteq_name: 'Momentum', airs_name: 'Mo_DYN', airs_portfolio_id: 2 };
 it('compares exact linked portfolios, preserves zero and handles missing or ambiguous data', () => {
   const source = { success: true, portfolios: [{ name: 'Momentum', ytd: '3,25%' }] };

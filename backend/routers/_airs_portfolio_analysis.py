@@ -178,7 +178,7 @@ def _bench_members(label: str) -> tuple[list[dict], dict]:
     return _leg(("bench_members", label), lambda: _members(label))
 
 
-def _index_returns(label: str, starts: list[str]) -> dict[str, dict]:
+def _index_returns(label: str, starts: list[str], *, end: str | None = None) -> dict[str, dict]:
     """The benchmark's EUR return per window — the index ETF's own price series where there is
     one, the constituent reconstruction where there is not. Memoized across portfolios.
 
@@ -206,20 +206,21 @@ def _index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     # Version the leg when the direct ACWI feed changes. The cache fingerprint sees data writes,
     # not a code deployment, so retaining the old key would keep returning the former GuruFocus
     # provenance until another table happened to change.
-    key = ("index_returns_yfinance_adjusted_v3", label, tuple(sorted(set(starts))), _today())
-    return _leg(key, lambda: _index_returns_now(label, starts))
+    key = ("index_returns_yfinance_adjusted_v4", label, tuple(sorted(set(starts))), end, _today())
+    return _leg(key, lambda: _index_returns_now(label, starts, **({'end': end} if end else {})))
 
 
-def _index_returns_now(label: str, starts: list[str]) -> dict[str, dict]:
+def _index_returns_now(label: str, starts: list[str], *, end: str | None = None) -> dict[str, dict]:
     from routers._benchmark_etf import etf_returns  # noqa: PLC0415
 
-    out = etf_returns(label, starts)
+    limits = {'end': end} if end else {}
+    out = etf_returns(label, starts, **limits)
     missing = [s for s in sorted(set(starts)) if s not in out]
     if not missing:
         return out
     # `out` last: an explicit statement that the ETF wins any overlap, rather than relying on
     # `missing` never containing a key the ETF answered.
-    return {**index_returns(label, missing), **out}
+    return {**index_returns(label, missing, **limits), **out}
 
 
 def _bench_prov(win: dict | None) -> dict:
@@ -838,17 +839,17 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
     benchmark = window.get("benchmark") or {}
     # AEX has no proxy ETF in the chart path. Retain its constituent fallback, but anchor that
     # fallback to the book's first funded month too. ACWI/SP500 use the exact sampled chart line.
-    if anchor and not benchmark:
-        benchmark = (_index_returns(benchmark_label, [anchor]).get(anchor) or {})
+    cutoff = window.get("return_as_of") or result.get("book_as_of")
+    if anchor and cutoff and not benchmark:
+        benchmark = (_index_returns(benchmark_label, [anchor], end=cutoff).get(anchor) or {})
     b_ytd = benchmark.get("return_pct", benchmark.get("eur_pct"))
     result.update({
         **_bench_prov(benchmark),
         "source": "book",
         "ytd_from": anchor,
         "portfolio_ytd_pct": p_ytd,
-        # `book_as_of` was set by `_book_return` (runs in both source modes); the benchmark stays
-        # yfinance, so `benchmark_as_of` from the model path above is left as-is.
-        "portfolio_as_of": window.get("return_as_of") or result.get("book_as_of"),
+        "portfolio_as_of": cutoff,
+        "benchmark_as_of": benchmark.get("as_of"),
         "benchmark_ytd_pct": b_ytd,
         "ytd_excess_pct": (p_ytd - b_ytd) if (p_ytd is not None and b_ytd is not None) else None,
         # AIRS has no since-inception for the book — clear the model's rather than mislabel it.
@@ -885,7 +886,8 @@ def _weighted_benchmark_profiles() -> dict[str, dict[str, float]]:
 
 
 def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, float],
-                             anchor: str | None, variant: str | None = None) -> dict:
+                             anchor: str | None, variant: str | None = None,
+                             end: str | None = None) -> dict:
     """The scorecard's allocation blocks and its weighted benchmark.
 
     Risk-profile portfolios use the versioned Stocks/Bonds policy mix.  Alternatives and cash are
@@ -900,7 +902,8 @@ def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, f
         return {"block_returns": [], "benchmark_ytd_pct": None}
     scorecard_blocks = _SCORECARD_BLOCKS
     proxy_labels = [proxy for _name, _buckets, proxy in scorecard_blocks if proxy]
-    proxy = {label: etf_returns(label, [anchor]).get(anchor) for label in proxy_labels} if anchor else {}
+    limits = {'end': end} if end else {}
+    proxy = {label: etf_returns(label, [anchor], **limits).get(anchor) for label in proxy_labels} if anchor else {}
     blocks: list[dict] = []
     for name, buckets, proxy_label in scorecard_blocks:
         slices = [s for s in allocation if s.get("bucket") in buckets]
@@ -928,7 +931,9 @@ def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, f
         return (sum(b["weight_pct"] * float(b[key]) for b in usable) / covered
                 if covered >= 99.5 else None)
     benchmark_ytd = composite("benchmark_return_pct")
-    return {"block_returns": blocks, "benchmark_ytd_pct": benchmark_ytd}
+    dates = [b['benchmark_end_date'] for b in blocks if b['weight_pct'] > 0 and b.get('benchmark_end_date')]
+    return {"block_returns": blocks, "benchmark_ytd_pct": benchmark_ytd,
+            "benchmark_as_of": min(dates) if dates and benchmark_ytd is not None else None}
 
 
 def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
@@ -2599,10 +2604,11 @@ def _portfolio_overview(portfolio_id: int, p: dict, benchmark: str, weight_by: s
     composition_ms = round((time.perf_counter() - started) * 1000)
     score = _returns(portfolio_id, p.get('positions_datum'), benchmark, 'book')
     block = _scorecard_block_returns(allocation, {}, score.get('ytd_from'),
-                                    portfolio_variant(p.get('name'), p.get('omschrijving')))
+                                    portfolio_variant(p.get('name'), p.get('omschrijving')), score.get('portfolio_as_of'))
     score['block_returns'] = block['block_returns']
     if block['benchmark_ytd_pct'] is not None:
         score['benchmark_ytd_pct'] = block['benchmark_ytd_pct']
+        score['benchmark_as_of'] = block.get('benchmark_as_of')
     own, bench = score.get('portfolio_ytd_pct'), score.get('benchmark_ytd_pct')
     score['ytd_excess_pct'] = own - bench if own is not None and bench is not None else None
     return {
@@ -3113,6 +3119,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     block_score = _scorecard_block_returns(
         allocation, bucket_returns, score_returns.get("ytd_from"),
         portfolio_variant(p.get("name"), p.get("omschrijving")),
+        score_returns.get("portfolio_as_of"),
     )
     # The book return is AIRS's own flow-aware `cumulatief_rendement`; it is the exact same
     # quantity drawn by the YTD chart. Never replace it with a weighted holding reconstruction:
@@ -3121,6 +3128,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     score_returns["block_returns"] = block_score["block_returns"]
     if block_score["benchmark_ytd_pct"] is not None:
         score_returns["benchmark_ytd_pct"] = block_score["benchmark_ytd_pct"]
+        score_returns["benchmark_as_of"] = block_score.get("benchmark_as_of")
     portfolio_ytd = score_returns.get("portfolio_ytd_pct")
     benchmark_ytd = score_returns.get("benchmark_ytd_pct")
     score_returns["ytd_excess_pct"] = (

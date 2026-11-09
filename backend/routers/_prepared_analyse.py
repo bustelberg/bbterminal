@@ -75,7 +75,7 @@ def holdings_key(portfolio_id: int, benchmark: str, look_through: bool) -> str:
     return f'holdings:{portfolio_id}:{benchmark.upper()}:{int(look_through)}'
 
 
-def read(scope: str, key: str) -> tuple[int | None, dict | None]:
+def read(scope: str, key: str, *, include_metadata: bool = False) -> tuple[int | None, dict | None]:
     version = source_version(scope)
     if version is None:
         return None, None
@@ -87,7 +87,7 @@ def read(scope: str, key: str) -> tuple[int | None, dict | None]:
                 .limit(1).execute().data or [])
         if (rows and isinstance(rows[0].get('payload'), dict)
                 and source_version(scope) == version and code_version() == code):
-            return version, deepcopy(rows[0]['payload'])
+            return version, deepcopy(rows[0] if include_metadata else rows[0]['payload'])
     except Exception as exc:
         _unavailable(exc)
     return version, None
@@ -106,16 +106,16 @@ def save(scope: str, key: str, payload: dict, version: int, code: str) -> bool:
 
 
 def read_overview(key: str) -> dict | None:
-    """Serve the last published bundle while a newer revision is prepared."""
-    rows = (supabase.table('analyse_prepared_snapshot').select('payload,prepared_at')
-            .eq('cache_key', key).eq('scope', 'holdings')
-            .limit(1).execute().data or [])
-    if (not rows or not isinstance(payload := rows[0].get('payload'), dict)
+    """Only publish an overview built from the current source/code revision."""
+    _, stored = read('holdings', key, include_metadata=True)
+    if stored is None:
+        return None
+    if (not isinstance(payload := stored.get('payload'), dict)
             or not isinstance(payload.get('return_series'), dict)
             or not isinstance(payload.get('book_holdings'), list)
             or payload.get('details_pending') is not False):
         return None
-    return {**payload, 'overview_prepared_at': rows[0]['prepared_at']}
+    return {**payload, 'overview_prepared_at': stored['prepared_at']}
 
 
 def overview_freshness(keys: list[str]) -> dict[str, str]:

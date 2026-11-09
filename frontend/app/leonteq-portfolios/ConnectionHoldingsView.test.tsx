@@ -7,13 +7,18 @@ import type { HoldingRule } from './matchHoldings';
 import { apiFetch } from '../../lib/apiFetch';
 
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+vi.mock('./refreshProgress', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./refreshProgress')>(),
+  refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
+}));
 vi.mock('../../lib/i18n', () => ({ useLang: () => ['en'] }));
 
 it('disconnects a match into leftovers, reconnects it and keeps the saved rules on reopen', async () => {
   const link = { leonteq_name: 'AI', airs_portfolio_id: 1, airs_name: 'Fixed model' };
   const cache: ConnectionHoldingsCache = new Map([
     ['leonteq:AI', { rows: [{ isin: 'US0378331005', name: 'APPLE INC', weight: '4.9%' }] }],
-    ['airs:1', { rows: [{ isin: 'US0378331005', name: 'Apple', weight: '4.95%' }] }],
+    ['airs:1', { rows: [{ isin: 'US0378331005', name: 'OLD INTEREST ROW', weight: '0.10%' }] }],
+    ['airs:security-v2:1', { rows: [{ isin: 'US0378331005', name: 'Apple', weight: '4.95%' }] }],
   ]);
   const rulesCache = new Map<string, HoldingRule[]>([[JSON.stringify(['AI', 1]), []]]);
   vi.mocked(apiFetch).mockResolvedValueOnce({ ok: true, json: async () => ({ rules: [{ leonteq_key: 'isin:US0378331005', airs_key: null }] }) } as Response)
@@ -24,6 +29,7 @@ it('disconnects a match into leftovers, reconnects it and keeps the saved rules 
   const view = <ConnectionHoldingsView link={link} cache={cache} rulesCache={rulesCache} onBack={() => {}} />;
   try {
     await act(async () => root.render(view));
+    expect(host.textContent).not.toContain('OLD INTEREST ROW');
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Disconnect holdings for APPLE INC"]')!.click());
     expect(host.querySelector('section[aria-labelledby=matched-holdings-heading]')?.textContent).toContain('No connected holdings');
     expect(host.querySelector('section[aria-label="Leonteq · Unmatched holdings"]')?.textContent).toContain('APPLE INC');

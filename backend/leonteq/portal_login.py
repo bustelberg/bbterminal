@@ -129,12 +129,7 @@ def _read_portfolios(page) -> dict:
     try:
         rows = page.locator('table tbody tr.indices-table__row')
         rows.first.wait_for(state='visible', timeout=25000)
-        # The mini charts render after the table. Their absence must not hide
-        # otherwise valid portfolio figures.
-        try:
-            page.locator('table .highcharts-graph').first.wait_for(state='attached', timeout=5000)
-        except TimeoutError:
-            pass
+        # Optional mini charts must not add a five-second wait to a ready portfolio table.
         portfolios = rows.evaluate_all(_READ_INDICES)
         if not portfolios or any(not row.get('name') for row in portfolios):
             return {'success': False, 'status': 'portfolios_failed'}
@@ -152,54 +147,88 @@ def _authenticated(context, page) -> bool:
 
 
 def _attempt_login(user: str, password: str, portfolio_name: str | None = None, performance: bool = False) -> dict:
-    from playwright.sync_api import Error, TimeoutError, sync_playwright
+    from leonteq.session import on_session_thread
+    from leonteq.progress import report
+    started = time.perf_counter()
+    result = on_session_thread(_read_in_session, user, password, portfolio_name, performance)
+    elapsed = time.perf_counter() - started
+    report(f'Leonteq source read finished in {elapsed:.1f}s.', f'Leonteq-bron gelezen in {elapsed:.1f}s.')
+    return {**result, 'duration_ms': round(elapsed * 1000)}
+
+
+def _read_in_session(user: str, password: str, portfolio_name: str | None, performance: bool) -> dict:
+    from playwright.sync_api import Error, TimeoutError
+    from leonteq.progress import report
+    from leonteq.session import session
 
     stage = 'browser_start'
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+        context, page, reused = session.get(user, password)
+        report('Reusing the active Leonteq connection…' if reused else 'Opening Leonteq LYNQS…',
+               'Actieve Leonteq-verbinding hergebruiken…' if reused else 'Leonteq LYNQS openen…')
+        if reused and _authenticated(context, page):
+            from leonteq.portal_api import read
             try:
-                context = browser.new_context()
-                page = context.new_page()
-                page.set_default_timeout(15000)
-                stage = 'login_navigation'
-                page.goto(INDICES_URL, wait_until='domcontentloaded', timeout=30000)
-                stage = 'login_form'
-                page.locator('input#username, input[name=username]').first.fill(user)
-                page.locator('input#password, input[name=password]').first.fill(password)
-                page.locator('#kc-login, button[type=submit], input[type=submit]').first.click()
-                deadline = time.monotonic() + 25
-                stage = 'authentication'
-                while time.monotonic() < deadline:
-                    if _authenticated(context, page):
-                        # Login normally returns directly to Indices. Avoid reloading
-                        # the entire SPA when it is already on the requested route.
-                        if not page.url.endswith('#/amc/indices'):
-                            stage = 'indices_navigation'
-                            page.goto(INDICES_URL, wait_until='domcontentloaded', timeout=30000)
-                        if _authenticated(context, page):
-                            if portfolio_name is not None:
-                                if performance:
-                                    stage = 'performance_details'
-                                    from leonteq.monthly_performance import read_details
-                                    return read_details(page, portfolio_name)
-                                return _read_composition(page, portfolio_name)
-                            return _read_portfolios(page)
-                        return {'success': False, 'status': 'session_failed'}
-                    if page.locator('#input-error, #kc-feedback-text, .alert-error').first.is_visible():
-                        return {'success': False, 'status': 'login_rejected'}
-                    if page.locator('input#otp, input[name=otp], input[autocomplete=one-time-code]').first.is_visible():
-                        return {'success': False, 'status': 'verification_required'}
-                    page.wait_for_timeout(300)
+                report('Retrieving fresh data directly from Leonteq…', 'Actuele gegevens rechtstreeks ophalen uit Leonteq…')
+                return read(page, session.portfolio_ids, portfolio_name, performance)
+            except (ValueError, KeyError, TypeError, Error):
+                # Schema/auth changes keep the existing verified portal/export reader available.
+                report('Direct source unavailable; reading the portal…', 'Rechtstreekse bron niet beschikbaar; portaal lezen…')
+        stage = 'login_navigation'
+        # Reload the source page on every explicit request. The session is reused, never its data.
+        page.goto(INDICES_URL, wait_until='domcontentloaded', timeout=30000)
+        if reused:
+            # Fragment-only navigation can leave the old Angular component and its data intact.
+            page.reload(wait_until='domcontentloaded', timeout=30000)
+        if not _authenticated(context, page):
+            stage = 'login_form'
+            report('Signing in to Leonteq…', 'Aanmelden bij Leonteq…')
+            page.locator('input#username, input[name=username]').first.fill(user)
+            page.locator('input#password, input[name=password]').first.fill(password)
+            page.locator('#kc-login, button[type=submit], input[type=submit]').first.click()
+            deadline = time.monotonic() + 25
+            stage = 'authentication'
+            while time.monotonic() < deadline:
+                if _authenticated(context, page):
+                    break
+                if page.locator('#input-error, #kc-feedback-text, .alert-error').first.is_visible():
+                    session.close()
+                    return {'success': False, 'status': 'login_rejected'}
+                if page.locator('input#otp, input[name=otp], input[autocomplete=one-time-code]').first.is_visible():
+                    session.close()
+                    return {'success': False, 'status': 'verification_required'}
+                page.wait_for_timeout(300)
+            else:
+                session.close()
                 return {'success': False, 'status': 'timeout'}
-            finally:
-                try:
-                    browser.close()
-                except Error:
-                    pass  # Cleanup must not overwrite a successful read.
+        if not page.url.endswith('#/amc/indices'):
+            stage = 'indices_navigation'
+            page.goto(INDICES_URL, wait_until='domcontentloaded', timeout=30000)
+        if not _authenticated(context, page):
+            session.close()
+            return {'success': False, 'status': 'session_failed'}
+        if not reused:
+            from leonteq.portal_api import read
+            try:
+                report('Retrieving fresh data directly from Leonteq…', 'Actuele gegevens rechtstreeks ophalen uit Leonteq…')
+                return read(page, session.portfolio_ids, portfolio_name, performance)
+            except (ValueError, KeyError, TypeError, Error):
+                report('Direct source unavailable; reading the portal…', 'Rechtstreekse bron niet beschikbaar; portaal lezen…')
+        if portfolio_name is None:
+            report('Reading the latest portfolio list…', 'Nieuwste portefeuillelijst lezen…')
+            return _read_portfolios(page)
+        if performance:
+            stage = 'performance_details'
+            report(f'Reading monthly returns for {portfolio_name}…', f'Maandrendementen lezen voor {portfolio_name}…')
+            from leonteq.monthly_performance import read_details
+            return read_details(page, portfolio_name)
+        report(f'Reading holdings and weights for {portfolio_name}…', f'Posities en gewichten lezen voor {portfolio_name}…')
+        return _read_composition(page, portfolio_name)
     except TimeoutError as exc:
+        session.close()
         return {'success': False, 'status': 'timeout', 'diagnostics': browser_diagnostic(exc, stage)}
     except Error as exc:
+        session.close()
         return {'success': False, 'status': 'browser_error', 'diagnostics': browser_diagnostic(exc, stage)}
 
 

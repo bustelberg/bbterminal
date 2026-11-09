@@ -14,6 +14,7 @@ export function rebalancePlan(left: Holding[], right: Holding[], rules: HoldingR
   const actions: RebalanceAction[] = [];
   if (matches.leonteqOnly.length || matches.airsOnly.length) issues.push('Unmatched holdings: connect all rows in Connections first.');
   for (const pair of matches.matched) {
+    if (pair.cash) continue; // Aggregate cash is a comparison, not a tradeable instrument.
     if (pair.leonteq.length !== 1 || pair.airs.length !== 1) { issues.push(`Ambiguous match: ${pair.isin}`); continue; }
     const current = weight(pair.airs[0].weight), target = weight(pair.leonteq[0].weight);
     if (current === null || target === null) { issues.push(`Invalid weight: ${pair.isin}`); continue; }

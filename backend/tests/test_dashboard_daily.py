@@ -10,6 +10,21 @@ import scheduler as S
 from tests._fake_supabase import FakeSupabase
 
 
+def test_schedule_reports_nested_market_stages_under_the_airs_clock(monkeypatch):
+    from datetime import datetime, timezone
+    from scheduled_jobs import BY_ID
+
+    clock = datetime(2026, 11, 9, 10, tzinfo=timezone.utc)
+    monkeypatch.setattr(S, '_scheduler', SimpleNamespace(get_jobs=lambda: [
+        SimpleNamespace(id='airs_vermogen_refresh', args=(), next_run_time=clock)]))
+    # Child-first declarations must still inherit the one real timer.
+    monkeypatch.setattr(S, 'BY_ID', {key: BY_ID[key] for key in (
+        'benchmark_price_slice', 'dashboard_market', 'airs_vermogen_refresh')})
+    rows = {row['id']: row for row in S.list_scheduled_jobs()}
+    assert rows['benchmark_price_slice']['next_run_at'] == clock.isoformat()
+    assert rows['dashboard_market']['next_run_at'] == clock.isoformat()
+
+
 def test_price_checks_wait_for_yahoo_queue(monkeypatch):
     from asset_pipeline import price_refresh, queue
     from routers import _airs_price_check
@@ -304,22 +319,33 @@ def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, n
     assert "Analyse: no bundle published (look-through=True)" in issues
 
 
-def test_daily_parent_retains_both_failed_child_receipts(monkeypatch):
+@pytest.mark.parametrize('market_failed', [False, True])
+def test_daily_parent_retains_failed_child_receipts_in_airs_market_pricing_order(monkeypatch, market_failed):
+    calls = []
     monkeypatch.setattr('management_portfolios.dashboard_model_rows', lambda rows: rows)
     import airs_vermogen
     import airs_scanner
     from routers import _airs_portfolio_store as store
-    monkeypatch.setattr(airs_vermogen, "run_airs_vermogen_refresh_sync", lambda **kw: {"status": "ok", "complete_accounts": 1})
+    def accounts(**kw):
+        calls.append('accounts')
+        return {"status": "ok", "complete_accounts": 1}
+    monkeypatch.setattr(airs_vermogen, "run_airs_vermogen_refresh_sync", accounts)
     monkeypatch.setattr(airs_vermogen, "_acquire_session", lambda *_: True)
     monkeypatch.setattr(airs_vermogen, "_LOCK", SimpleNamespace(release=lambda: None))
     monkeypatch.setattr(airs_scanner, "fetch_model_portfolios_sync", lambda *_: [{"id": 1}])
-    monkeypatch.setattr(airs_scanner, "count_model_portfolio_holdings_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(airs_scanner, "count_model_portfolio_holdings_sync", lambda *a, **kw: calls.append('compositions'))
     monkeypatch.setattr(store, "save_portfolios", lambda *_: None)
     pricing = {"results": [{"portefeuille": "BOOK", "error": "missing FX"}]}
     post = {"errors": {"BOOK": {"opening": "missing valuation"}}}
     def price(*a):
+        calls.append('pricing')
         raise D.IncompleteRefresh("pricing incomplete", pricing)
     def prepare(*a):
+        calls.append(a[0])
+        if a[0] == 'dashboard_market':
+            if market_failed:
+                raise D.IncompleteRefresh('market incomplete', {'errors': {'benchmark_price_slice': 'Yahoo unavailable'}})
+            return 'market complete'
         raise D.IncompleteRefresh("post incomplete", post)
     monkeypatch.setattr(S, "_body_airs_model_prices", price)
     monkeypatch.setattr(S, "_run_body", prepare)
@@ -327,7 +353,10 @@ def test_daily_parent_retains_both_failed_child_receipts(monkeypatch):
         S._body_airs_vermogen()
     assert caught.value.summary["pricing"] == pricing
     assert caught.value.summary["post_airs"] == post
-    assert len(caught.value.summary["errors"]) == 2
+    assert len(caught.value.summary["errors"]) == 2 + market_failed
+    assert calls == ['accounts', 'compositions', 'dashboard_market', 'pricing', 'dashboard_post_airs']
+    if market_failed:
+        assert caught.value.summary['market']['errors'] == {'benchmark_price_slice': 'Yahoo unavailable'}
 
 
 def test_freshness_reads_actual_dates_and_reports_unmapped_coverage(monkeypatch):

@@ -394,7 +394,7 @@ def repair_index_proxy_history() -> int:
     return refresh_index_proxies(force=True, bypass_daily_guard=True, full_history=True)
 
 
-def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
+def etf_returns(label: str, starts: list[str], *, end: str | None = None) -> dict[str, dict]:
     """`{start: {eur_pct, local_pct, as_of, start_date, ticker, currency}}` for the windows this
     ETF can price. A window that opens before the fund existed is ABSENT, not null — the caller
     falls back to the reconstruction for it rather than printing a dash.
@@ -411,6 +411,11 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
     if not fresh or not starts:
         return {}
     bid, (end_d, end_p) = fresh
+    if end:
+        closing = _at_or_before(bid, end)
+        if not closing:
+            return {}
+        end_d, end_p = closing
     ticker, ccy = PROXY[label], _CURRENCY.get(PROXY[label], "USD")
     fetched_at = _proxy_fetched_at(bid)
 

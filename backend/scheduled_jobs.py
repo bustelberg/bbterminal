@@ -102,10 +102,10 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     JobSpec(
         id="dashboard_market", label="Dashboard daily market data",
         fills="held prices · benchmark trackers · FX · constituent prices/caps · momentum",
-        cadence="Every day, 06:00 Amsterdam",
-        trigger={"hour": 6, "minute": 0, "timezone": "Europe/Amsterdam"},
+        cadence="After the 11:00 Amsterdam AIRS scan, before model pricing and preparation",
+        after_job="airs_vermogen_refresh",
         options={"coalesce": True, "misfire_grace_time": 3600}, max_age_hours=30,
-        note="Sequential market-data stages followed by the daily due-fundamentals check. Each stage records its own result.",
+        note="Runs inside the AIRS daily sequence after accounts and compositions, before model pricing and Analyse. Each market-data stage records its own result.",
     ),
     JobSpec(
         id="daily_pipeline",
@@ -276,7 +276,7 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         options={"coalesce": True, "misfire_grace_time": 3600},
         max_age_hours=30,
         note="Full AIRS re-scan every day at 11:00 Amsterdam: every account, all model compositions, and "
-             "paired-model prices, then saved price checks; APScheduler "
+             "then shared market data and benchmarks, paired-model prices, and saved price checks; APScheduler "
              "handles DST.",
     ),
     JobSpec(

@@ -24,16 +24,38 @@ def test_current_snapshot_round_trips_without_sharing_mutable_rows(store):
     assert P.read('holdings', 'test')[1]['rows'][0]['weight'] == 2
 
 
-def test_overview_stays_available_when_sources_change(store, monkeypatch):
+def test_overview_rejects_outdated_sources_and_code(store, monkeypatch):
     key = P.holdings_key(1934, 'ACWI', False)
     assert P.read_overview(key) is None
     P.save('holdings', key, {'return_series': {'returns': []}, 'book_holdings': [],
                             'details_pending': False}, 10, 'code-v1')
+    assert P.read_overview(key)['overview_prepared_at']
     store.table('analyse_source_revision').update({'version': 11}).eq('scope', 'holdings').execute()
     assert P.read('holdings', key)[1] is None
-    assert P.read_overview(key)['overview_prepared_at']
+    assert P.read_overview(key) is None
     monkeypatch.setattr(P, 'code_version', lambda: 'code-v2')
-    assert P.read_overview(key)['overview_prepared_at']
+    assert P.read_overview(key) is None
+
+
+def test_overview_route_rebuilds_missing_snapshot_through_shared_analysis(store, monkeypatch):
+    from routers import airs, _airs_portfolio_analysis as analysis, _airs_value_series as series
+    calls = []
+    async def compute(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {'portfolio_id': 1, 'book_holdings': [{'name': 'Stock'}], 'returns': {'portfolio_ytd_pct': 9}}
+    async def in_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(airs.asyncio, 'to_thread', in_thread)
+    monkeypatch.setattr(analysis, 'compute_portfolio_analysis_async', compute)
+    monkeypatch.setattr(series, 'with_return_series', lambda payload, benchmark: {**payload, 'return_series': {'returns': []}})
+    result = asyncio.run(airs.airs_model_portfolio_overview_bundle(1))
+    assert result['book_holdings'] == [{'name': 'Stock'}]
+    assert result['returns']['portfolio_ytd_pct'] == 9
+    assert result['details_pending'] is False
+    assert len(calls) == 1
+    assert P.read_overview(P.holdings_key(1, 'ACWI', False)) is not None
+    asyncio.run(airs.airs_model_portfolio_overview_bundle(1))
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('field,value', [('source_version', 9), ('code_version', 'old'),

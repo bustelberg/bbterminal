@@ -1,5 +1,51 @@
 # AIRS model portfolios (/management-dashboard)
 
+Insights → Prices checks every saved Leonteq → AIRS Dynamic connection with one
+button. It refreshes both source compositions, reads each mapped Yahoo symbol once
+per batch, and flags `abs(source_price / yahoo_close - 1) * 100 > 5`. Exact 5%
+differences are not alerts. Yahoo requests use the existing shared governor and a
+bounded pool; source sessions remain serialized independently.
+
+Checks use completed, unadjusted daily closes from recent history on the source
+valuation date. Quote subunits (such as GBp) are normalized. Missing mappings,
+prices, dates, incompatible currencies, stale reference dates and source failures
+remain explicit, uncheckable results. Cash is excluded. No FX rate or listing is
+guessed. Alerts and incomplete coverage remain visible in Prices, and the shared
+background popup reports progress and the final counts. An alert is a successful
+check; unavailable coverage produces an incomplete job with its partial results
+still readable. The job uses the existing `prices` refresh operation and protected
+result route; no extra database table is required.
+
+The Portfolios page uses the shared bottom-right job popups for explicit source
+refreshes in Portfolios, Connections and Insights. Leonteq lists/compositions,
+AIRS compositions and monthly-return comparisons run as background jobs with
+real source-stage progress. Quick connection-option reloads use the same popup
+stack locally. Saved tables remain visible during refresh; a source fallback
+keeps its saved data but produces a failed/incomplete job receipt. Popup Details
+retains the recent progress messages.
+
+`POST /api/leonteq/refresh/job` starts a validated source operation; the existing
+job transport handles watching, reattachment and cancellation. The admin-only
+`GET /api/leonteq/refresh/jobs/{job_id}/result` retrieves its data for 15 minutes.
+Portfolio payloads are never emitted on the globally readable job progress stream.
+
+LYNQS reads share one authenticated, in-memory browser on a dedicated owner thread.
+Warm refreshes call the page's verified authenticated AMC API directly, with
+cache revalidation, rather than navigating the SPA or reusing displayed data.
+Only portfolio identifiers and the browser session are reused. API schemas and
+composition totals are validated; the portal/CSV reader remains the fallback and
+explicitly reloads its page to avoid stale fragment-only navigation.
+Credentials changing, browser loss, or a 15-minute session age
+recreates it on the next request. Login/browser failures discard it. Optional
+mini-charts do not delay a ready portfolio list. Popup progress records the actual
+Leonteq source-read duration.
+
+Dynamic connection inspection fetches only the AIRS holdings report using the
+existing valued-date fallback and snapshot writer. It does not run the unrelated
+performance, mutations, transactions or model-weight reports. Monthly comparisons
+fetch AIRS and Leonteq concurrently through their independently serialized sessions,
+and validate just the selected connection rather than reloading both catalogues.
+
 Analyse silently preloads Performance's lightweight `monthly-report?month=…&include_details=false`
 response after the overview and Holdings paint. Its month tiles and Risk then prepare independently; no positions
 or full monthly reports are prefetched. Opening Performance reuses the completed or in-flight
@@ -515,6 +561,19 @@ or independent cron job. The weekday cutoff does not infer a market holiday cale
 missing final valuations remain explicitly pending.
 
 ## Diagnosing missing AIRS valuations
+
+Insights → Prices resolves missing or currency-mismatched Yahoo listings using ISIN identity
+from OpenFIGI, Yahoo search and chart metadata. Candidates must belong to the FIGI listing
+set, match the issuer and source currency, and have valid prices. Confirmed mappings persist
+in `leonteq_price_symbol`, keyed by ISIN and normalized currency; this does not change the
+general analysis/execution listing. Apply `20261109160000_leonteq_price_symbols.sql` before
+deploying. RLS restricts access to the backend service role.
+
+Each row has Recheck: it reads that source's fresh holdings for the saved Dynamic connection,
+matches the selected instrument, retries symbol resolution and updates that row. Client prices
+are never accepted. Effectenrekening is always cash, including when it carries an identifier.
+Ambiguous identities, missing prices, different currencies and different valuation dates remain
+uncheckable. A matching listing on another exchange can still have a different closing price.
 
 In `airs_vermogen._vermogen_most_recent`, a failed valuation lookup initially applies only to the account that made it. A shared miss can skip a date only after the quorum is met and the date is newer than the latest proven valuation. The memo expires on the read path so single-account refreshes can see valuations published after a fleet scan. The saved `reports_ok` badge clears when a refresh successfully retrieves the report. See [diagnose_missing_reports.py](../backend/scripts/diagnose_missing_reports.py) and the valuation-discovery tests in `test_airs_html_fragment.py`.
 

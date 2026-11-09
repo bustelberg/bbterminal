@@ -8,6 +8,7 @@ import type { CompositionResult } from './CompositionTable';
 import type { AirsComposition } from './AirsCompositionView';
 import { holdingKey, matchHoldings, soldRuleKey, type Holding, type HoldingRule } from './matchHoldings';
 import SearchablePortfolioPicker from './SearchablePortfolioPicker';
+import { refreshRequest } from './refreshProgress';
 
 export type PortfolioConnection = { leonteq_name: string; airs_portfolio_id: number; airs_name: string | null };
 type Side = 'leonteq' | 'airs';
@@ -16,6 +17,11 @@ type Snapshot = {
   datum?: string | null; timestamp?: string; cached?: boolean; warning?: boolean; noFixed?: boolean;
 };
 const sides: Side[] = ['leonteq', 'airs'];
+const formatWeight = (value: string | null | undefined) => {
+  if (value == null || !value.trim()) return '—';
+  const number = Number(value.trim().replace(/%$/, '').trim().replace(',', '.'));
+  return Number.isFinite(number) ? `${number.toFixed(2)}%` : '—';
+};
 const formatDate = (value: string, withTime = false) => {
   const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
   const parts = new Intl.DateTimeFormat('nl-NL', {
@@ -25,13 +31,19 @@ const formatDate = (value: string, withTime = false) => {
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
   return `${part('day')} ${part('month').replace(/\.$/, '')} ${part('year')}${withTime ? ` ${part('hour')}:${part('minute')}` : ''}`;
 };
-const keyFor = (link: PortfolioConnection, side: Side) => side === 'leonteq' ? `leonteq:${link.leonteq_name}` : `airs:${link.airs_portfolio_id}`;
+// Old AIRS snapshots include accrued-interest lines. Never reuse those after this upgrade.
+export const connectionSnapshotKey = (link: PortfolioConnection, side: Side) => side === 'leonteq'
+  ? `leonteq:${link.leonteq_name}` : `airs:security-v2:${link.airs_portfolio_id}`;
+const keyFor = connectionSnapshotKey;
 
-async function read(link: PortfolioConnection, side: Side, refresh: boolean): Promise<Snapshot> {
+export async function readConnectionHoldings(link: PortfolioConnection, side: Side, refresh: boolean, nl = false, savedOnly = false): Promise<Snapshot> {
+  const fetcher = refresh ? (url: string, init: Parameters<typeof apiFetch>[1]) => refreshRequest(url, init,
+    `${side === 'leonteq' ? 'Leonteq' : 'AIRS'} · ${side === 'leonteq' ? link.leonteq_name : link.airs_name ?? link.airs_portfolio_id}`,
+    side === 'leonteq' ? link.leonteq_name : link.airs_name ?? undefined, nl) : apiFetch;
   if (side === 'leonteq') {
-    const response = await apiFetch(`${API_URL}/api/leonteq/portfolios/composition`, {
+    const response = await fetcher(`${API_URL}/api/leonteq/portfolios/composition`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: link.leonteq_name, refresh }),
+      body: JSON.stringify({ name: link.leonteq_name, refresh, ...(savedOnly ? { saved_only: true } : {}) }),
     });
     if (!response.ok) throw new Error('failed');
     const data = await response.json() as CompositionResult;
@@ -40,7 +52,7 @@ async function read(link: PortfolioConnection, side: Side, refresh: boolean): Pr
       isin: position.isin, name: position.name, weight: position.weight,
     }))), timestamp: data.retrieved_at, cached: data.cached, warning: Boolean(data.refresh_error) };
   }
-  const response = await apiFetch(`${API_URL}/api/leonteq/airs/model-portfolios/${link.airs_portfolio_id}/composition${refresh ? '?refresh=true' : ''}`, { cache: 'no-store', noReadCache: true });
+  const response = await fetcher(`${API_URL}/api/leonteq/airs/model-portfolios/${link.airs_portfolio_id}/composition${refresh ? '?refresh=true' : savedOnly ? '?saved_only=true' : ''}`, { cache: 'no-store', noReadCache: true });
   if (!response.ok) throw new Error('failed');
   const data = await response.json() as AirsComposition;
   return { rows: data.rows.map((position) => ({ isin: position.ISINCode, name: position.Fonds,
@@ -48,6 +60,8 @@ async function read(link: PortfolioConnection, side: Side, refresh: boolean): Pr
   })), datum: data.datum, timestamp: data.cached_at ?? data.retrieved_at,
     cached: Boolean(data.cached_at), noFixed: data.no_fixed_model };
 }
+
+const read = readConnectionHoldings;
 
 export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack }: {
   link: PortfolioConnection; cache: Map<string, Snapshot>; rulesCache: Map<string, HoldingRule[]>; onBack: () => void;
@@ -129,7 +143,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
       .catch(() => { if (alive.current) setRulesError(true); })
       .finally(() => { if (alive.current) setRulesLoading(false); });
     for (const side of sides) {
-      void read(link, side, true).then((result) => {
+      void read(link, side, true, nl).then((result) => {
         if (alive.current && request === version.current) {
           cache.set(keyFor(link, side), result);
           setData((current) => ({ ...current, [side]: result }));
@@ -156,7 +170,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
       <table className="w-full text-sm"><caption className="sr-only">{side === 'leonteq' ? 'Leonteq' : 'AIRS'} · {nl ? 'Niet gekoppelde posities' : 'Unmatched holdings'}</caption>
         <thead className="bg-elevated text-xs text-fg-muted"><tr>{headers.map((label, column) => <th key={label} scope="col" className={`px-3 py-3 font-medium ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right' : 'text-left'}`}>{label}</th>)}</tr></thead>
         <tbody className="divide-y divide-neutral-800/30">{rows.map((row, index) => <tr key={`${row.isin ?? row.name}-${index}`}>
-          {(side === 'leonteq' ? [row.isin, row.name, row.weight] : [row.name, row.weight, row.isin]).map((value, column) => <td key={column} className={`px-3 py-3 ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right tabular-nums' : ''}`}>{value ?? '—'}</td>)}
+          {(side === 'leonteq' ? [row.isin, row.name, formatWeight(row.weight)] : [row.name, formatWeight(row.weight), row.isin]).map((value, column) => <td key={column} className={`px-3 py-3 ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right tabular-nums' : ''}`}>{value ?? '—'}</td>)}
           {side === 'airs' && <td className="px-3 py-3">{holdingKey(row).startsWith('isin:') && !data.leonteq?.rows.some((source) => holdingKey(source) === holdingKey(row)) && <button type="button" disabled={controlsBusy} onClick={() => void saveRule(soldRuleKey(holdingKey(row)), holdingKey(row))} className="whitespace-nowrap text-accent-300 hover:underline disabled:opacity-50" aria-label={`Mark ${row.name} sold in Leonteq`}>{nl ? 'Verkocht in Leonteq' : 'Sold in Leonteq'}</button>}</td>}
         </tr>)}
           {!rows.length && <tr><td colSpan={headers.length} className="px-3 py-6 text-center text-fg-muted">{nl ? 'Geen overgebleven posities.' : 'No unmatched holdings.'}</td></tr>}
@@ -192,7 +206,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
               <table className="w-full text-sm"><caption className="sr-only">{side === 'leonteq' ? 'Leonteq' : 'AIRS'} · {name}</caption>
                 <thead className="bg-elevated text-xs text-fg-muted"><tr>{headers.map((label, column) => <th key={label} scope="col" className={`px-3 py-3 font-medium ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right' : 'text-left'}`}>{label}</th>)}</tr></thead>
                 <tbody className="divide-y divide-neutral-800/30">{snapshot.rows.map((row, index) => <tr key={`${row.isin ?? row.name}-${index}`} className="hover:bg-elevated/40">
-                  {(side === 'leonteq' ? [row.isin, row.name, row.weight] : [row.name, row.weight, row.isin]).map((value, column) => <td key={column} className={`px-3 py-3 ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right tabular-nums' : column === (side === 'leonteq' ? 0 : 2) ? 'whitespace-nowrap' : ''}`}>{value ?? '—'}</td>)}
+                  {(side === 'leonteq' ? [row.isin, row.name, formatWeight(row.weight)] : [row.name, formatWeight(row.weight), row.isin]).map((value, column) => <td key={column} className={`px-3 py-3 ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right tabular-nums' : column === (side === 'leonteq' ? 0 : 2) ? 'whitespace-nowrap' : ''}`}>{value ?? '—'}</td>)}
                 </tr>)}
                   {!snapshot.rows.length && <tr><td colSpan={3} className="px-3 py-8 text-center text-fg-muted">{nl ? 'Geen posities beschikbaar.' : 'No holdings available.'}</td></tr>}
                 </tbody>
@@ -213,14 +227,14 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
             </thead>
             <tbody>{comparison.matched.map((match) => <Fragment key={match.leonteqKey}>
               {Array.from({ length: Math.max(match.leonteq.length, match.airs.length) }, (_, index) => <tr key={index} className={`${index === 0 ? 'border-t border-neutral-800/30' : ''} hover:bg-elevated/40`}>
-                {index === 0 && <th scope="rowgroup" rowSpan={Math.max(match.leonteq.length, match.airs.length)} className="px-3 py-3 text-left align-top font-medium"><div>{match.isin}</div><div className="mt-1 text-xs font-normal text-fg-muted">{match.manual ? (nl ? 'Handmatig gekoppeld' : 'Manually connected') : 'ISIN'}</div></th>}
+                {index === 0 && <th scope="rowgroup" rowSpan={Math.max(match.leonteq.length, match.airs.length)} className="px-3 py-3 text-left align-top font-medium"><div>{match.isin}</div><div className="mt-1 text-xs font-normal text-fg-muted">{match.cash ? (nl ? 'Automatisch opgeteld' : 'Automatically combined') : match.manual ? (nl ? 'Handmatig gekoppeld' : 'Manually connected') : match.company ? (nl ? 'Bedrijfsnaam · verschillende ISINs' : 'Company name · different ISINs') : 'ISIN'}</div></th>}
                 <td className="border-l border-neutral-800/30 px-3 py-3">{match.leonteq[index]?.name ?? '—'}</td>
-                <td className="px-3 py-3 text-right tabular-nums">{match.leonteq[index]?.weight ?? '—'}</td>
+                <td className="px-3 py-3 text-right tabular-nums">{formatWeight(match.leonteq[index]?.weight)}</td>
                 <td className="border-l border-neutral-800/30 px-3 py-3">{match.airs[index]?.name ?? '—'}</td>
-                <td className="px-3 py-3 text-right tabular-nums">{match.airs[index]?.weight ?? '—'}</td>
-                {index === 0 && <td rowSpan={Math.max(match.leonteq.length, match.airs.length)} className="px-3 py-3 text-center align-middle"><button type="button" disabled={controlsBusy}
+                <td className="px-3 py-3 text-right tabular-nums">{formatWeight(match.airs[index]?.weight)}</td>
+                {index === 0 && <td rowSpan={Math.max(match.leonteq.length, match.airs.length)} className="px-3 py-3 text-center align-middle">{match.cash ? (nl ? 'Automatisch' : 'Automatic') : <button type="button" disabled={controlsBusy}
                   aria-label={`${nl ? 'Posities ontkoppelen voor' : 'Disconnect holdings for'} ${match.leonteq[0].name ?? match.isin}`}
-                  onClick={() => void saveRule(match.leonteqKey, null)} className="text-fg-muted hover:text-neg-300 disabled:opacity-50">{nl ? 'Ontkoppelen' : 'Disconnect'}</button></td>}
+                  onClick={() => void saveRule(match.leonteqKey, null)} className="text-fg-muted hover:text-neg-300 disabled:opacity-50">{nl ? 'Ontkoppelen' : 'Disconnect'}</button>}</td>}
               </tr>)}
             </Fragment>)}
               {!comparison.matched.length && <tr><td colSpan={6} className="px-3 py-8 text-center text-fg-muted">{nl ? 'Geen gekoppelde posities.' : 'No connected holdings.'}</td></tr>}
@@ -234,7 +248,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
           <thead className="bg-elevated text-xs text-fg-muted"><tr>{['Fonds', 'ISIN', 'AIRS', nl ? 'Doel' : 'Target', nl ? 'Actie' : 'Action'].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead>
           <tbody>{comparison.sold.flatMap((sold) => sold.rows.map((row, index) => <tr key={`${sold.airsKey}-${index}`} className="border-t border-neutral-800/30">
             <th className="px-3 py-3 text-left font-medium">{row.name}{sold.conflict && <p role="alert" className="text-xs text-neg-300">{nl ? 'Weer aanwezig in Leonteq. Markering ongedaan maken.' : 'Present in Leonteq again. Undo the sold marking.'}</p>}</th>
-            <td className="px-3 py-3">{row.isin}</td><td className="px-3 py-3">{row.weight}</td><td className="px-3 py-3">{sold.conflict ? '—' : '0%'}</td>
+            <td className="px-3 py-3">{row.isin}</td><td className="px-3 py-3">{formatWeight(row.weight)}</td><td className="px-3 py-3">{sold.conflict ? '—' : '0.00%'}</td>
             <td className="px-3 py-3 text-center"><button type="button" disabled={controlsBusy} onClick={() => void saveRule(soldRuleKey(sold.airsKey), null)} className="text-accent-300 hover:underline disabled:opacity-50">{nl ? 'Ongedaan maken' : 'Undo'}</button></td>
           </tr>))}</tbody>
         </table></div>

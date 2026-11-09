@@ -1,5 +1,20 @@
 # Deployment + in-process pipeline & scheduling
 
+## Dashboard daily sequence
+
+At **11:00 Europe/Amsterdam**, `airs_vermogen_refresh` scans AIRS accounts and
+model compositions, then runs `dashboard_market` (FX, watched Yahoo prices,
+benchmarks and due fundamentals), prices paired models, and runs
+`dashboard_post_airs` to prepare reports and Analyse. `dashboard_market` has no
+independent morning timer. Each child keeps its own durable result, and failures
+remain visible in the parent receipt while independent stages finish.
+
+Book comparisons use AIRS's published valuation date as their benchmark cutoff,
+including weighted Stocks/Bonds scorecards and constituent fallbacks. Newer
+Yahoo bars remain stored but cannot enter an older AIRS comparison. Holidays use
+the last available close on or before the AIRS date; the actual benchmark mark
+date is reported rather than relabelled as the portfolio date.
+
 ## Outage containment (2026-10-19)
 
 Yahoo uses one in-process circuit across chart, search, profile and batch quote calls.

@@ -534,7 +534,7 @@ def index_weights(rows: list[dict], label: str) -> list[float]:
     return w
 
 
-def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
+def index_returns(label: str, starts: list[str], *, end: str | None = None) -> dict[str, dict]:
     """Cap-weighted EUR/local return for `label` over SEVERAL windows, from ONE price load.
 
     Exists because a benchmark must be measured over the SAME window as whatever it is compared
@@ -551,8 +551,9 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     lookback = (date.fromisoformat(earliest) - timedelta(days=45)).isoformat()
     today = date.today().isoformat()
 
-    closes = _closes([m["company_id"] for m in members], lookback, today)
-    fx = _fx_to_eur({(m.get("currency") or "USD") for m in members}, lookback, today)
+    cutoff = end or today
+    closes = _closes([m["company_id"] for m in members], lookback, cutoff)
+    fx = _fx_to_eur({(m.get("currency") or "USD") for m in members}, lookback, cutoff)
 
     out: dict[str, dict] = {}
     for s in sorted(set(starts)):
@@ -565,6 +566,7 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
         eur = sum(x / 100.0 * r["return_eur_pct"] for x, r in zip(w, rows))
         loc = sum(x / 100.0 * r["return_local_pct"] for x, r in zip(w, rows))
         out[s] = {"eur_pct": eur, "local_pct": loc, "members": len(rows),
+                  "as_of": min(r["end_date"] for r in rows),
                   "start_date": min(r["start_date"] for r in rows)}
     return out
 

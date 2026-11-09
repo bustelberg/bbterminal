@@ -8,6 +8,7 @@ import type { CompositionResult } from './CompositionTable';
 import type { AirsComposition } from './AirsCompositionView';
 import { holdingKey, type HoldingRule } from './matchHoldings';
 import { rebalancePlan, type RebalanceAction } from './rebalancePlan';
+import { refreshRequest } from './refreshProgress';
 
 type Result = { action: RebalanceAction; success: boolean; message?: string; reverted?: boolean; revertError?: string; revertUncertain?: boolean };
 const button = 'rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm disabled:opacity-50';
@@ -23,7 +24,11 @@ function formatSnapshotDate(value?: string | null, withTime = true) {
   return `${part('day')} ${part('month').replace(/\.$/, '')} ${part('year')}${withTime ? ` ${part('hour')}:${part('minute')}` : ''}`;
 }
 async function json<T>(url: string, options = {}) {
-  const response = await apiFetch(`${API_URL}${url}`, options);
+  const body = (options as RequestInit).body;
+  const refresh = url.includes('refresh=true') || (typeof body === 'string' && JSON.parse(body).refresh === true);
+  const response = refresh
+    ? await refreshRequest(`${API_URL}${url}`, options, 'Rebalance · Refresh portfolio holdings')
+    : await apiFetch(`${API_URL}${url}`, options);
   if (!response.ok) {
     const failure = await response.json().catch(() => null) as { detail?: unknown } | null;
     throw new Error(typeof failure?.detail === 'string' ? failure.detail : 'Could not load saved data. Select Refresh compositions.');
