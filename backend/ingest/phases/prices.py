@@ -129,7 +129,7 @@ def _run_prices_phase(
             summary += "\n" + "\n".join(samples)
         accumulated_errors.append(summary)
     _step(f"Yahoo refresh complete: {refreshed.get('moved', 0)} updated, "
-          f"{refreshed.get('unchanged', 0)} without a newer stored close, "
+          f"{refreshed.get('unchanged', 0)} unchanged (already current or no newer stored close), "
           f"{resolved.get('unmapped', 0)} delisted or unmapped, {errors} errors.",
           level="error" if errors else "info")
 

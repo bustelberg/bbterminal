@@ -179,8 +179,11 @@ class TestTheSchedulerJob:
 
         spec = BY_ID["asset_price_refresh"]
         assert spec.after_job == "dashboard_market"
-        assert BY_ID[spec.after_job].trigger["hour"] == 6
-        assert BY_ID[spec.after_job].trigger["timezone"] == "Europe/Amsterdam"
+        market = BY_ID[spec.after_job]
+        assert market.after_job == 'airs_vermogen_refresh'
+        trigger = BY_ID[market.after_job].trigger
+        assert trigger["hour"] == 11
+        assert trigger["timezone"] == "Europe/Amsterdam"
         # ~220 gap fetches at ~1.5s each; a slow run must never overlap the next day's tick.
         assert spec.options["max_instances"] == 1
         # ...and it must actually be wired to the tick.
