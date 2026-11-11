@@ -15,6 +15,7 @@ it.each([
   ['/api/leonteq/airs/model-portfolios/7/composition?refresh=true&datum=2026-11-06', {}, 'airs', 7],
   ['/api/leonteq/portfolios/monthly-performance', { name: 'AI', airs_portfolio_id: 7 }, 'monthly', 7],
   ['/api/leonteq/price-checks', {}, 'prices', undefined],
+  ['/api/leonteq/recent-transactions', { name: 'AI', airs_portfolio_id: 7, days: 30 }, 'transactions', 7],
 ])('runs %s through the shared background popup and then reads its result', async (url, body, operation, portfolioId) => {
   vi.mocked(startJob).mockResolvedValue({ id: 'job-1', done: Promise.resolve({ status: 'done' } as JobToast), body: {} });
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ status: 200, payload: { rows: ['saved'] } })));
@@ -24,6 +25,7 @@ it.each([
   expect(request).toMatchObject({ operation, name: 'AI', lang: 'nl' });
   expect(request.portfolio_id).toBe(portfolioId);
   if (operation === 'airs') expect(request.datum).toBe('2026-11-06');
+  if (operation === 'transactions') expect(request.days).toBe(30);
   expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/refresh/jobs/job-1/result'), { cache: 'no-store', noReadCache: true });
   expect(await result.json()).toEqual({ rows: ['saved'] });
 });

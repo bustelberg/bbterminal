@@ -9,8 +9,9 @@ describe('Risk navigation', () => {
     expect(modal).toContain('<ActiveSharePanel benchmark=');
     expect(modal).toContain("dynamic(() => import('./ActiveSharePanel')");
     expect(modal).not.toContain('<AirsRiskPanel');
-    expect(panel).toContain("(['active', 'corr', 'vol', 'dd', 'conc', 'returns'] as const)");
-    expect(panel).toContain("useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns'>('active')");
+    expect(panel).toContain("(['active', 'corr', 'vol', 'dd', 'conc', 'returns', 'weights'] as const)");
+    expect(panel).toContain("useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns' | 'weights'>('active')");
+    expect(panel).toContain('<WeightsPanel portefeuille={returnsAccount ?? portefeuille}');
     expect(panel).toContain('<WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille}');
     expect(modal).toContain('returnsAccount={reportAccount ?? data.book_portefeuille}');
     expect(panel).not.toContain('Current portfolio simulation');

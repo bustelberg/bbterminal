@@ -140,7 +140,7 @@ def monthly(payload, name):
     return {'portfolio_name': name, 'months': months, 'yearly_totals': totals}
 
 
-def read(page, ids, name=None, performance=False):
+def read(page, ids, name=None, performance=False, transactions=False):
     def get(path):
         response = page.request.get(f'{BASE}/{path}', headers={'Cache-Control': 'no-cache'}, timeout=10000)
         if not response.ok:
@@ -158,6 +158,32 @@ def read(page, ids, name=None, performance=False):
     if name not in ids:
         raise ApiUnavailable('Portfolio not found in the current catalogue')
     path = f'amc/{quote(ids[name], safe="")}'
+    if transactions:
+        from leonteq.recent_transactions import parse_transactions
+        from leonteq.progress import report
+        rows, total, seen = [], None, set()
+        while True:
+            report(f'Reading booked transactions · {len(rows)}/{total if total is not None else "…"}')
+            page_data = get(path + f'/index-transactions?offset={len(rows)}&limit=100&sort=-transactionTime')
+            if (not isinstance(page_data, dict) or not isinstance(page_data.get('rows'), list)
+                    or type(page_data.get('totalRows')) is not int or not 0 <= page_data['totalRows'] <= 20000):
+                raise ApiUnavailable('Unknown or oversized transaction feed')
+            if total is not None and page_data['totalRows'] != total:
+                raise ApiUnavailable('Transactions changed during pagination. Fetch again.')
+            total = page_data['totalRows']
+            batch = page_data['rows']
+            identities = {(row.get('reportId'), row.get('transactionNumber')) for row in batch
+                          if isinstance(row, dict) and row.get('reportId') is not None and row.get('transactionNumber') is not None}
+            if seen & identities:
+                raise ApiUnavailable('Overlapping transaction pages. Fetch again.')
+            seen.update(identities)
+            rows.extend(batch)
+            if len(rows) >= total:
+                break
+            if not batch:
+                raise ApiUnavailable('Incomplete transaction pagination')
+        return {'success': True, 'transactions': parse_transactions({'rows': rows, 'totalRows': total}),
+                'retrieved_at': datetime.now(timezone.utc).isoformat()}
     result = monthly(get(path + '/monthly-performance'), name) if performance else composition(get(path + '/composition?sort=%2Bname'), name)
     return {'success': True, 'status': 'success', 'source': 'lynqs_api',
             'retrieved_at': datetime.now(timezone.utc).isoformat(), **result}

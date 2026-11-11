@@ -8,6 +8,7 @@ export async function refreshRequest(url: string, init: RequestInit | undefined,
   const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
   const match = parsed.pathname.match(/\/airs\/model-portfolios\/(\d+)\/composition$/);
   const operation = match ? 'airs' : parsed.pathname.endsWith('/monthly-performance') ? 'monthly'
+    : parsed.pathname.endsWith('/recent-transactions') ? 'transactions'
     : parsed.pathname.endsWith('/price-checks') ? 'prices'
     : parsed.pathname.endsWith('/login') ? 'list' : 'composition';
   const { id, done } = await startJob(`${API_URL}/api/leonteq/refresh/job`, title, {
@@ -15,7 +16,7 @@ export async function refreshRequest(url: string, init: RequestInit | undefined,
     body: JSON.stringify({ operation, name: body.name ?? name,
       portfolio_id: match ? Number(match[1]) : body.airs_portfolio_id,
       datum: parsed.searchParams.get('datum') || undefined, lang: nl ? 'nl' : 'en',
-      source: body.source, isin: body.isin, holding_name: body.holding_name }),
+      source: body.source, isin: body.isin, holding_name: body.holding_name, days: body.days }),
   }).catch((cause) => {
     const message = nl ? 'Vernieuwen kon niet worden gestart. Controleer de verbinding en probeer opnieuw.'
       : 'The refresh could not be started. Check the connection and retry.';

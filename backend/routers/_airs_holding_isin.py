@@ -225,7 +225,7 @@ _ALTERNATIVE_FUND_NAMES = {
 def forced_bucket(name: str | None, grid: dict | None = None) -> str | None:
     """Reviewed portfolio classifications take precedence over generic wrapper metadata."""
     g = grid or {}
-    return BUCKET_ALTS if any((candidate or '').strip().casefold() in _ALTERNATIVE_FUND_NAMES
+    return BUCKET_ALTS if any((candidate or '').strip().rstrip('.').casefold() in _ALTERNATIVE_FUND_NAMES
                              for candidate in (name, g.get('name'), g.get('leonteq_name'))) else None
 
 

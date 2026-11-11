@@ -12,7 +12,7 @@ export function rebalancePlan(left: Holding[], right: Holding[], rules: HoldingR
   const matches = matchHoldings(left, right, rules);
   const issues: string[] = [];
   const actions: RebalanceAction[] = [];
-  if (matches.leonteqOnly.length || matches.airsOnly.length) issues.push('Unmatched holdings: connect all rows in Connections first.');
+  if (matches.leonteqOnly.length || matches.airsOnly.length) issues.push('Unmatched holdings: connect all rows in Connections → Leonteq to AIRS Fixed first.');
   for (const pair of matches.matched) {
     if (pair.cash) continue; // Aggregate cash is a comparison, not a tradeable instrument.
     if (pair.leonteq.length !== 1 || pair.airs.length !== 1) { issues.push(`Ambiguous match: ${pair.isin}`); continue; }

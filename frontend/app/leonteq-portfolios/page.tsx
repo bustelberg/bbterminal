@@ -8,10 +8,11 @@ import PortfolioLinksPanel from './PortfolioLinksPanel';
 import RebalancePanel from './RebalancePanel';
 import ReturnsPanel from './ReturnsPanel';
 import PricesPanel from './PricesPanel';
+import BenchmarkPerformancePanel from './BenchmarkPerformancePanel';
 
 const tabs = ['leonteq', 'airs', 'dynamic'] as const;
 const sections = ['portfolios', 'connections', 'insights'] as const;
-const insights = ['rebalance', 'returns', 'prices'] as const;
+const insights = ['rebalance', 'returns', 'prices', 'performance'] as const;
 type Tab = typeof tabs[number] | typeof sections[number] | typeof insights[number];
 
 export default function LeonteqPortfoliosPage() {
@@ -27,6 +28,7 @@ export default function LeonteqPortfoliosPage() {
   const [rebalanceOpened, setRebalanceOpened] = useState(false);
   const [returnsOpened, setReturnsOpened] = useState(false);
   const [pricesOpened, setPricesOpened] = useState(false);
+  const [performanceOpened, setPerformanceOpened] = useState(false);
   function select(next: Tab) {
     if (next === 'insights') {
       select(insight);
@@ -40,7 +42,7 @@ export default function LeonteqPortfoliosPage() {
     if (next === 'leonteq' || next === 'airs' || next === 'dynamic') {
       setSource(next);
       setSection('portfolios');
-    } else if (next === 'rebalance' || next === 'returns' || next === 'prices') {
+    } else if (next === 'rebalance' || next === 'returns' || next === 'prices' || next === 'performance') {
       setInsight(next);
       setSection('insights');
     } else {
@@ -52,6 +54,7 @@ export default function LeonteqPortfoliosPage() {
     if (next === 'rebalance') setRebalanceOpened(true);
     if (next === 'returns') setReturnsOpened(true);
     if (next === 'prices') setPricesOpened(true);
+    if (next === 'performance') setPerformanceOpened(true);
     setTab(next);
   }
   return <main className="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-7xl flex-col gap-6 overflow-hidden p-4 md:p-8">
@@ -101,7 +104,7 @@ export default function LeonteqPortfoliosPage() {
     <div role="tabpanel" id="source-panel-dynamic" aria-labelledby="source-tab-dynamic" hidden={tab !== 'dynamic'}>{dynamicOpened && <AirsModelsPanel kind="dynamic" />}</div>
     </div>
     <div role="tabpanel" id="source-panel-connections" aria-labelledby="section-tab-connections" hidden={tab !== 'connections'}>
-      {connectionsOpened && <PortfolioLinksPanel />}
+      {connectionsOpened && <PortfolioLinksPanel active={section === 'connections'} />}
     </div>
     <div role="tabpanel" id="source-panel-insights" aria-labelledby="section-tab-insights" hidden={section !== 'insights'}>
     <div role="tablist" aria-label="Insights" className="mb-4 inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs">
@@ -116,7 +119,7 @@ export default function LeonteqPortfoliosPage() {
             document.getElementById(`insight-tab-${insights[target]}`)?.focus({ preventScroll: true });
           }
         }} className={`shrink-0 px-3 py-1.5 font-medium transition-colors ${insight === key ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}>
-        {key === 'rebalance' ? 'Rebalance' : key === 'returns' ? 'Returns' : 'Prices'}
+        {key === 'rebalance' ? 'Rebalance' : key === 'returns' ? 'Returns' : key === 'prices' ? 'Prices' : 'Monthly performance'}
       </button>)}
     </div>
     <div role="tabpanel" id="source-panel-rebalance" aria-labelledby="insight-tab-rebalance" hidden={tab !== 'rebalance'}>
@@ -124,6 +127,7 @@ export default function LeonteqPortfoliosPage() {
     </div>
     <div role="tabpanel" id="source-panel-returns" aria-labelledby="insight-tab-returns" hidden={tab !== 'returns'}>{returnsOpened && <ReturnsPanel />}</div>
     <div role="tabpanel" id="source-panel-prices" aria-labelledby="insight-tab-prices" hidden={tab !== 'prices'}>{pricesOpened && <PricesPanel />}</div>
+    <div role="tabpanel" id="source-panel-performance" aria-labelledby="insight-tab-performance" hidden={tab !== 'performance'}>{performanceOpened && <BenchmarkPerformancePanel />}</div>
     </div>
     </div>
   </main>;

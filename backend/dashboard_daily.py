@@ -9,11 +9,13 @@ from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from contextvars import ContextVar
 import os
+import logging
 from zoneinfo import ZoneInfo
 
 from deps import supabase
 
 _lease_held = ContextVar("dashboard_daily_lease", default=False)
+_log = logging.getLogger(__name__)
 
 
 def daily_refresh_active() -> bool:
@@ -25,11 +27,18 @@ def daily_refresh_active() -> bool:
     url = _db_url()
     if not url:
         return bool(os.environ.get('RAILWAY_PUBLIC_DOMAIN'))
-    with psycopg.connect(url, connect_timeout=3, autocommit=True, options='-c statement_timeout=3000') as conn:
-        acquired = conn.execute("SELECT pg_try_advisory_lock(hashtext('bbterminal.dashboard_daily'))").fetchone()[0]
-        if acquired:
-            conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.dashboard_daily'))")
-        return not acquired
+    try:
+        with psycopg.connect(url, connect_timeout=3, autocommit=True, options='-c statement_timeout=3000') as conn:
+            acquired = conn.execute("SELECT pg_try_advisory_lock(hashtext('bbterminal.dashboard_daily'))").fetchone()[0]
+            if acquired:
+                conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.dashboard_daily'))")
+            return not acquired
+    except psycopg.OperationalError as error:
+        # Unknown lock state must defer queue work, never assume the daily run is idle.
+        # The next scheduler tick opens a new connection and probes again.
+        _log.warning('Daily refresh lock check unavailable (%s, SQLSTATE %s); deferring background work until the next check.',
+                     type(error).__name__, error.sqlstate or 'unknown')
+        return True
 
 
 @contextmanager
@@ -234,6 +243,27 @@ def prepare_month(account: str, today=None, *, month: str | None = None, complet
     return {"account": account, "end": end, "errors": errors}
 
 
+def _price_freshness_issue(isin, mapped, close, expected, source, day):
+    """Explain dated prices using matching evidence from today's saved refresh only."""
+    message = f"{isin}: price dated {close or 'absent'}; expected {expected}"
+    summary = source.get('summary') or {}
+    receipts = [row for row in summary.get('results', [])
+                if row.get('isin') == isin and row.get('symbol') == mapped.get('yahoo_symbol')
+                and row.get('analysis_id') == mapped.get('analysis_id')
+                and str(row.get('latest_close') or '')[:10] == close]
+    if str(source.get('started_at') or '')[:10] != day or len(receipts) != 1:
+        return message + '; no matching provider-availability receipt today'
+    receipt = receipts[0]
+    if receipt.get('status') == 'error':
+        return message + f"; price refresh failed: {str(receipt.get('error') or 'unknown error')[:300]}"
+    vendor = str(receipt.get('vendor_latest_close') or '')[:10]
+    if receipt.get('status') == 'unavailable' and vendor and vendor <= close:
+        return message + f"; Yahoo's latest completed close was {vendor} at the last refresh (newer close not published)"
+    if vendor and vendor > close:
+        return message + f'; Yahoo offers a {vendor} close that is not stored'
+    return message + '; provider availability was not confirmed'
+
+
 def freshness(today=None, *, dashboard_only: bool = False) -> dict:
     """Read actual source dates and completeness; never repair or fetch a vendor."""
     from airs_vermogen import REPORTS, latest_completed_market_date
@@ -314,11 +344,13 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
             mapped = execution.get(isin) or {}
             if not mapped.get("yahoo_symbol") or mapped.get("status") != "ok":
                 unsupported.append(isin)
+                issues.append(f"{isin}: no verified Yahoo price mapping")
                 continue
             close = str((assets.get(mapped.get("analysis_id")) or {}).get("price_to") or "")[:10]
             price_dates[isin] = close or None
             if close < expected:
-                issues.append(f"{isin}: price dated {close or 'absent'}")
+                issues.append(_price_freshness_issue(isin, mapped, close, expected,
+                                                    sources.get('asset_price_refresh') or {}, day))
             currency = mapped.get("currency")
             major = SUBUNIT.get(currency, (currency, 1))[0]
             if major and major != "EUR" and fx_dates.get(major, "") < expected:

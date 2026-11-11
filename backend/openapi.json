@@ -6338,6 +6338,67 @@
         "title": "BuildUniverseRequest",
         "type": "object"
       },
+      "CashBalanceRequest": {
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Current"
+          },
+          "datum": {
+            "format": "date",
+            "title": "Datum",
+            "type": "string"
+          },
+          "row_id": {
+            "minimum": 1.0,
+            "title": "Row Id",
+            "type": "integer"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Target"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "datum",
+          "row_id",
+          "total",
+          "current",
+          "target"
+        ],
+        "title": "CashBalanceRequest",
+        "type": "object"
+      },
       "CertificateResultAdjustment": {
         "description": "Wrapper P&L formerly allocated to cash; not a cash return or an actual holding.",
         "properties": {
@@ -8400,6 +8461,24 @@
         "title": "EtfPairYear",
         "type": "object"
       },
+      "EtfProviderCountryWeight": {
+        "properties": {
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "country",
+          "weight_pct"
+        ],
+        "title": "EtfProviderCountryWeight",
+        "type": "object"
+      },
       "EtfProviderSectorWeight": {
         "properties": {
           "sector": {
@@ -8416,6 +8495,73 @@
           "weight_pct"
         ],
         "title": "EtfProviderSectorWeight",
+        "type": "object"
+      },
+      "EtfRegionAllocationResponse": {
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/EtfRegionWeight"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "as_of",
+          "source",
+          "source_url",
+          "regions"
+        ],
+        "title": "EtfRegionAllocationResponse",
+        "type": "object"
+      },
+      "EtfRegionWeight": {
+        "properties": {
+          "provider_weights": {
+            "items": {
+              "$ref": "#/components/schemas/EtfProviderCountryWeight"
+            },
+            "title": "Provider Weights",
+            "type": "array"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "region",
+          "weight_pct",
+          "provider_weights"
+        ],
+        "title": "EtfRegionWeight",
         "type": "object"
       },
       "EtfSectorAllocationResponse": {
@@ -14908,6 +15054,13 @@
             ],
             "title": "Datum"
           },
+          "days": {
+            "default": 7,
+            "maximum": 90.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "type": "integer"
+          },
           "holding_name": {
             "anyOf": [
               {
@@ -14961,7 +15114,8 @@
               "composition",
               "airs",
               "monthly",
-              "prices"
+              "prices",
+              "transactions"
             ],
             "title": "Operation",
             "type": "string"
@@ -15572,6 +15726,48 @@
           "benchmark"
         ],
         "title": "PortfolioVolatility",
+        "type": "object"
+      },
+      "PositionAddRequest": {
+        "properties": {
+          "datum": {
+            "format": "date",
+            "title": "Datum",
+            "type": "string"
+          },
+          "isin": {
+            "pattern": "^[A-Z]{2}[A-Z0-9]{9}\\d$",
+            "title": "Isin",
+            "type": "string"
+          },
+          "leonteq_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Leonteq Name",
+            "type": "string"
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,6}|(?=[\\d.]{1,13}0*$)\\d{0,6}\\.\\d{0,6}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Percentage"
+          }
+        },
+        "required": [
+          "datum",
+          "isin",
+          "percentage",
+          "leonteq_name"
+        ],
+        "title": "PositionAddRequest",
         "type": "object"
       },
       "PricePoint": {
@@ -21697,9 +21893,9 @@
         ]
       }
     },
-    "/api/airs/accounts/{portefeuille}/weekly-returns/job": {
-      "post": {
-        "operationId": "airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post",
+    "/api/airs/accounts/{portefeuille}/weekly-returns/all": {
+      "get": {
+        "operationId": "airs_weekly_returns_all_api_airs_accounts__portefeuille__weekly_returns_all_get",
         "parameters": [
           {
             "in": "path",
@@ -21707,17 +21903,6 @@
             "required": true,
             "schema": {
               "title": "Portefeuille",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "instrument_id",
-            "required": true,
-            "schema": {
-              "maxLength": 512,
-              "minLength": 1,
-              "title": "Instrument Id",
               "type": "string"
             }
           }
@@ -21742,7 +21927,294 @@
             "description": "Validation Error"
           }
         },
+        "summary": "Airs Weekly Returns All",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/weekly-returns/all/job": {
+      "post": {
+        "operationId": "airs_weekly_returns_all_job_api_airs_accounts__portefeuille__weekly_returns_all_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "default": "2025-02-01",
+              "format": "date",
+              "title": "Start Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Weekly Returns All Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/weekly-returns/job": {
+      "post": {
+        "operationId": "airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Instrument Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
         "summary": "Airs Weekly Returns Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/weight-search": {
+      "post": {
+        "operationId": "airs_weight_search_api_airs_accounts__portefeuille__weight_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "default": "2025-02-01",
+              "format": "date",
+              "title": "Start Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "annual_target",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 20,
+              "minimum": 0,
+              "title": "Annual Target",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "annual_cash",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 20,
+              "minimum": 0,
+              "title": "Annual Cash",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "available_history",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Available History",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          },
+          {
+            "in": "query",
+            "name": "objective",
+            "required": false,
+            "schema": {
+              "default": "sharpe",
+              "pattern": "^(sharpe|sortino)$",
+              "title": "Objective",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Weight Search",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/weight-search/bounds": {
+      "get": {
+        "operationId": "airs_weight_search_bounds_api_airs_accounts__portefeuille__weight_search_bounds_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Weight Search Bounds",
         "tags": [
           "airs"
         ]
@@ -22007,6 +22479,48 @@
           }
         },
         "summary": "Ingest Basket Fundamentals Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/etf/{isin}/region-allocation": {
+      "get": {
+        "operationId": "etf_region_allocation_api_airs_etf__isin__region_allocation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtfRegionAllocationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Etf Region Allocation",
         "tags": [
           "airs"
         ]
@@ -33469,6 +33983,96 @@
         ]
       }
     },
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/cash-balance": {
+      "get": {
+        "operationId": "read_cash_balance_api_leonteq_airs_model_portfolios__portfolio_id__cash_balance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Cash Balance",
+        "tags": [
+          "leonteq"
+        ]
+      },
+      "post": {
+        "operationId": "execute_cash_balance_api_leonteq_airs_model_portfolios__portfolio_id__cash_balance_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashBalanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Cash Balance",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
     "/api/leonteq/airs/model-portfolios/{portfolio_id}/composition": {
       "get": {
         "operationId": "airs_model_composition_api_leonteq_airs_model_portfolios__portfolio_id__composition_get",
@@ -33542,6 +34146,57 @@
           }
         },
         "summary": "Airs Model Composition",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/positions": {
+      "post": {
+        "operationId": "add_airs_position_api_leonteq_airs_model_portfolios__portfolio_id__positions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PositionAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Airs Position",
         "tags": [
           "leonteq"
         ]
@@ -33871,6 +34526,75 @@
           }
         },
         "summary": "Save Holding Connection",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/portfolios/benchmark-performance": {
+      "get": {
+        "operationId": "benchmark_performance_api_leonteq_portfolios_benchmark_performance_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": true,
+            "schema": {
+              "maximum": 2100,
+              "minimum": 2000,
+              "title": "Year",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "enum": [
+                "ACWI",
+                "SP500",
+                "BONDS",
+                "ALTERNATIVES"
+              ],
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Performance",
         "tags": [
           "leonteq"
         ]

@@ -31,7 +31,7 @@ router = APIRouter(tags=["leonteq"])
 
 
 class PortfolioRefreshRequest(BaseModel):
-    operation: Literal['list', 'composition', 'airs', 'monthly', 'prices']
+    operation: Literal['list', 'composition', 'airs', 'monthly', 'prices', 'transactions']
     name: str | None = Field(default=None, min_length=1, max_length=300)
     portfolio_id: int | None = Field(default=None, ge=1)
     datum: date | None = None
@@ -39,6 +39,7 @@ class PortfolioRefreshRequest(BaseModel):
     source: Literal['Leonteq', 'AIRS'] | None = None
     isin: str | None = Field(default=None, max_length=12)
     holding_name: str | None = Field(default=None, min_length=1, max_length=500)
+    days: int = Field(default=7, ge=1, le=90)
 
 
 @router.post('/api/leonteq/refresh/job')
@@ -47,22 +48,24 @@ async def start_portfolio_refresh(body: PortfolioRefreshRequest):
     from fastapi import HTTPException
     from leonteq.refresh_jobs import run
 
-    if (body.operation in ('composition', 'monthly') and not body.name
-            or body.operation in ('airs', 'monthly') and body.portfolio_id is None):
+    if (body.operation in ('composition', 'monthly', 'transactions') and not body.name
+            or body.operation in ('airs', 'monthly', 'transactions') and body.portfolio_id is None):
         raise HTTPException(422, 'The portfolio identity is required for this refresh')
     if body.source and (body.operation != 'prices' or not body.name or not body.portfolio_id or not body.holding_name):
         raise HTTPException(422, 'The connection and holding identity are required for a row recheck')
     label = ('All linked portfolio prices' if body.operation == 'prices' else f'AIRS #{body.portfolio_id}' if body.operation == 'airs'
              else body.name or 'Leonteq portfolios')
     identity = f'{body.operation}:{body.portfolio_id or ""}:{body.datum or "latest"}'
+    if body.operation == 'transactions':
+        identity += f':{body.days}'
     if body.source:
         import hashlib
         identity += ':' + hashlib.sha256(f'{body.name}:{body.source}:{body.isin}:{body.holding_name}'.encode()).hexdigest()[:20]
-    prefix = 'airs.leonteq.refresh' if body.operation in ('airs', 'monthly', 'prices') else 'leonteq.refresh'
+    prefix = 'airs.leonteq.refresh' if body.operation in ('airs', 'monthly', 'prices', 'transactions') else 'leonteq.refresh'
     job, reused = jobs.start(f'{prefix}.{identity}', label,
         lambda ctx: run(ctx, body.operation, name=body.name, portfolio_id=body.portfolio_id,
                           datum=body.datum.isoformat() if body.datum else None, lang=body.lang,
-                          source=body.source, isin=body.isin, holding_name=body.holding_name))
+                          source=body.source, isin=body.isin, holding_name=body.holding_name, days=body.days))
     return {'job_id': job.id, 'already_running': reused}
 
 
@@ -142,6 +145,40 @@ class PercentageEditRequest(BaseModel):
     percentage: Decimal = Field(ge=0, le=100, max_digits=12, decimal_places=6, allow_inf_nan=False)
 
 
+class PositionAddRequest(BaseModel):
+    datum: date
+    isin: str = Field(pattern=r'^[A-Z]{2}[A-Z0-9]{9}\d$')
+    percentage: Decimal = Field(gt=0, le=100, max_digits=12, decimal_places=6, allow_inf_nan=False)
+    leonteq_name: str = Field(min_length=1, max_length=300)
+
+
+class CashBalanceRequest(BaseModel):
+    datum: date
+    row_id: int = Field(ge=1)
+    total: Decimal = Field(allow_inf_nan=False)
+    current: Decimal = Field(allow_inf_nan=False)
+    target: Decimal = Field(ge=0, le=100, allow_inf_nan=False)
+
+
+@router.get('/api/leonteq/airs/model-portfolios/{portfolio_id}/cash-balance')
+async def read_cash_balance(portfolio_id: int = Path(ge=1)):
+    from leonteq.airs_edit import balance_cash
+    return await asyncio.to_thread(balance_cash, portfolio_id)
+
+
+@router.post('/api/leonteq/airs/model-portfolios/{portfolio_id}/cash-balance')
+async def execute_cash_balance(body: CashBalanceRequest, portfolio_id: int = Path(ge=1)):
+    from leonteq.airs_edit import balance_cash
+    return await asyncio.to_thread(balance_cash, portfolio_id, {**body.model_dump(), 'datum': body.datum.isoformat()})
+
+
+@router.post('/api/leonteq/airs/model-portfolios/{portfolio_id}/positions')
+async def add_airs_position(body: PositionAddRequest, portfolio_id: int = Path(ge=1)):
+    from leonteq.airs_edit import add_position
+    return await asyncio.to_thread(add_position, portfolio_id, body.datum.isoformat(), body.isin,
+                                   body.percentage, body.leonteq_name)
+
+
 @router.patch('/api/leonteq/airs/model-portfolios/{portfolio_id}/positions/{row_id}/percentage')
 async def edit_airs_percentage(body: PercentageEditRequest, portfolio_id: int = Path(ge=1), row_id: int = Path(ge=1)):
     from leonteq.airs_edit import update_percentage
@@ -199,6 +236,14 @@ class MonthlyPerformanceRequest(PortfolioCompositionRequest):
 async def monthly_performance(request: MonthlyPerformanceRequest):
     from leonteq.monthly_performance import comparison
     return await asyncio.to_thread(comparison, request.name, request.airs_portfolio_id, request.refresh)
+
+
+@router.get('/api/leonteq/portfolios/benchmark-performance')
+async def benchmark_performance(name: str = Query(min_length=1, max_length=300),
+                                year: int = Query(ge=2000, le=2100),
+                                benchmark: Literal['ACWI', 'SP500', 'BONDS', 'ALTERNATIVES'] = 'ACWI'):
+    from leonteq.benchmark_performance import comparison
+    return await asyncio.to_thread(comparison, name, year, benchmark)
 
 
 @router.post('/api/leonteq/portfolios/composition')

@@ -1082,6 +1082,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/weekly-returns/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Airs Weekly Returns All */
+        get: operations["airs_weekly_returns_all_api_airs_accounts__portefeuille__weekly_returns_all_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/weekly-returns/all/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Airs Weekly Returns All Job */
+        post: operations["airs_weekly_returns_all_job_api_airs_accounts__portefeuille__weekly_returns_all_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/weekly-returns/job": {
         parameters: {
             query?: never;
@@ -1093,6 +1127,40 @@ export interface paths {
         put?: never;
         /** Airs Weekly Returns Job */
         post: operations["airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/weight-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Airs Weight Search */
+        post: operations["airs_weight_search_api_airs_accounts__portefeuille__weight_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/weight-search/bounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Airs Weight Search Bounds */
+        get: operations["airs_weight_search_bounds_api_airs_accounts__portefeuille__weight_search_bounds_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1194,6 +1262,23 @@ export interface paths {
          *     serving a stored portfolio and an ad-hoc set alike.
          */
         post: operations["ingest_basket_fundamentals_job_api_airs_basket_fundamentals_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/etf/{isin}/region-allocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Etf Region Allocation */
+        get: operations["etf_region_allocation_api_airs_etf__isin__region_allocation_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7132,6 +7217,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/cash-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Cash Balance */
+        get: operations["read_cash_balance_api_leonteq_airs_model_portfolios__portfolio_id__cash_balance_get"];
+        put?: never;
+        /** Execute Cash Balance */
+        post: operations["execute_cash_balance_api_leonteq_airs_model_portfolios__portfolio_id__cash_balance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/leonteq/airs/model-portfolios/{portfolio_id}/composition": {
         parameters: {
             query?: never;
@@ -7143,6 +7246,23 @@ export interface paths {
         get: operations["airs_model_composition_api_leonteq_airs_model_portfolios__portfolio_id__composition_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/airs/model-portfolios/{portfolio_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Airs Position */
+        post: operations["add_airs_position_api_leonteq_airs_model_portfolios__portfolio_id__positions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7289,6 +7409,23 @@ export interface paths {
         get: operations["read_holding_connections_api_leonteq_portfolio_links_holdings_get"];
         /** Save Holding Connection */
         put: operations["save_holding_connection_api_leonteq_portfolio_links_holdings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/portfolios/benchmark-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Benchmark Performance */
+        get: operations["benchmark_performance_api_leonteq_portfolios_benchmark_performance_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -11495,6 +11632,22 @@ export interface components {
             /** Start Month */
             start_month: string;
         };
+        /** CashBalanceRequest */
+        CashBalanceRequest: {
+            /** Current */
+            current: number | string;
+            /**
+             * Datum
+             * Format: date
+             */
+            datum: string;
+            /** Row Id */
+            row_id: number;
+            /** Target */
+            target: number | string;
+            /** Total */
+            total: number | string;
+        };
         /**
          * CertificateResultAdjustment
          * @description Wrapper P&L formerly allocated to cash; not a cash return or an actual holding.
@@ -12283,10 +12436,41 @@ export interface components {
             /** Year */
             year: number;
         };
+        /** EtfProviderCountryWeight */
+        EtfProviderCountryWeight: {
+            /** Country */
+            country: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
         /** EtfProviderSectorWeight */
         EtfProviderSectorWeight: {
             /** Sector */
             sector: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** EtfRegionAllocationResponse */
+        EtfRegionAllocationResponse: {
+            /** As Of */
+            as_of: string;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name: string;
+            /** Regions */
+            regions: components["schemas"]["EtfRegionWeight"][];
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /** EtfRegionWeight */
+        EtfRegionWeight: {
+            /** Provider Weights */
+            provider_weights: components["schemas"]["EtfProviderCountryWeight"][];
+            /** Region */
+            region: string;
             /** Weight Pct */
             weight_pct: number;
         };
@@ -14780,6 +14964,11 @@ export interface components {
         PortfolioRefreshRequest: {
             /** Datum */
             datum?: string | null;
+            /**
+             * Days
+             * @default 7
+             */
+            days?: number;
             /** Holding Name */
             holding_name?: string | null;
             /** Isin */
@@ -14796,7 +14985,7 @@ export interface components {
              * Operation
              * @enum {string}
              */
-            operation: "list" | "composition" | "airs" | "monthly" | "prices";
+            operation: "list" | "composition" | "airs" | "monthly" | "prices" | "transactions";
             /** Portfolio Id */
             portfolio_id?: number | null;
             /** Source */
@@ -14960,6 +15149,20 @@ export interface components {
             worst_period_pct?: number | null;
             /** Years */
             years?: number | null;
+        };
+        /** PositionAddRequest */
+        PositionAddRequest: {
+            /**
+             * Datum
+             * Format: date
+             */
+            datum: string;
+            /** Isin */
+            isin: string;
+            /** Leonteq Name */
+            leonteq_name: string;
+            /** Percentage */
+            percentage: number | string;
         };
         /** PricePoint */
         PricePoint: {
@@ -17697,10 +17900,146 @@ export interface operations {
             };
         };
     };
+    airs_weekly_returns_all_api_airs_accounts__portefeuille__weekly_returns_all_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_weekly_returns_all_job_api_airs_accounts__portefeuille__weekly_returns_all_job_post: {
+        parameters: {
+            query?: {
+                start_date?: string;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_weekly_returns_job_api_airs_accounts__portefeuille__weekly_returns_job_post: {
         parameters: {
             query: {
                 instrument_id: string;
+                start_date?: string | null;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_weight_search_api_airs_accounts__portefeuille__weight_search_post: {
+        parameters: {
+            query?: {
+                start_date?: string;
+                annual_target?: number;
+                annual_cash?: number;
+                available_history?: boolean;
+                profile?: string | null;
+                objective?: string;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_weight_search_bounds_api_airs_accounts__portefeuille__weight_search_bounds_get: {
+        parameters: {
+            query?: {
+                profile?: string | null;
             };
             header?: never;
             path: {
@@ -17878,6 +18217,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioFundamentalsJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_region_allocation_api_airs_etf__isin__region_allocation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfRegionAllocationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -25269,6 +25639,72 @@ export interface operations {
             };
         };
     };
+    read_cash_balance_api_leonteq_airs_model_portfolios__portfolio_id__cash_balance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_cash_balance_api_leonteq_airs_model_portfolios__portfolio_id__cash_balance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashBalanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_model_composition_api_leonteq_airs_model_portfolios__portfolio_id__composition_get: {
         parameters: {
             query?: {
@@ -25283,6 +25719,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_airs_position_api_leonteq_airs_model_portfolios__portfolio_id__positions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PositionAddRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -25541,6 +26012,39 @@ export interface operations {
                 "application/json": components["schemas"]["HoldingConnectionRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_performance_api_leonteq_portfolios_benchmark_performance_get: {
+        parameters: {
+            query: {
+                name: string;
+                year: number;
+                benchmark?: "ACWI" | "SP500" | "BONDS" | "ALTERNATIVES";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

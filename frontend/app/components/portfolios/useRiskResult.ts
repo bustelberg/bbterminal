@@ -43,7 +43,7 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
   const [retry, setRetry] = useState(0);
   const hit = cached<T>(key);
   const data = bundle ? (bundle.views[traceScope] as T | undefined) ?? null : hit ?? (loaded?.key === key ? loaded.value : null);
-  const error = bundle ? bundle.error : failure?.key === key ? failure.message : null;
+  const error = bundle ? (data != null ? null : bundle.error) : failure?.key === key ? failure.message : null;
 
   useEffect(() => {
     const answer = data as { available?: boolean; reason?: string; history_issues?: Array<{ kind?: string }> } | null;

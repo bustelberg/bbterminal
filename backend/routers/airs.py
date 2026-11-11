@@ -28,6 +28,7 @@ from routers._etf_sector_allocation import (
     supported as sector_allocation_supported,
 )
 from routers._sse import sse_event, sse_message
+from routers._etf_region_allocation import EtfRegionAllocationResponse, fetch_region_allocation, supported as region_allocation_supported
 import queue as thread_queue
 import threading
 from datetime import UTC, datetime
@@ -53,6 +54,17 @@ router = APIRouter(tags=["airs"])
 _log = logging.getLogger(__name__)
 
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+@router.get('/api/airs/etf/{isin}/region-allocation', response_model=EtfRegionAllocationResponse)
+async def etf_region_allocation(isin: str) -> EtfRegionAllocationResponse:
+    normalized = isin.strip().upper()
+    if not region_allocation_supported(normalized):
+        raise HTTPException(404, 'Region allocation is not available for this fund yet')
+    try:
+        return await asyncio.to_thread(fetch_region_allocation, normalized)
+    except Exception as exc:
+        raise HTTPException(502, f'Could not read the current fund region allocation: {exc}') from exc
 
 
 @router.get(
@@ -2434,18 +2446,24 @@ async def airs_portfolio_risk_bundle(req: RiskBundleRequest, prepare_if_missing:
     from jobs import UserFacingJobError
     holdings = [h.model_dump() for h in req.holdings]
     policy = req.benchmark_weights
-    def load():
-        saved = (_risk_bundle.read_or_prepare(holdings, policy) if prepare_if_missing
-                 else _risk_bundle.read(holdings, policy))
-        if saved is not None and req.returns_account:
+    def with_weekly(saved):
+        if req.returns_account:
             from routers._airs_instrument_returns import bundle
             saved = {**saved, 'views': {**saved['views'], 'weekly-returns': bundle(req.returns_account)}}
         return saved
 
+    def load():
+        saved = (_risk_bundle.read_or_prepare(holdings, policy) if prepare_if_missing
+                 else _risk_bundle.read(holdings, policy))
+        return with_weekly(saved) if saved is not None else None
+
     try:
         saved = await asyncio.to_thread(load)
     except UserFacingJobError as exc:
-        raise HTTPException(503, str(exc)) from exc
+        from fastapi.responses import JSONResponse
+        partial = await asyncio.to_thread(with_weekly, {'views': {}})
+        return JSONResponse(status_code=202, headers={'Retry-After': '10'},
+                            content={'ready': False, 'available': False, 'detail': str(exc), **partial})
     if saved is None:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=202, content={'ready': False})
@@ -4080,16 +4098,59 @@ async def airs_weekly_returns(portefeuille: str, instrument_id: str | None = Non
 
 
 @router.post('/api/airs/accounts/{portefeuille}/weekly-returns/job')
-async def airs_weekly_returns_job(portefeuille: str, instrument_id: str = Query(..., min_length=1, max_length=512)):
+async def airs_weekly_returns_job(portefeuille: str, instrument_id: str = Query(..., min_length=1, max_length=512),
+                                  start_date: dt_date | None = Query(None)):
     import jobs as job_registry
     import hashlib
-    from routers._airs_instrument_returns import state, collect
+    from routers._airs_instrument_returns import state, collect, latest_date
+    if start_date is not None and not dt_date(1900, 1, 1) <= start_date <= latest_date():
+        raise HTTPException(422, 'Earliest date must be between 1 January 1900 and today.')
     _, _, _, _, selected = await asyncio.to_thread(state, portefeuille, instrument_id)
-    label = f"{selected['name']} · AIRS history"
-    key = hashlib.sha256(instrument_id.encode()).hexdigest()[:16]
+    label = f"{selected['name']} · Full AIRS history"
+    key = hashlib.sha256(f'{instrument_id}:{start_date or "full"}'.encode()).hexdigest()[:16]
     job, reused = job_registry.start(f'airs.weekly-returns.{portefeuille}.{key}', label,
-                                    lambda ctx: collect(portefeuille, instrument_id, ctx))
+                                    lambda ctx: collect(portefeuille, instrument_id, ctx, full_history=True, earliest_date=start_date))
     return {'job_id': job.id, 'label': label, 'already_running': reused}
+
+
+@router.post('/api/airs/accounts/{portefeuille}/weekly-returns/all/job')
+async def airs_weekly_returns_all_job(portefeuille: str, start_date: dt_date = Query(dt_date(2025, 2, 1))):
+    import jobs as job_registry
+    from routers._airs_instrument_returns import _snapshots, collect_all, latest_date
+    if not dt_date(1900, 1, 1) <= start_date <= latest_date():
+        raise HTTPException(422, 'Earliest date must be between 1 January 1900 and today.')
+    await asyncio.to_thread(_snapshots, portefeuille)
+    label = f'{portefeuille} · All AIRS instrument histories'
+    job, reused = job_registry.start(f'airs.weekly-returns-all.{portefeuille}.{start_date}', label,
+                                    lambda ctx: collect_all(portefeuille, ctx, start_date))
+    return {'job_id': job.id, 'label': label, 'already_running': reused}
+
+
+@router.get('/api/airs/accounts/{portefeuille}/weekly-returns/all')
+async def airs_weekly_returns_all(portefeuille: str):
+    from routers._airs_instrument_returns import bundle
+    return await asyncio.to_thread(bundle, portefeuille)
+
+
+@router.post('/api/airs/accounts/{portefeuille}/weight-search')
+async def airs_weight_search(portefeuille: str, start_date: dt_date = Query(dt_date(2025, 2, 1)),
+                             annual_target: float = Query(2.0, ge=0, le=20, allow_inf_nan=False),
+                             annual_cash: float = Query(0.0, ge=0, le=20, allow_inf_nan=False),
+                             available_history: bool = True, profile: str | None = None,
+                             objective: str = Query('sharpe', pattern='^(sharpe|sortino)$')):
+    from routers._airs_instrument_returns import latest_date
+    from routers._airs_weight_search import run
+    if not dt_date(1900, 1, 1) <= start_date <= latest_date():
+        raise HTTPException(422, 'Earliest date must be between 1 January 1900 and today.')
+    return await asyncio.to_thread(run, portefeuille, start_date, annual_target, annual_cash, available_history, profile, objective)
+
+
+@router.get('/api/airs/accounts/{portefeuille}/weight-search/bounds')
+async def airs_weight_search_bounds(portefeuille: str, profile: str | None = None):
+    from routers._airs_monthly_report import _account
+    from routers._airs_weight_search import policy
+    await asyncio.to_thread(_account, portefeuille)
+    return await asyncio.to_thread(policy, portefeuille, profile)
 
 
 @router.post('/api/airs/accounts/{portefeuille}/monthly-benchmark/job')

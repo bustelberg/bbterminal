@@ -92,6 +92,52 @@ def test_daily_queue_pause_observes_shared_lease(monkeypatch, acquired, active):
     assert conn.execute.call_count == (2 if acquired else 1)
 
 
+@pytest.mark.parametrize('stage', ['connect', 'probe', 'unlock'])
+def test_queue_defers_on_database_shutdown_and_resumes_on_next_tick(monkeypatch, caplog, stage):
+    import common.pg
+    import psycopg
+    import scheduler
+    from asset_pipeline import queue
+    from unittest.mock import MagicMock, Mock
+
+    failed, healthy = MagicMock(), MagicMock()
+    for conn in (failed, healthy):
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (True,)
+    shutdown = psycopg.errors.AdminShutdown('terminating connection due to administrator command')
+    if stage == 'probe':
+        failed.execute.side_effect = shutdown
+    elif stage == 'unlock':
+        failed.execute.side_effect = [MagicMock(fetchone=lambda: (True,)), shutdown]
+    connect = Mock(side_effect=[shutdown if stage == 'connect' else failed, healthy])
+    monkeypatch.setattr(common.pg, '_db_url', lambda: 'test-database')
+    monkeypatch.setattr(psycopg, 'connect', connect)
+    monkeypatch.setattr(scheduler, '_scheduled_futures', {})
+    process = Mock(return_value={'processed': 0})
+    monkeypatch.setattr(queue, 'process_slice', process)
+
+    scheduler._fire_asset_ingest_queue()
+    process.assert_not_called()
+    assert 'deferring background work' in caplog.text
+    assert 'queue worker failed' not in caplog.text
+    scheduler._fire_asset_ingest_queue()
+    process.assert_called_once()
+    assert connect.call_count == 2
+    if stage != 'connect':
+        failed.__exit__.assert_called_once()
+
+
+def test_lock_probe_does_not_hide_programming_errors(monkeypatch):
+    import dashboard_daily
+    import common.pg
+    import psycopg
+    from unittest.mock import Mock
+    monkeypatch.setattr(common.pg, '_db_url', lambda: 'test-database')
+    monkeypatch.setattr(psycopg, 'connect', Mock(side_effect=psycopg.ProgrammingError('bad SQL')))
+    with pytest.raises(psycopg.ProgrammingError):
+        dashboard_daily.daily_refresh_active()
+
+
 def test_scheduled_fx_sync_stops_at_completed_market_day(monkeypatch):
     import scheduler
     import airs_vermogen

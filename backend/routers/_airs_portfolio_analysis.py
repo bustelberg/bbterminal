@@ -1714,6 +1714,27 @@ def _cash_currency(row: dict, wrapped_marks: dict[int, dict[str, dict]]) -> str 
     return next(iter(currencies)) if len(currencies) == 1 and None not in currencies else None
 
 
+def _model_class_categories(portfolio_id):
+    return {p['isin']: bucket for p in ref_positions_for(portfolio_id)
+            if p.get('isin') and (bucket := _class_from_categorie(p.get('categorie')))} if portfolio_id is not None else {}
+
+
+def classify_book_holding(row, grid, model_categories):
+    """The Holdings overview's asset-class precedence, shared with allocation research."""
+    from routers._airs_holding_isin import classify_bucket, forced_bucket
+    return (forced_bucket(row.get('holding_name'), grid) or model_categories.get(row.get('isin')) or row.get('bucket')
+            or classify_bucket(None, _is_fund(grid, row.get('holding_name') or ''),
+                               row.get('isin'), row.get('holding_name') or '', grid))
+
+
+def classify_account_holdings(account, rows):
+    from routers._airs_account_links import list_account_links
+    link = next((row for row in list_account_links()['accounts'] if row.get('portefeuille') == account), None)
+    categories = _model_class_categories(link.get('model_portfolio_id') if link else None)
+    grid = _grid(sorted({row['isin'] for row in rows if row.get('isin')}))
+    return [{**row, 'bucket': classify_book_holding(row, grid.get(row.get('isin')), categories)} for row in rows]
+
+
 def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     """The composition as the BOOK actually holds it — weighted by AIRS's EUR values, not the
     model's nominal percentages.
@@ -1732,7 +1753,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     Returns None when the model has no paired book, or the book resolves to nothing priceable.
     """
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
-    from routers._airs_holding_isin import (classify_bucket, forced_bucket, resolve_account_isins)  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
 
     account_links = list_account_links()["accounts"]
     link = next((a for a in account_links
@@ -1744,11 +1765,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # class (Mint Tower is an ``equity`` fund there while AIRS explicitly marks it ``ALTBEL``).
     # Use the model class wherever it is known so the book allocation says what AIRS says it
     # holds; fall back to the resolver/grid only for instruments outside that model.
-    model_categories = {
-        p.get("isin"): _class_from_categorie(p.get("categorie"))
-        for p in ref_positions_for(link["model_portfolio_id"])
-        if p.get("isin") and _class_from_categorie(p.get("categorie"))
-    }
+    model_categories = _model_class_categories(link['model_portfolio_id'])
     rows = (resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
     if not rows:
         return None
@@ -1826,10 +1843,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         # `resolve_account_isins` normally supplies this, but older/cached rows and test/import
         # callers may only carry the raw instrument fields. Never let a missing persisted bucket
         # turn a plainly identifiable stock into Unclassified in the allocation bar.
-        bucket = forced_bucket(r.get('holding_name'), grow) or model_categories.get(isin) or r.get("bucket")
-        if not bucket:
-            bucket = classify_bucket(None, _is_fund(grow, r.get("holding_name") or ""),
-                                    isin, r.get("holding_name") or "", grow)
+        bucket = classify_book_holding(r, grow, model_categories)
         items.append((w, b))
         label = {"name": r.get("holding_name"), "isin": isin,
                  "asset_class": bucket,

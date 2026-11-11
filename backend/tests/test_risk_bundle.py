@@ -138,6 +138,23 @@ def test_read_only_poll_does_not_prepare(monkeypatch, risk_request):
     prepare.assert_not_called()
 
 
+def test_updating_risk_keeps_saved_weekly_history_available(monkeypatch, risk_request):
+    import json
+    from jobs import UserFacingJobError
+    from routers import _airs_instrument_returns
+    monkeypatch.setattr(B, 'read_or_prepare', Mock(side_effect=UserFacingJobError('Risk data is still updating.')))
+    weekly = {'options': [{'id': 'A'}], 'instruments': {}}
+    monkeypatch.setattr(_airs_instrument_returns, 'bundle', lambda account: weekly)
+    response = risk_request(account='BOOK')
+    assert response.status_code == 202
+    assert response.headers['retry-after'] == '10'
+    assert json.loads(response.body) == {
+        'ready': False, 'available': False, 'detail': 'Risk data is still updating.',
+        'views': {'weekly-returns': weekly},
+    }
+    assert B.read_or_prepare.call_count == 1
+
+
 def test_waiting_for_quiet_sources_remains_cancellable(store):
     from jobs import JobCancelled
     ctx = SimpleNamespace(progress=Mock(), check=Mock(side_effect=JobCancelled('stopped')))

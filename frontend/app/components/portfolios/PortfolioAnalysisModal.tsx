@@ -28,7 +28,8 @@ import {
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
-import type { BookValueSeries, EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
+import type { BookValueSeries, EtfSectorAllocationResponse, EtfRegionAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
+import { addEtfRegionWeights } from './etfRegionLookThrough';
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
@@ -837,6 +838,15 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
             )}
           </label>
         )}
+        {axis === 'region' && etfControl && etfControl.count > 0 && <div className="flex items-center gap-1.5 text-[11px]">
+          <button type="button" aria-pressed={etfControl.enabled} title={copy.axes.addRegionEtfsTitle}
+            onClick={() => etfControl.onChange(!etfControl.enabled)}
+            className={`rounded-lg border border-neutral-800/40 px-2 py-1 transition-colors ${etfControl.enabled ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
+            {copy.axes.addEtfs}
+          </button>
+          {etfControl.enabled && etfControl.loading && <span role="status" className="text-fg-faint">{copy.axes.loadingEtfs}</span>}
+          {etfControl.enabled && !etfControl.loading && etfControl.unavailable > 0 && <span className="text-warn-300">{copy.axes.unavailableEtfs(etfControl.unavailable)}</span>}
+        </div>}
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{axisNote}</p>
       {/*  ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
@@ -3593,6 +3603,7 @@ export default function PortfolioAnalysisModal({
   const [error, setError] = useState<string | null>(null);
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
   const [includeEtfsInSector, setIncludeEtfsInSector] = useState(true);
+  const [includeEtfsInRegion, setIncludeEtfsInRegion] = useState(false);
   const eligibleSectorEtfs = useMemo(() => {
     const byIsin = new Map<string, BookHolding>();
     for (const holding of data?.book_holdings ?? []) {
@@ -3602,6 +3613,11 @@ export default function PortfolioAnalysisModal({
     return [...byIsin.values()].sort((a, b) => (a.isin ?? '').localeCompare(b.isin ?? ''));
   }, [data?.book_holdings]);
   const eligibleSectorEtfKey = eligibleSectorEtfs.map((holding) => holding.isin).join('|');
+  const eligibleRegionEtfs = useMemo(() => eligibleSectorEtfs.filter(holding => !assetFilter || holding.bucket === assetFilter), [eligibleSectorEtfs, assetFilter]);
+  const eligibleRegionEtfKey = eligibleRegionEtfs.map(holding => holding.isin).join('|');
+  const [etfRegionResult, setEtfRegionResult] = useState<{
+    key: string; allocations: Record<string, EtfRegionAllocationResponse>; unavailable: number;
+  } | null>(null);
   const eligibleCertificateSectorCount = useMemo(
     () => certificateSectorLookThroughCount(data?.book_holdings ?? []),
     [data?.book_holdings],
@@ -3868,6 +3884,31 @@ export default function PortfolioAnalysisModal({
     })();
     return () => controller.abort();
   }, [assetFilter, eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
+
+  useEffect(() => {
+    if (!includeEtfsInRegion || !eligibleRegionEtfKey || etfRegionResult?.key === eligibleRegionEtfKey) return;
+    const controller = new AbortController();
+    void (async () => {
+      const settled = await Promise.all(eligibleRegionEtfs.map(async holding => {
+        const isin = holding.isin!.trim().toUpperCase();
+        try {
+          const response = await apiFetch(`${API_URL}/api/airs/etf/${encodeURIComponent(isin)}/region-allocation`, { signal: controller.signal });
+          const body = await response.json().catch(() => null);
+          if (!response.ok) return [isin, null] as const;
+          return [isin, body as EtfRegionAllocationResponse] as const;
+        } catch { return [isin, null] as const; }
+      }));
+      if (controller.signal.aborted) return;
+      const allocations: Record<string, EtfRegionAllocationResponse> = {};
+      let unavailable = 0;
+      for (const [isin, allocation] of settled) {
+        if (allocation) allocations[isin] = allocation;
+        else unavailable++;
+      }
+      setEtfRegionResult({ key: eligibleRegionEtfKey, allocations, unavailable });
+    })();
+    return () => controller.abort();
+  }, [includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfRegionResult?.key]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -4234,10 +4275,13 @@ export default function PortfolioAnalysisModal({
                     const sectorRows = a.axis === 'sector' && includeEtfsInSector && !lookThrough
                       ? addCertificateSectorWeights(a.rows, data.book_holdings ?? [])
                       : a.rows;
-                    const rows = a.axis === 'sector' && includeEtfsInSector
+                    const fundRows = a.axis === 'sector' && includeEtfsInSector
                       ? addEtfSectorWeights(
                         sectorRows, data.book_holdings ?? [], loadedEtfAllocations,
                       ) : sectorRows;
+                    const rows = a.axis === 'region' && includeEtfsInRegion
+                      ? addEtfRegionWeights(fundRows, (data.book_holdings ?? []).filter(holding => !assetFilter || holding.bucket === assetFilter),
+                        etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {}) : fundRows;
                     return (
                     <Chart key={a.axis} axis={a.axis} rows={rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
@@ -4258,6 +4302,11 @@ export default function PortfolioAnalysisModal({
                           && etfSectorResult?.key !== eligibleSectorEtfKey,
                         unavailable: etfSectorResult?.key === eligibleSectorEtfKey
                           ? etfSectorResult.unavailable : 0,
+                      } : a.axis === 'region' && eligibleRegionEtfs.length ? {
+                        enabled: includeEtfsInRegion, onChange: setIncludeEtfsInRegion,
+                        count: eligibleRegionEtfs.length,
+                        loading: includeEtfsInRegion && etfRegionResult?.key !== eligibleRegionEtfKey,
+                        unavailable: etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.unavailable : 0,
                       } : undefined} />
                     );
                   })}

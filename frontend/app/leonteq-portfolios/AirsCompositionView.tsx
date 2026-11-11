@@ -15,6 +15,7 @@ export type AirsComposition = {
   portfolio: string; portfolio_id: number; datum: string | null; dates: string[]; rows: Position[];
   cached_at?: string; retrieved_at?: string; no_fixed_model?: boolean;
   snapshot_saved?: boolean;
+  already_at_target?: boolean;
   cache_upgrade_available?: boolean;
 };
 

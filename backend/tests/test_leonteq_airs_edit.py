@@ -41,6 +41,17 @@ def test_percentage_edit_verifies_remote_result_and_refreshes_latest_cache(setup
     assert fetch.call_args.kwargs == {'datum': '2025-02-14', 'metadata': before}
 
 
+def test_manual_revert_is_verified_as_a_noop_without_resubmitting(setup):
+    db, before, _, fetch, update, save = setup
+    result = airs_edit.update_percentage(1, 18137, '2025-02-14', Decimal('5.5'), Decimal('4.95'))
+    assert result['already_at_target'] is True
+    assert result['rows'] == before['rows']
+    fetch.assert_called_once_with(1, datum='2025-02-14')
+    update.assert_not_called()
+    save.assert_called_once()
+    assert db.tables['airs_model_portfolio'][0]['positions_schema_version'] == 3
+
+
 @pytest.mark.parametrize('row_id,expected', [(18138, '4.95'), (18137, '5')])
 def test_stale_or_wrong_row_is_refused_before_saving(setup, row_id, expected):
     db, before, after, fetch, update, save = setup

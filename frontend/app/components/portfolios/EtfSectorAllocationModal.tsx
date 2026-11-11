@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { useLang } from '../../../lib/i18n';
 import { colorForSector } from '../../../lib/sectorColors';
-import type { EtfSectorAllocationResponse } from '../../../lib/types/api';
+import type { EtfSectorAllocationResponse, EtfRegionAllocationResponse } from '../../../lib/types/api';
 import PanelDialog from './PanelDialog';
 import LoadingDots from './LoadingDots';
 import {
@@ -20,8 +20,11 @@ export default function EtfSectorAllocationModal({
   initialData?: EtfSectorAllocationResponse; onClose: () => void;
 }) {
   const [lang] = useLang();
-  const [data, setData] = useState<EtfSectorAllocationResponse | null>(initialData ?? null);
-  const [error, setError] = useState<string | null>(null);
+  const [sectorData, setData] = useState<EtfSectorAllocationResponse | null>(initialData ?? null);
+  const [sectorError, setError] = useState<string | null>(null);
+  const [regionData, setRegionData] = useState<EtfRegionAllocationResponse | null>(null);
+  const [regionError, setRegionError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'sector' | 'region'>('sector');
 
   useEffect(() => {
     if (initialData || !isin) return undefined;
@@ -43,12 +46,37 @@ export default function EtfSectorAllocationModal({
     return () => controller.abort();
   }, [initialData, isin]);
 
+  const regional = regionData?.isin === isin?.trim().toUpperCase() ? regionData : null;
+  useEffect(() => {
+    if (tab !== 'region' || !isin || regional) return;
+    const controller = new AbortController();
+    setRegionError(null);
+    void (async () => {
+      try {
+        const response = await apiFetch(`${API_URL}/api/airs/etf/${encodeURIComponent(isin)}/region-allocation`, { signal: controller.signal });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+        if (!controller.signal.aborted) setRegionData(body as EtfRegionAllocationResponse);
+      } catch (reason) {
+        if (!controller.signal.aborted) setRegionError(reason instanceof Error ? reason.message : String(reason));
+      }
+    })();
+    return () => controller.abort();
+  }, [tab, isin, regional]);
+
+  // The same allocation table renders either taxonomy; source labels and weights stay intact.
+  const data = tab === 'sector' ? sectorData : regional ? { ...regional, sectors: regional.regions.map(row => ({
+    sector: row.region, weight_pct: row.weight_pct, provider_sectors: row.provider_weights.map(item => item.country),
+    provider_weights: row.provider_weights.map(item => ({ sector: item.country, weight_pct: item.weight_pct })),
+  })) } : null;
+  const error = tab === 'sector' ? sectorError : regionError;
+
   const date = data?.as_of
     ? new Intl.DateTimeFormat(lang === 'nl' ? 'nl-NL' : 'en-GB', {
       day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
     }).format(new Date(`${data.as_of}T00:00:00Z`))
     : null;
-  const labels = lang === 'nl'
+  const sectorLabels = lang === 'nl'
     ? { title: 'Sectorverdeling', asOf: 'Per', source: 'Bron', close: 'Sluiten',
       providerSector: 'Oorspronkelijke sector', originalWeight: 'Origineel',
       ourSector: 'Onze sector', ourWeight: 'Onze fondsweging', currentWeight: 'Actueel gewicht',
@@ -63,7 +91,14 @@ export default function EtfSectorAllocationModal({
       total: 'Total',
       holdingWeight: (weight: string) => `This fund is ${weight}% of the current portfolio.`,
       loading: 'Loading sector weights', failed: 'Sector allocation could not be loaded.' };
-  const mappedSectors = collapseEtfSectors(data?.sectors ?? []);
+  const labels = tab === 'sector' ? sectorLabels : { ...sectorLabels,
+    title: lang === 'nl' ? 'Regioverdeling' : 'Region allocation',
+    providerSector: lang === 'nl' ? 'Oorspronkelijk land' : 'Original country',
+    ourSector: lang === 'nl' ? 'Onze regio' : 'Our region',
+    loading: lang === 'nl' ? 'Regiowegingen laden' : 'Loading region weights',
+    failed: lang === 'nl' ? 'Regioverdeling kon niet worden geladen.' : 'Region allocation could not be loaded.',
+  };
+  const mappedSectors = tab === 'sector' ? collapseEtfSectors(data?.sectors ?? []) : data?.sectors ?? [];
   const sourceTotal = mappedSectors.reduce((sum, row) => sum + row.weight_pct, 0);
   const ourTotal = mappedSectors.reduce(
     (sum, row) => sum + normalizedEtfSectorWeight(row.weight_pct, sourceTotal), 0,
@@ -97,7 +132,22 @@ export default function EtfSectorAllocationModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto py-4">
+        <div role="tablist" aria-label={lang === 'nl' ? 'Fondsverdeling' : 'Fund allocation'}
+          className="mt-4 inline-flex w-fit shrink-0 rounded-lg border border-neutral-800/40 text-xs">
+          {(['sector', 'region'] as const).map((key) => <button key={key} type="button" role="tab"
+            id={`etf-allocation-tab-${key}`} aria-selected={tab === key} aria-controls={`etf-allocation-panel-${key}`}
+            tabIndex={tab === key ? 0 : -1} onClick={() => setTab(key)}
+            onKeyDown={(event) => {
+              const next = event.key === 'Home' ? 'sector' : event.key === 'End' ? 'region'
+                : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? key === 'sector' ? 'region' : 'sector' : null;
+              if (next) { event.preventDefault(); setTab(next); document.getElementById(`etf-allocation-tab-${next}`)?.focus(); }
+            }} className={`px-3 py-1.5 font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${tab === key ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}>
+            {key === 'sector' ? 'Sector' : lang === 'nl' ? 'Regio' : 'Region'}
+          </button>)}
+        </div>
+
+        {(['sector', 'region'] as const).map(key => <div key={key} role="tabpanel" id={`etf-allocation-panel-${key}`} aria-labelledby={`etf-allocation-tab-${key}`}
+          hidden={tab !== key} className="min-h-0 flex-1 overflow-auto py-4">{tab === key && <>
           {!data && !error && (
             <div className="flex h-full items-center justify-center text-sm text-fg-muted">
               {labels.loading}<LoadingDots />
@@ -185,7 +235,7 @@ export default function EtfSectorAllocationModal({
               </div>
             </div>
           )}
-        </div>
+        </>}</div>)}
 
         {data && date && (
           <div className="shrink-0 border-t border-neutral-800/30 pt-3 text-[11px] text-fg-faint">

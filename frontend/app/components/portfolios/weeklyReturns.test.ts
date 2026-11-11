@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, weeklyCorrelation, type WeeklyCell, type WeeklyReturns } from './weeklyReturns';
+import { instrumentLabel, searchInstruments, weeklyBars, visibleWeeklyReturns, periodReturn, fullHistoryReturn, weeklyCorrelation, type WeeklyCell, type WeeklyReturns } from './weeklyReturns';
 
 describe('Instrument-only weekly returns', () => {
   const options = [
@@ -49,6 +49,23 @@ describe('Instrument-only weekly returns', () => {
     const sample = data();
     sample.selected!.weeks[1] = { status: 'missing_price', from_price: 110, price: null, return_pct: null };
     expect(periodReturn(sample)?.value).toBeCloseTo(-1);
+  });
+  it('full history uses actual first and last quotes while retaining unheld or missing weeks', () => {
+    const sample = data();
+    sample.selected!.weeks[0].from_price = null;
+    sample.selected!.weeks[2].price = null;
+    const result = fullHistoryReturn(sample);
+    expect(result).toEqual({ value: expect.closeTo(-10), from: '2026-01-04', to: '2026-01-11' });
+    expect(sample.selected!.weeks[2].price).toBeNull();
+    expect(fullHistoryReturn(undefined)).toBeNull();
+  });
+  it('draws only actual non-zero returns, with dates and quote cells aligned', () => {
+    const sample = data();
+    sample.selected!.weeks[0] = { status: 'missing_price', return_pct: null, price: null };
+    const visible = visibleWeeklyReturns(sample);
+    expect(visible.periods.map(period => period.target_date)).toEqual(['2026-01-11']);
+    expect(visible.selected!.weeks.map(cell => cell.return_pct)).toEqual([-10]);
+    expect(sample.periods).toHaveLength(3);
   });
   it('calculates positive and negative correlation from paired weekly returns', () => {
     const a = data(), b = data();

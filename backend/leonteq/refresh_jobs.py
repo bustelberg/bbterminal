@@ -35,7 +35,7 @@ _FAILURES = {
 
 
 def run(ctx, operation: str, *, name: str | None = None, portfolio_id: int | None = None,
-        datum: str | None = None, lang: str = 'en', source=None, isin=None, holding_name=None):
+        datum: str | None = None, lang: str = 'en', source=None, isin=None, holding_name=None, days=7):
     from leonteq import portfolio_cache, composition_cache, airs_models, monthly_performance
 
     def say(en, nl=None):
@@ -70,6 +70,10 @@ def run(ctx, operation: str, *, name: str | None = None, portfolio_id: int | Non
                 summary = f'{name}: monthly returns and differences refreshed.'
                 if lang == 'nl':
                     summary = f'{name}: maandrendementen en verschillen vernieuwd.'
+            elif operation == 'transactions':
+                from leonteq.recent_transactions import run as recent
+                payload = recent(ctx, name, portfolio_id, days)
+                summary = f'{len(payload["transactions"])} booked trades ready for individual weight review.'
             elif operation == 'prices':
                 from leonteq.price_checks import run as check_prices
                 payload = check_prices(ctx, name=name, portfolio_id=portfolio_id, source=source,

@@ -49,6 +49,7 @@ import VolatilityView from './VolatilityView';
 import DrawdownView from './DrawdownView';
 import ConcentrationView from './ConcentrationView';
 import WeeklyReturnsPanel from './WeeklyReturnsPanel';
+import WeightsPanel from './WeightsPanel';
 
 const riskLoading = () => <p role="status" className="text-sm text-fg-muted">Loading risk…</p>;
 const TrackingErrorView = dynamic(() => import('./TrackingErrorView'), { loading: riskLoading });
@@ -199,7 +200,8 @@ export default function ActiveSharePanel({
    * changing views neither reloads history nor recalculates the risk measures.
    */
   const [view, setView] =
-    useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns'>('active');
+    useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns' | 'weights'>('active');
+  const [weightsOpened, setWeightsOpened] = useState(false);
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
@@ -284,7 +286,7 @@ export default function ActiveSharePanel({
       <div className="relative shrink-0 text-center">
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-fg-strong">
-            {view === 'returns' ? 'AIRS · Huidige koers' : t.subtitle(portfolioName, selectedPortfolioAsOf)}
+            {view === 'returns' || view === 'weights' ? 'AIRS · Huidige koers' : t.subtitle(portfolioName, selectedPortfolioAsOf)}
           </h4>
           {/*  A TWO-POSITION SEGMENTED CONTROL, JOINED — which is the shape that means "exactly
               one of these". The filter chips elsewhere in this modal are separate pills because
@@ -306,8 +308,8 @@ export default function ActiveSharePanel({
                 here in one language is exactly the drift `riskCopy`'s compile-time guarantee
                 exists to prevent. */}
             {/* Tracking error is temporarily hidden; keep its implementation below. */}
-            {(['active', 'corr', 'vol', 'dd', 'conc', 'returns'] as const).map((k) => (
-              <button key={k} type="button" onClick={() => setView(k)}
+            {(['active', 'corr', 'vol', 'dd', 'conc', 'returns', 'weights'] as const).map((k) => (
+              <button key={k} type="button" onClick={() => { if (k === 'weights') setWeightsOpened(true); setView(k); }}
                 aria-pressed={view === k}
                 className={`cursor-pointer px-3 py-1.5 font-medium whitespace-nowrap
                   transition-colors ${
@@ -328,6 +330,7 @@ export default function ActiveSharePanel({
 
       {/* Each view renders from the shared Risk bundle. */}
       {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}
+      <div hidden={view !== 'weights'}>{weightsOpened && <WeightsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}</div>
       {view === 'te' && (
         <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           portefeuille={portefeuille}

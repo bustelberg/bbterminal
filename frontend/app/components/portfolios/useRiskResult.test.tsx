@@ -11,10 +11,10 @@ it('switches prepared views without any per-tab loader calls', async () => {
   const root = createRoot(host);
   const load = vi.fn(async () => ({ value: 'unexpected request' }));
   function Probe({ view }: { view: string }) {
-    const { data } = useRiskResult<{ value: string }>(view, load, view, 'failed');
-    return <span>{data?.value}</span>;
+    const { data, error } = useRiskResult<{ value: string }>(view, load, view, 'failed');
+    return <span>{error ?? data?.value}</span>;
   }
-  const bundle = { views: { volatility: { value: 'saved volatility' }, drawdown: { value: 'saved drawdown' } }, error: null };
+  const bundle = { views: { volatility: { value: 'saved volatility' }, drawdown: { value: 'saved drawdown' } }, error: 'Other risk data is updating' };
   try {
     await act(async () => root.render(<RiskBundleContext.Provider value={bundle}><Probe view="volatility" /></RiskBundleContext.Provider>));
     expect(host.textContent).toBe('saved volatility');

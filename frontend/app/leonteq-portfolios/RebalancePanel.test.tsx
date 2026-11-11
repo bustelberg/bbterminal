@@ -13,7 +13,7 @@ vi.mock('./refreshProgress', async (importOriginal) => ({
 }));
 it('uses the same saved preview in both modes without upgrading metadata or fetching live data', async () => {
   vi.mocked(apiFetch).mockImplementation(async (url) => ({ ok: true, json: async () => {
-    if (url.endsWith('/portfolio-links')) return { links: [{ leonteq_name: 'Source', airs_name: 'Fixed', airs_portfolio_id: 1 }] };
+    if (url.endsWith('/portfolio-links?kind=fixed')) return { links: [{ leonteq_name: 'Source', airs_name: 'Fixed', airs_portfolio_id: 1 }] };
     if (url.includes('/holdings?')) return { rules: [] };
     if (url.includes('/airs/')) return { datum: '2026-07-05', cache_upgrade_available: !url.includes('refresh=true'),
       rows: [{ id: url.includes('refresh=true') ? 99 : null, Fonds: 'Apple', ISINCode: 'US0378331005', Percentage: url.includes('refresh=true') ? 4.5 : 4 }] };
@@ -23,6 +23,7 @@ it('uses the same saved preview in both modes without upgrading metadata or fetc
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
     await act(async () => root.render(<RebalancePanel />));
+    expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/portfolio-links?kind=fixed'), { cache: 'no-store', noReadCache: true });
     await act(async () => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
     await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Prepare action list')!.click());
     expect(vi.mocked(apiFetch).mock.calls.filter(([url]) => url.includes('composition?refresh=true'))).toHaveLength(0);
@@ -69,7 +70,7 @@ it('rejects invalid weights and ambiguous or unmatched rows, preserving explicit
   expect(rebalancePlan([row, row], [row], []).issues).toContain('Ambiguous match: US0378331005');
   expect(rebalancePlan([row], [row], [{ leonteq_key: 'isin:US0378331005', airs_key: null }]).issues).not.toHaveLength(0);
 });
-it.each(['complete', 'limit', 'stop-before-first', 'stop-after-first', 'live-limit', 'live-failure', 'live-stop', 'live-revert', 'live-revert-failure', 'live-single'])('runs with mocked APIs: %s', async (scenario) => {
+it.each(['complete', 'limit', 'stop-before-first', 'stop-after-first', 'live-limit', 'live-failure', 'live-stop', 'live-revert', 'live-revert-already', 'live-revert-failure', 'live-single'])('runs with mocked APIs: %s', async (scenario) => {
   vi.useFakeTimers();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const names = ['Apple', 'Microsoft', 'Nvidia'];
@@ -81,9 +82,9 @@ it.each(['complete', 'limit', 'stop-before-first', 'stop-after-first', 'live-lim
     return { ok: !(options?.method === 'PATCH' && (scenario === 'live-failure' || (scenario === 'live-revert-failure' && percentage === 4))), json: async () => {
     if (options?.method === 'PATCH') {
       const id = Number(url.match(/positions\/(\d+)/)?.[1] ?? 1);
-      return { datum: '2026-07-05', rows: [{ id, Fonds: names[id - 1], ISINCode: isins[id - 1], Percentage: percentage }] };
+      return { datum: '2026-07-05', already_at_target: scenario === 'live-revert-already' && percentage === 4, rows: [{ id, Fonds: names[id - 1], ISINCode: isins[id - 1], Percentage: percentage }] };
     }
-    if (url.endsWith('/portfolio-links')) return { links: [{ leonteq_name: 'Source', airs_name: 'Target', airs_portfolio_id: 1 }] };
+    if (url.endsWith('/portfolio-links?kind=fixed')) return { links: [{ leonteq_name: 'Source', airs_name: 'Target', airs_portfolio_id: 1 }] };
     if (url.includes('/holdings?')) return { rules: [] };
     if (url.includes('/airs/')) return { datum: '2026-07-05', rows: names.map((Fonds, i) => ({ id: i + 1, Fonds, ISINCode: isins[i], Percentage: 4 })) };
     return { success: true, groups: [{ positions: names.map((name, i) => ({ name, isin: isins[i], weight: '5%' })) }] };
@@ -150,7 +151,7 @@ it.each(['complete', 'limit', 'stop-before-first', 'stop-after-first', 'live-lim
         const writesAfterRevert = vi.mocked(apiFetch).mock.calls.filter(([, options]) => options?.method === 'PATCH');
         expect(writesAfterRevert).toHaveLength(2);
         expect(JSON.parse(writesAfterRevert[1][1]!.body as string)).toEqual({ datum: '2026-07-05', expected_percentage: 5, percentage: 4 });
-        expect(host.textContent).toContain(scenario === 'live-revert' ? 'restored to 4% and verified' : 'Revert failed');
+        expect(host.textContent).toContain(scenario === 'live-revert' ? 'restored to 4% and verified' : scenario === 'live-revert-already' ? 'already restored to 4% in AIRS' : 'Revert failed');
         expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent === 'Revert')).toBe(false);
         return;
       }

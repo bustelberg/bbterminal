@@ -1035,7 +1035,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           {/* Narrow fixed action/numeric columns, with the remaining width for names.
               The table scrolls within this card on small screens. */}
           <table className="w-full min-w-[60rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[11rem]" /><col className="w-[11rem]" /><col className="w-[9rem]" /></colgroup>
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[9rem]" /><col className="w-[7rem]" /><col className="w-[11rem]" /><col className="w-[11rem]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1044,6 +1044,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <th className="px-2 py-2.5 font-medium text-right w-8">#</th>
                 <th className="px-2 py-2.5 font-medium text-left" />{/* Analyse */}
                 <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortTh label="Month-to-date" k="mtd" align="right"
+                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
+                  title="This month's return, reported by AIRS Rendementen. Shown only when AIRS has a value for the current month." />
                 <SortTh label="Year-to-date" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
@@ -1051,9 +1054,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                   title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">{t.overviewDates.since}</th>
                 <th className="px-2 py-2.5 font-medium text-right normal-case"
                   title="Latest AIRS valuation date available for this portfolio.">{t.overviewDates.to}</th>
-                <SortTh label="Month-to-date" k="mtd" align="right"
-                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
-                  title="This month's return, reported by AIRS Rendementen. Shown only when AIRS has a value for the current month." />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1258,6 +1258,14 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             : 'name — the AIRS book itself; no Fixed portfolio paired'} />
                         </div>
                       </td>
+                      <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(monthToDate(r))}`}>
+                        {pct(monthToDate(r))}
+                        <Provenance source="airs_att" asOf={r.periode} fetchedAt={r.fetched_at} kind="copied"
+                          onRefresh={async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
+                          what="This month's return, as AIRS reports it."
+                          staleReason={r.periode?.slice(0, 7) !== currentMonth ? 'AIRS has not reported a return for this month yet'
+                            : r.missing_reports?.includes('att') ? 'Rendement was missing from the latest AIRS scan' : undefined} />
+                      </td>
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
@@ -1279,14 +1287,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                         {r.as_of ? new Intl.DateTimeFormat('en-GB', {
                           day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
                         }).format(new Date(`${r.as_of}T00:00:00Z`)) : '—'}
-                      </td>
-                      <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(monthToDate(r))}`}>
-                        {pct(monthToDate(r))}
-                        <Provenance source="airs_att" asOf={r.periode} fetchedAt={r.fetched_at} kind="copied"
-                          onRefresh={async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
-                          what="This month's return, as AIRS reports it."
-                          staleReason={r.periode?.slice(0, 7) !== currentMonth ? 'AIRS has not reported a return for this month yet'
-                            : r.missing_reports?.includes('att') ? 'Rendement was missing from the latest AIRS scan' : undefined} />
                       </td>
                     </tr>
                     {isOpen && (

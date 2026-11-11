@@ -27,6 +27,14 @@ it('surfaces a failed preparation without another request', async () => {
   expect(apiFetch).toHaveBeenCalledOnce();
 });
 
+it('returns saved AIRS history during risk updates without caching an incomplete bundle', async () => {
+  const partial = { ready: false, available: false, detail: 'Risk data is still updating.',
+    views: { 'weekly-returns': { options: [{ id: 'A' }] } } };
+  vi.mocked(apiFetch).mockResolvedValue(reply(partial, 202));
+  expect(await loadRiskBundle('{}')).toEqual(partial);
+  expect(readRiskResult('risk-bundle\n{}')).toBeNull();
+});
+
 it('does not cache a response completed after the client data generation changed', async () => {
   let finish!: (response: Response) => void;
   vi.mocked(apiFetch).mockImplementation(() => new Promise<Response>((resolve) => { finish = resolve; }));

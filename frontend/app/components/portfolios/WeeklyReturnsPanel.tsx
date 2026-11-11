@@ -7,7 +7,8 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { startJob } from '../../../lib/stores/jobs';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { useLang } from '../../../lib/i18n';
-import { instrumentLabel, searchInstruments, weeklyBars, periodReturn, weeklyCorrelation, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
+import { weeklyAxisTicks } from './weeklyAxisTicks';
+import { instrumentLabel, searchInstruments, weeklyBars, visibleWeeklyReturns, periodReturn, fullHistoryReturn, weeklyCorrelation, type WeeklyReturns, type InstrumentOption } from './weeklyReturns';
 
 const day = (value: string | null, nl: boolean) => value
   ? new Date(`${value}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
@@ -80,7 +81,23 @@ type LinkedWeeks = {
   window: [string, string] | null; onWindow: (window: [string, string] | null) => void;
 };
 
-function ReturnChart({ data, nl, scale, linked }: { data: WeeklyReturns; nl: boolean; scale: number; linked: LinkedWeeks }) {
+export function ReturnChart({ data: source, nl, scale, linked }: { data: WeeklyReturns; nl: boolean; scale: number; linked: LinkedWeeks }) {
+  const data = useMemo(() => visibleWeeklyReturns(source), [source]);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [chartWidth, setChartWidth] = useState(960);
+  useEffect(() => {
+    const element = svgRef.current;
+    if (!element) return;
+    const measure = () => setChartWidth(element.getBoundingClientRect().width || 960);
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      globalThis.addEventListener('resize', measure);
+      return () => globalThis.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const drag = useRef<{ start: string; previous: [string, string] | null } | null>(null);
   const { hovered, onHover, window, onWindow } = linked;
   const found = data.periods.findIndex((period) => period.target_date === hovered);
@@ -123,17 +140,12 @@ function ReturnChart({ data, nl, scale, linked }: { data: WeeklyReturns; nl: boo
           <rect x={x - step / 2} y={top} width={step} height={bottom - top} fill="transparent" />
         </g>;
       })}
-      <text x={left} y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
-      {data.periods.map((period, index) => {
-        if (!index || index > bars.length - 3 || period.target_date.slice(0, 7) === data.periods[index - 1].target_date.slice(0, 7)) return null;
-        const label = new Date(`${period.target_date}T12:00:00`).toLocaleDateString(nl ? 'nl-NL' : 'en-GB', { month: 'short' });
-        return <text key={period.target_date} x={left + step * (index + .5)} y="292" textAnchor="middle" fill="currentColor" fontSize="11">{label}</text>;
-      })}
-      <text x={right} y="292" textAnchor="end" fill="currentColor" fontSize="11">{day(data.through, nl)}</text>
+      {weeklyAxisTicks(data.periods.map(period => period.target_date), data.start_date, data.through, chartWidth, nl).map(tick =>
+        <text key={`${tick.x}-${tick.label}`} x={tick.x} y="292" textAnchor={tick.anchor} fill="currentColor" fontSize={11 * 960 / Math.max(160, chartWidth)}>{tick.label}</text>)}
       {!bars.some((value) => value != null) && <text x="495" y="105" textAnchor="middle" fill="currentColor" fontSize="13">{nl ? 'Nog geen wekelijkse rendementen beschikbaar' : 'No weekly returns available yet'}</text>}
     </>;
     return { content, bars, labels, weekLabels: data.periods.map((period) => weekLabel(period.target_date)), left, right, step, top, bottom, mid, width, limit };
-  }, [data, nl, scale, onHover]);
+  }, [data, nl, scale, onHover, chartWidth]);
   const { bars, labels, left, right, step, top, bottom, mid, width, limit } = chart;
   const activePeriod = active === null ? undefined : data.periods[active];
   const activeValue = active === null ? null : bars[active];
@@ -153,7 +165,7 @@ function ReturnChart({ data, nl, scale, linked }: { data: WeeklyReturns; nl: boo
   }
   const selectedIndices = window ? data.periods.flatMap((period, index) =>
     period.target_date >= window[0] && period.target_date <= window[1] ? [index] : []) : [];
-  return <svg viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf 1 januari 2026' : 'Weekly price changes from 1 January 2026'}`} className="w-full min-w-0 touch-none select-none text-fg-subtle"
+  return <svg ref={svgRef} viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf' : 'Weekly price changes from'} ${day(data.start_date, nl)}`} className="w-full min-w-0 touch-none select-none text-fg-subtle"
     onPointerLeave={() => { if (!drag.current) onHover(null); }}
     onPointerDown={(event) => {
       if (event.button !== 0) return;
@@ -198,7 +210,7 @@ function ReturnChart({ data, nl, scale, linked }: { data: WeeklyReturns; nl: boo
 }
 
 type WeeklyReturnsBundle = Pick<WeeklyReturns, 'portefeuille' | 'start_date' | 'through' | 'options'> & {
-  instruments: Record<string, Pick<WeeklyReturns, 'selected' | 'periods' | 'missing_observations'>>;
+  instruments: Record<string, Pick<WeeklyReturns, 'selected' | 'periods' | 'missing_observations'> & Partial<Pick<WeeklyReturns, 'start_date' | 'ytd_return'>>>;
 };
 
 function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
@@ -223,7 +235,9 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
       through: bundle.through, options: bundle.options, ...series };
   }, [bundle, selectedId, liveData, portefeuille]);
   useEffect(() => { onData(data ?? null); }, [data, onData]);
-  const ytd = useMemo(() => periodReturn(data), [data]);
+  const ytd = useMemo(() => data?.ytd_return !== undefined ? data.ytd_return
+    : data?.start_date.slice(0, 4) === data?.through.slice(0, 4) ? periodReturn(data) : null, [data]);
+  const fullReturn = useMemo(() => fullHistoryReturn(data), [data]);
   const selectedReturn = useMemo(() => linked.window ? periodReturn(data, linked.window) : null, [data, linked.window]);
   const returnColor = (value: number | undefined) => value == null || value === 0 ? 'text-fg' : value > 0 ? 'text-pos-300' : 'text-neg-300';
   const quoteDates = (value: ReturnType<typeof periodReturn>) => value
@@ -276,17 +290,18 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
 
   if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
   return <div className="flex min-w-0 flex-col rounded-xl border border-neutral-800/30 bg-elevated/30 p-3">
-    <div className="flex h-20 shrink-0 flex-col items-start gap-2">
+    <div className="flex h-24 shrink-0 flex-col items-start gap-2">
       <div className="flex w-full items-start justify-between gap-2">
         <InstrumentPicker options={options} selected={chosen} onSelect={choose} nl={nl} />
         <div className="shrink-0 text-right" title={chosen ? quoteDates(ytd) : undefined}>
           <div className="text-[10px] font-medium text-fg-muted">YTD</div>
           <div className={`text-lg font-semibold tabular-nums ${returnColor(ytd?.value)}`}>{ytd ? percent(ytd.value) : '—'}</div>
+          <div className="text-[10px] text-fg-muted" title={quoteDates(fullReturn)}>{nl ? 'Volledige historie' : 'Full history'} {fullReturn ? percent(fullReturn.value) : '—'}</div>
         </div>
       </div>
       <button type="button" disabled={busy || !chosen} onClick={() => void loadHistory()}
         className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-xs font-medium text-fg-muted hover:text-accent-300 disabled:opacity-50">
-        {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Ontbrekende geschiedenis laden' : 'Load missing history')}
+        {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Volledige geschiedenis laden' : 'Load full history')}
       </button>
     </div>
     <div className="max-h-9 shrink-0 overflow-y-auto">
@@ -301,7 +316,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
         <text x="495" y="110" textAnchor="middle" fill="currentColor" fontSize="16">
           {!bundle && !riskBundle?.error ? (nl ? 'Rendementen laden…' : 'Loading returns…') : (nl ? 'Kies een instrument' : 'Choose an instrument')}
         </text>
-        <text x="65" y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
+        <text x="65" y="292" fill="currentColor" fontSize="11">{nl ? 'Beschikbare AIRS-historie' : 'Available AIRS history'}</text>
       </svg>}
     </div>
     <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-t border-neutral-800/30 pt-2" title={chosen && linked.window ? quoteDates(selectedReturn) : undefined}>
@@ -334,7 +349,7 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
   return <div className="flex w-full min-w-0 flex-col gap-2">
     <div className="flex h-6 shrink-0 items-center justify-between gap-2 text-xs text-fg-muted">
-      <span>{window ? `${day(weekStart(window[0]) < '2026-01-01' ? '2026-01-01' : weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
+      <span>{window ? `${day(weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
       {window && <button type="button" className="text-accent-300 hover:underline" onClick={() => onWindow(null)}>{lang === 'nl' ? 'Selectie wissen' : 'Clear selection'}</button>}
     </div>
     <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">

@@ -91,6 +91,7 @@ export type PortfolioCorrelationMatrix = components['schemas']['PortfolioCorrela
 // because an ETF's listing tells you nothing about what it holds.
 export type ModelPortfolioAnalysis = components['schemas']['ModelPortfolioAnalysis'];
 export type EtfSectorAllocationResponse = components['schemas']['EtfSectorAllocationResponse'];
+export type EtfRegionAllocationResponse = components['schemas']['EtfRegionAllocationResponse'];
 export type EtfSectorWeight = components['schemas']['EtfSectorWeight'];
 // Brinson-Fachler: WHY a model beat or lagged the index. Allocation (the right buckets?) vs
 // selection (the right names inside them?) — different mistakes with different fixes. The three

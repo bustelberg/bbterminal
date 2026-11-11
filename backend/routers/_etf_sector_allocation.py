@@ -263,7 +263,7 @@ def parse_justetf_sector_payload(
     )
 
 
-def _tracked_get(session: requests.Session, url: str, *, source: str) -> requests.Response:
+def _tracked_get(session: requests.Session, url: str, *, source: str, job: str = 'etf_sector_allocation') -> requests.Response:
     status: int | None = None
     body = ""
     try:
@@ -274,7 +274,7 @@ def _tracked_get(session: requests.Session, url: str, *, source: str) -> request
         return response
     finally:
         track_api_call(
-            supabase, source=source, region="global", job="etf_sector_allocation",
+            supabase, source=source, region="global", job=job,
             outcome=classify_outcome(status, has_data=bool(body)),
         )
 

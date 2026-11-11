@@ -24,7 +24,7 @@ async function readOptions(kind: 'fixed' | 'dynamic'): Promise<Options> {
   return await response.json() as Options;
 }
 
-function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
+function LinksPanel({ kind, active }: { kind: 'fixed' | 'dynamic'; active: boolean }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
   const [data, setData] = useState<Options | null>(null);
@@ -41,13 +41,21 @@ function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
   const inFlight = useRef(false);
 
   useEffect(() => {
+    if (!active) return;
     alive.current = true;
-    let active = true;
-    void readOptions(kind).then((options) => { if (active) setData(options); })
-      .catch(() => { if (active) setError('load'); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; alive.current = false; };
-  }, [kind]);
+    const cache = holdingsCache.current, savedRules = rulesCache.current;
+    let current = true;
+    void readOptions(kind).then((options) => {
+      if (current) { setData(options); setError(null); if (!inFlight.current) setBusy(false); }
+    })
+      .catch(() => { if (current) setError('load'); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => {
+      current = false; alive.current = false;
+      // Rebalance may add/edit AIRS positions while Connections is hidden.
+      cache.clear(); savedRules.clear();
+    };
+  }, [kind, active]);
 
   async function reload() {
     if (inFlight.current) return;
@@ -96,6 +104,7 @@ function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
   const targetOptions = (data?.airs_portfolios ?? []).filter((row) => !connectedTargets.has(row.id));
   const valid = sourceOptions.some((row) => row.name === source)
     && targetOptions.some((row) => row.id === Number(target));
+  if (!active) return null;
   if (selected) return <ConnectionHoldingsView key={JSON.stringify([selected.leonteq_name, selected.airs_portfolio_id])}
     link={selected} cache={holdingsCache.current} rulesCache={rulesCache.current} onBack={() => setSelected(null)} />;
   return <section className="space-y-5" aria-labelledby="portfolio-connections-heading" aria-busy={loading || busy}>
@@ -148,12 +157,12 @@ function LinksPanel({ kind }: { kind: 'fixed' | 'dynamic' }) {
   </section>;
 }
 
-export default function PortfolioLinksPanel() {
+export default function PortfolioLinksPanel({ active = true }: { active?: boolean }) {
   const [kind, setKind] = useState<'fixed' | 'dynamic'>('fixed');
   return <div className="space-y-4">
     <div className="inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs" aria-label="Connection type">
       {(['fixed', 'dynamic'] as const).map((value) => <button key={value} type="button" aria-pressed={kind === value} onClick={() => setKind(value)} className={`shrink-0 px-3 py-1.5 font-medium transition-colors ${kind === value ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}>{value === 'fixed' ? 'Leonteq to AIRS Fixed' : 'Leonteq to AIRS Dynamic'}</button>)}
     </div>
-    <LinksPanel key={kind} kind={kind} />
+    <LinksPanel key={kind} kind={kind} active={active} />
   </div>;
 }

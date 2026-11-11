@@ -9,6 +9,7 @@ import type { AirsComposition } from './AirsCompositionView';
 import { holdingKey, type HoldingRule } from './matchHoldings';
 import { rebalancePlan, type RebalanceAction } from './rebalancePlan';
 import { refreshRequest } from './refreshProgress';
+import RecentTransactionsPanel from './RecentTransactionsPanel';
 
 type Result = { action: RebalanceAction; success: boolean; message?: string; reverted?: boolean; revertError?: string; revertUncertain?: boolean };
 const button = 'rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm disabled:opacity-50';
@@ -35,7 +36,7 @@ async function json<T>(url: string, options = {}) {
   }
   return await response.json() as T;
 }
-export default function RebalancePanel({ active = true }: { active?: boolean }) {
+function FullPortfolioRebalance({ active = true, onBusyChange }: { active?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const [links, setLinks] = useState<PortfolioConnection[]>([]);
   const [selected, setSelected] = useState('');
   const [dummy, setDummy] = useState(true);
@@ -57,6 +58,7 @@ export default function RebalancePanel({ active = true }: { active?: boolean }) 
   const [maxChanges, setMaxChanges] = useState('');
   const validLimit = maxChanges === '' || (/^[1-9]\d*$/.test(maxChanges) && Number.isSafeInteger(Number(maxChanges)));
   const alive = useRef(true), busy = useRef(false);
+  useEffect(() => { onBusyChange?.(running || reverting !== null); }, [running, reverting, onBusyChange]);
   const selection = useRef({ links, selected });
   selection.current = { links, selected };
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function RebalancePanel({ active = true }: { active?: boolean }) 
     if (!active || busy.current) return;
     let current = true;
     setLoading(true);
-    void json<{ links: PortfolioConnection[] }>('/api/leonteq/portfolio-links', { cache: 'no-store', noReadCache: true })
+    void json<{ links: PortfolioConnection[] }>('/api/leonteq/portfolio-links?kind=fixed', { cache: 'no-store', noReadCache: true })
       .then((data) => {
         if (!current || !alive.current) return;
         const previous = selection.current.links[Number(selection.current.selected)];
@@ -101,10 +103,15 @@ export default function RebalancePanel({ active = true }: { active?: boolean }) 
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ datum: source.datum, expected_percentage: expected, percentage }),
     });
-    if (!response.ok) throw new Error('Save failed or unverified. Refresh before retrying.');
+    if (!response.ok) {
+      const failure = await response.json().catch(() => null);
+      if (failure?.detail === 'percentage_changed' || failure?.detail === 'row_changed') throw new Error('This holding changed in AIRS. Refresh compositions before retrying; no additional change was made.');
+      throw new Error('Save failed or unverified. Refresh before retrying.');
+    }
     const verified = await response.json() as AirsComposition;
     const saved = verified.rows.filter((item) => item.id === row.id);
     if (verified.datum !== source.datum || saved.length !== 1 || saved[0].Percentage !== percentage || saved[0].Fonds !== row.Fonds || saved[0].ISINCode !== row.ISINCode) throw new Error('Save outcome uncertain. Refresh before retrying.');
+    return verified;
   }
   async function revert(action: RebalanceAction) {
     const result = results.find((item) => item.action.id === action.id);
@@ -112,10 +119,12 @@ export default function RebalancePanel({ active = true }: { active?: boolean }) 
     busy.current = true; setReverting(action.id); setLoading(true);
     setStatus(dummy ? `Reverting simulated change for ${action.name}…` : `Restoring ${action.name} to ${action.current}% in AIRS…`);
     try {
-      if (!dummy) await saveWeight(action, action.target, action.current);
+      const verified = !dummy ? await saveWeight(action, action.target, action.current) : null;
       if (alive.current) {
         setResults((current) => current.map((item) => item.action.id === action.id ? { ...item, reverted: true, revertError: undefined } : item));
-        setStatus(dummy ? `Simulated change reverted for ${action.name}. No AIRS weights were changed.` : `${action.name} restored to ${action.current}% and verified in AIRS.`);
+        setStatus(dummy ? `Simulated change reverted for ${action.name}. No AIRS weights were changed.` : verified?.already_at_target
+          ? `${action.name} was already restored to ${action.current}% in AIRS. Verified; no additional change was made.`
+          : `${action.name} restored to ${action.current}% and verified in AIRS.`);
       }
     } catch (error) {
       if (alive.current) {
@@ -267,4 +276,19 @@ export default function RebalancePanel({ active = true }: { active?: boolean }) 
       </table></div>
     </>}
   </section>;
+}
+
+export default function RebalancePanel({ active = true }: { active?: boolean }) {
+  const [tab, setTab] = useState<'full' | 'recent'>('full');
+  const [recentOpened, setRecentOpened] = useState(false);
+  const [fullBusy, setFullBusy] = useState(false), [recentBusy, setRecentBusy] = useState(false);
+  return <div className="space-y-4">
+    <div role="tablist" aria-label="Rebalance view" className="inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs">
+      {(['full', 'recent'] as const).map(value => <button key={value} id={`rebalance-tab-${value}`} type="button" role="tab" aria-selected={tab === value} aria-controls={`rebalance-panel-${value}`}
+        disabled={fullBusy || recentBusy} className={`shrink-0 px-3 py-1.5 font-medium transition-colors disabled:opacity-50 ${tab === value ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}
+        onClick={() => { setTab(value); if (value === 'recent') setRecentOpened(true); }}>{value === 'full' ? 'Full portfolio' : 'Recent transactions'}</button>)}
+    </div>
+    <div role="tabpanel" id="rebalance-panel-full" aria-labelledby="rebalance-tab-full" hidden={tab !== 'full'}><FullPortfolioRebalance active={active && tab === 'full'} onBusyChange={setFullBusy} /></div>
+    <div role="tabpanel" id="rebalance-panel-recent" aria-labelledby="rebalance-tab-recent" hidden={tab !== 'recent'}>{recentOpened && <RecentTransactionsPanel active={active && tab === 'recent'} onBusyChange={setRecentBusy} />}</div>
+  </div>;
 }

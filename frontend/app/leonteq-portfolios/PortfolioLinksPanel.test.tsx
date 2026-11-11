@@ -27,6 +27,21 @@ it('switches to dynamic connection options', async () => {
   } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
 });
 
+it('reloads saved comparisons when returning from Rebalance', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ leonteq_portfolios: [], airs_portfolios: [], links: [] })));
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<PortfolioLinksPanel active />));
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(<PortfolioLinksPanel active={false} />));
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    await act(async () => root.render(<PortfolioLinksPanel active />));
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+  } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
+});
+
 it('saves and removes a selected connection and disables duplicate links', async () => {
   const saved = { leonteq_name: 'AI-TopSelectie', airs_portfolio_id: 1, airs_name: 'Fixed model', updated_at: '2026-11-05T12:00:00Z' };
   vi.mocked(apiFetch).mockResolvedValueOnce({ ok: true, json: async () => ({

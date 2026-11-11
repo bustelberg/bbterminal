@@ -3,6 +3,7 @@ import { Fragment } from 'react';
 type Position = {
   name: string; isin: string | null; total_value: string | null; units: string | null;
   price: string | null; currency: string | null; performance: string | null; weight: string | null;
+  price_date?: string | null;
 };
 export type CompositionResult = {
   success: boolean; status: string; portfolio_name?: string; retrieved_at?: string;

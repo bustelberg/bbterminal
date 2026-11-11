@@ -8,12 +8,25 @@ export type WeeklyReturns = {
   portefeuille: string; start_date: string; through: string; missing_observations: number;
   periods: { week_end: string; target_date: string; as_of_date: string | null; from_date: string | null; partial: boolean; available: boolean }[];
   options: InstrumentOption[]; selected: WeeklyInstrument | null;
+  ytd_return?: { value: number; from: string; to: string } | null;
 };
 export type InstrumentOption = Pick<WeeklyInstrument, 'id' | 'name' | 'isin' | 'currency'>;
 
 /** Missing observations remain gaps, never zero-return bars. */
 export function weeklyBars(cells: WeeklyCell[]): (number | null)[] {
   return cells.map((cell) => cell.return_pct != null && Number.isFinite(cell.return_pct) ? cell.return_pct : null);
+}
+
+/** Draw only actual non-zero return observations, keeping dates and cells aligned. */
+export function visibleWeeklyReturns(data: WeeklyReturns): WeeklyReturns {
+  const indices = data.periods.flatMap((_, index) => {
+    const cell = data.selected?.weeks[index];
+    return cell?.status === 'priced' && cell.return_pct != null && Number.isFinite(cell.return_pct) && Math.abs(cell.return_pct) > 1e-10 ? [index] : [];
+  });
+  const periods = indices.map(index => data.periods[index]);
+  return { ...data, periods, start_date: periods[0]?.from_date ?? data.start_date,
+    through: periods.at(-1)?.as_of_date ?? data.through,
+    selected: data.selected ? { ...data.selected, weeks: indices.map(index => data.selected!.weeks[index]) } : null };
 }
 
 /** A price return uses the opening and closing quotes, never a sum of weekly percentages. */
@@ -28,6 +41,22 @@ export function periodReturn(data: WeeklyReturns | undefined, window?: [string, 
   const to = data.periods[last].as_of_date;
   if (!from || !to || opening == null || closing == null || !Number.isFinite(opening) || !Number.isFinite(closing)
       || opening <= 0 || closing <= 0) return null;
+  const value = (closing / opening - 1) * 100;
+  return Number.isFinite(value) ? { value, from, to } : null;
+}
+
+/** The full-history tile spans the first and last actual quotes, including sold instruments.
+ * Missing intervening weeks remain gaps in the chart and are never zero weekly returns. */
+export function fullHistoryReturn(data: WeeklyReturns | undefined) {
+  const quotes = new Map<string, number>();
+  data?.periods.forEach((period, index) => {
+    const cell = data.selected?.weeks[index];
+    if (period.from_date && cell?.from_price != null && Number.isFinite(cell.from_price) && cell.from_price > 0) quotes.set(period.from_date, cell.from_price);
+    if (period.as_of_date && cell?.price != null && Number.isFinite(cell.price) && cell.price > 0) quotes.set(period.as_of_date, cell.price);
+  });
+  const sorted = [...quotes].sort(([a], [b]) => a.localeCompare(b));
+  if (sorted.length < 2) return null;
+  const [from, opening] = sorted[0], [to, closing] = sorted[sorted.length - 1];
   const value = (closing / opening - 1) * 100;
   return Number.isFinite(value) ? { value, from, to } : null;
 }

@@ -560,7 +560,220 @@ AIRS session lock within the daily workflow; it adds no second account/model sca
 or independent cron job. The weekday cutoff does not infer a market holiday calendar;
 missing final valuations remain explicitly pending.
 
-## Diagnosing missing AIRS valuations
+## Full weekly AIRS instrument history
+
+If market-risk preparation is interrupted by source updates, the risk bundle returns
+an HTTP 202 update state with saved AIRS weekly histories still available. The client
+retries after ten seconds and never caches that partial response as a complete bundle.
+Returns and Weights remain usable while the market-risk views are being prepared.
+
+The **Weights** tab immediately after Returns lists the saved AIRS instrument catalogue
+with a **Fetch** action per row. Its configurable earliest date defaults to **1 February
+2025**. Fetches start today and use the same weekly history loader and stopping rules
+as Returns, with the selected date as an additional strict lower bound (including report
+fallbacks and separate YTD-anchor requests). Existing older history is retained. Row
+jobs queue through the shared AIRS session and report progress through the standard
+task notifications; other instruments can be queued while one is fetching.
+
+**Fetch all** uses one AIRS session and one full portfolio report per weekly date,
+extracting and saving all instrument quotes in batches. Completed observations are reused
+on subsequent runs. Each instrument stops independently after two consecutive zero-return
+weeks; the remaining instruments continue to the date limit or the report boundary. The
+separate YTD opening is also shared. Bulk progress uses the standard task notification;
+Open remains available during the fetch, and the saved results reload in one bundle read.
+
+### Allocation search in Weights
+
+The profile selector and four min–max labels use the same versioned defaults plus saved
+administrator overrides as Allocation bands. The account name supplies the initial
+profile where recognised; otherwise the user must choose one. The server reloads the
+selected profile policy for every search and rejects any grid candidate outside any
+class's bounds. Defaults are targets, not additional optimisation constraints. Missing,
+invalid or infeasible bounds block the search; there is no unconstrained fallback.
+The current-allocation comparator retains the actual holdings, even if they breach
+the policy, while all searched candidates must comply. Limits that admit no 5% grid
+allocation produce an explicit unavailable result. The response includes the applied
+policy so the displayed bounds are refreshed to the policy actually used.
+
+**Find optimal weights** searches saved observations only and never writes allocations
+or fetches reports. Defaults: Sharpe ranking, 2% annual Sortino target, 0% assumed annual
+cash return and available-history proxy mode. The 5% long-only grid sums to 100% and
+enforces the selected profile bounds. Negative holdings and unknown classes block it.
+Asset classes reuse the Holdings overview's shared classification: reviewed overrides,
+then the exactly linked AIRS model's category by ISIN, then the resolved holding class
+and generic classifier fallback. No fuzzy portfolio matching or separate optimisation
+classification table is used. AQR's reviewed Alternatives rule accepts the source name's
+trailing full stop. The optimiser keeps direct instrument returns rather than expanding
+certificate holdings into additional, duplicated return series.
+
+Proxy mode reweights available instruments within each class for each weekly timestep,
+using current EUR values. Missing returns are excluded, genuine zero observations kept.
+Both prices use historical EUR FX at most seven days old. Actual marks must fall within
+their respective weekly bins, never after the requested target, and span 4-10 days.
+Actual dates may differ within a weekly bin; no interpolation is performed.
+
+Weeks with an entirely unavailable held non-cash class are skipped. At least 4 usable
+weeks allow an exploratory calculation, including short samples such as nine weeks;
+this minimum is not a statistical-reliability threshold. Details reports average/minimum class coverage, instruments used
+in at least one week, instruments excluded throughout and skipped weeks. The current
+comparison retains actual full-book class weights using those same proxy returns.
+Strict mode instead requires 52 consecutive weeks for the complete current basket.
+
+Older observations rank candidates by the chosen ratio; the newest observations test only the
+training winner. With at least 52 usable weeks, the split reserves at least 26 weeks
+for validation while retaining at least 26 for training (74 becomes 48/26). Longer
+histories retain the 75/25 split when it already provides 26 validation weeks. Shorter
+exploratory samples use 75/25. The current allocation and top three training candidates
+are shown with weights and training/test scores regardless of significance. Sharpe is
+the default, with Sortino selectable in Settings. Sharpe uses sample deviation and
+the assumed cash return as the risk-free rate; Sortino uses its separate target.
+Undefined ratios display as a dash. Test data never selects or ranks candidates.
+Details displays only full-period tables by class: Instrument, Sharpe, Start and End.
+Training/test observations are combined before recalculating each instrument's Sharpe;
+the displayed dates are the actual first opening and last closing marks used. Each class
+ends with an **Average instrument Sharpe** row: the arithmetic mean of defined instrument
+Sharpes, with the group's period envelope. This is a descriptive average, not the Sharpe
+of a weighted class return series. Missing returns and undefined ratios are excluded from
+the mean; undefined values display a dash. No diagnostic prose is shown. The optimiser's
+training/test search and weighted class calculations remain unchanged. **Download Excel**
+exports the displayed full-period results as XLSX using the shared application exporter:
+Category, Instrument, Sharpe, Start and End, including each category average row.
+Scores remain numeric (rounded to two decimals), missing values are blank, and dates
+match the displayed `1 nov 2026` format. Export uses the existing result without fetching
+again and is hidden when inputs change or instrument scores are unavailable.
+The paired moving-block bootstrap requires 26 validation weeks (and eight downside
+observations per series for Sortino), plus a positive one-sided 95% lower bound on
+improvement in the selected ratio (999 samples, 4-week blocks,
+at least 950 defined samples). Gapped samples can be searched but cannot pass this
+check; compounded return and drawdown metrics are withheld to avoid compressing
+missing market periods into a continuous backtest. Settings and diagnostics collapse.
+
+These are historical checks under sampling assumptions, not proof of a strategic
+optimum. Prices exclude dividends, coupons, corporate-action adjustment and costs.
+Current-holdings selection bias and changing proxy composition remain material limits.
+Cash is an assumption, not a measured instrument return. No allocation is applied.
+Short-sample calculations explicitly report their usable week count and unsupported
+validation state as context without hiding candidate weights. If no
+calculation is possible, the specific server reason is shown rather than a generic error.
+
+The Returns tab's **Load full history** action starts at today's Amsterdam calendar
+date and steps backwards by exactly seven days for the selected instrument. Existing
+quotes are reused only for an exact quote date or a previously checked requested date;
+an unpublished report falls back up to six calendar days, including across weekends. The search stops
+after two consecutive 0% weekly quoted-price returns, or when no AIRS report is available
+within the requested week. The zero-return rule is an explicit user-selected heuristic.
+The same cutoff trims previously saved flat tails from the displayed full history without
+deleting source observations. YTD remains independently calculated. A report where the selected
+instrument is absent still counts as an available report, so sales do not prematurely end
+discovery. Login,
+transport and unparseable reports fail the job instead of being mistaken for history exhaustion.
+
+Each observation is committed to the existing per-instrument snapshot table before progress
+is published. Cancellation retains those observations; subsequent loads reuse saved quotes
+and completed historical no-data checks. Historical quotes never replace live holdings or
+publish incomplete portfolio snapshots. No migration is required. A 1900 safety boundary fails
+explicitly if reached without a stopping boundary.
+
+Charts display only valid non-zero weekly returns, with no placeholder bars for missing,
+zero or unheld observations. Dates and cells remain aligned after filtering. **YTD** uses a separate
+31 December opening observation for the current year, while **Full history** uses the first
+and last actual instrument quotes. The YTD opening is checked after the backwards scan. YTD is unavailable
+when its own opening or closing quote is missing, regardless of older available history.
+
+## External-fund region allocation
+
+The external-fund allocation modal has Sector and Region tabs using one shared allocation
+table. Region loads on demand from `/api/airs/etf/{isin}/region-allocation`. Physical iShares
+funds use the official embedded geography/countries breakdown, falling back to justETF's
+expanded Countries table. Other registered ETFs use justETF. Synthetic funds retain the
+index-facing justETF source. Yahoo-only mutual-fund sector coverage does not imply regional
+coverage; unavailable country data is reported explicitly.
+
+Country names map through the existing `asset_pipeline.geo.msci_region_of` definitions into
+North America, Europe, Pacific and Emerging Markets. Provider Other, unknown countries and
+non-country buckets remain visible as Unclassified with their original source labels and
+weights. They are included in the allocation total, never redistributed over known regions.
+The table retains original country weights, grouped regional weights, current fund weight and
+portfolio contribution, with the same rounding normalization as Sector. Each tab displays its
+own source and as-of date. Incomplete/invalid totals are rejected and successful regional
+responses are cached separately for six hours.
+The main Region comparison chart has an **Add funds** toggle. It loads the regional breakdowns
+of supported funds in the selected asset class on demand, then adds their underlying regional
+contributions to the existing whole-portfolio bars. It reuses the Sector weighting arithmetic,
+keeps the benchmark unchanged, includes Unclassified, and restores the original rows when
+disabled. Missing breakdowns are counted as unavailable; successfully loaded data is retained
+when toggling off and on.
+
+## Monthly benchmark performance
+
+Insights → **Monthly performance** compares a selected linked Leonteq portfolio with ACWI
+(default), S&P 500, global bonds or EUR high yield in grouped monthly bars. Portfolio,
+benchmark and year selectors preserve the existing Insights navigation; an expandable values
+table provides exact returns and Leonteq-minus-benchmark differences in percentage points.
+Opening the view reads saved Leonteq performance and the existing EUR benchmark ETF price
+series only. **Refresh returns** checks benchmark prices and reuses the shared monthly-return
+background job, with progress notifications. An explicit benchmark refresh bypasses an earlier
+same-day check so a newly published completed close can be picked up immediately.
+
+The current month is included as MTD, using Leonteq's reported monthly return and the benchmark's
+latest stored completed close through today. Future months stay empty. A cached MTD observation
+remains unavailable after that month ends until Leonteq is fetched again. Benchmark returns unchain consecutive
+month-end cumulative EUR marks, with each price converted at its historical FX rate. Missing
+boundaries, FX or stale month-end prices remain unavailable; they never become zero returns.
+The footer shows the benchmark and Leonteq fetch timestamps separately.
+
+## Recent-transaction weight reviews
+
+Insights → Rebalance has Full portfolio and Recent transactions views. Recent transactions
+reads the authenticated LYNQS `index-transactions` endpoint with its observed offset/limit/sort
+parameters. Every page is checked for a stable total and non-overlapping transaction IDs;
+incomplete feeds fail closed. Only booked security Buy/Sell events enter the queue; fees,
+currency movements and explicitly pending/cancelled records are excluded.
+
+The user selects a Fixed connection and a 7/30/90-day window. Several trades in one ISIN
+become one review row. Current target weights come from a fresh, complete Leonteq composition,
+not from trade amounts. Matching reuses the Connections matcher, including manual rules,
+company-exposure links and cash handling. Other unmatched instruments do not block a valid
+individual row. A zero target requires an absent holding, latest Sell events, a complete source
+snapshot dated at or after the trades, and one identifiable AIRS Fixed row.
+
+Dummy mode is the default. A live per-row apply re-fetches the trades, connection rules and both
+compositions; changed trade IDs, targets, previous weights, row identity or composition date
+require another review. The existing AIRS percentage endpoint performs the one write and reads
+back the saved export. Uncertain outcomes cannot be retried until the queue is fetched again.
+The review displays the projected portfolio total; individual changes can temporarily move it
+away from 100%. Fetching transactions and checking the feed never execute Leonteq trades or
+write AIRS weights. No new schedule or database migration is required.
+Percentage updates are idempotent when a fresh AIRS export already contains the requested
+weight. Revert then reports “already restored” without submitting another save; any different
+unexpected current weight still raises a conflict.
+
+Below the transaction rows, **Balance cash to 100%** provides **Read latest total** and
+**Execute**. The read fetches the latest AIRS Fixed snapshot and its native `.tableTotal`
+footer, validates the footer against the complete exported weights, and proposes
+`cash + 100 − total`. Export precision is retained even though the footer displays two decimals.
+Exactly one editable Liquiditeiten / cash / Effectenrekening row is required; missing weights,
+conflicting totals, ambiguous cash or a target outside 0–100% stop the action. Live execution
+rechecks the date, total, cash row and weights under the AIRS session lock, submits once through
+the shared native percentage editor, and verifies a 100% total with all other holdings unchanged.
+Dummy mode simulates without saving. Individual Execute buttons own their progress state;
+additional row actions queue sequentially so AIRS writes do not overlap.
+The cash section also compares combined AIRS and Leonteq cash weights side by side, showing
+the signed AIRS-minus-Leonteq difference in percentage points. Leonteq comes from the fetched
+composition; reading the latest total or saving cash updates the AIRS side. Missing weights
+remain unavailable rather than being treated as zero, and the comparison stays visible after saving.
+
+A current Leonteq holding absent from AIRS Fixed is offered as a new position at its current
+weight. Existing manual connection/disconnection rules still take precedence. A live Add uses
+AIRS's native `toevoegen` form and its ISIN autocomplete to select an already registered Fonds,
+then reads the export back to verify one new row with the same ISIN, registered name and weight.
+The server rechecks the Fixed connection and current Leonteq target, checks for duplicates, and
+disables automatic retries around the submission. Missing or ambiguous instrument registration
+stops before saving and tells the user to register/review the instrument manually. No instrument
+master records are created. Returning to Connections reloads its saved-data comparison so the
+new position appears as connected.
+
+## Price checks
 
 Insights → Prices resolves missing or currency-mismatched Yahoo listings using ISIN identity
 from OpenFIGI, Yahoo search and chart metadata. Candidates must belong to the FIGI listing
@@ -574,6 +787,8 @@ matches the selected instrument, retries symbol resolution and updates that row.
 are never accepted. Effectenrekening is always cash, including when it carries an identifier.
 Ambiguous identities, missing prices, different currencies and different valuation dates remain
 uncheckable. A matching listing on another exchange can still have a different closing price.
+
+## Diagnosing missing AIRS valuations
 
 In `airs_vermogen._vermogen_most_recent`, a failed valuation lookup initially applies only to the account that made it. A shared miss can skip a date only after the quorum is met and the date is newer than the latest proven valuation. The memo expires on the read path so single-account refreshes can see valuations published after a fleet scan. The saved `reports_ok` badge clears when a refresh successfully retrieves the report. See [diagnose_missing_reports.py](../backend/scripts/diagnose_missing_reports.py) and the valuation-discovery tests in `test_airs_html_fragment.py`.
 

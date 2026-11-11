@@ -47,7 +47,7 @@ type Card = { what: string; where?: string; when?: string; how?: string };
 export type RiskCopy = {
   /** The switch.  SHORT — six of these sit on one row inside a fixed dialog. */
   views: {
-    active: string; te: string; corr: string; vol: string; dd: string; conc: string; returns: string;
+    active: string; te: string; corr: string; vol: string; dd: string; conc: string; returns: string; weights: string;
   };
   /** The dialog heading per view, rendered as `<title> vs <benchmark>`. */
   titles: {
@@ -291,7 +291,7 @@ export function riskLongDate(iso?: string | null): string | null {
 
 const en: RiskCopy = {
   views: { active: 'Active share', te: 'Tracking error', corr: 'Correlation', vol: 'Volatility',
-    dd: 'Drawdown', conc: 'Concentration', returns: 'Returns' },
+    dd: 'Drawdown', conc: 'Concentration', returns: 'Returns', weights: 'Weights' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
     vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
   basis: { label: 'AIRS weights', now: 'Current', start: 'Start of year' },
@@ -636,7 +636,7 @@ const en: RiskCopy = {
 
 const nl: RiskCopy = {
   views: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie', vol: 'Volatiliteit',
-    dd: 'Drawdown', conc: 'Concentratie', returns: 'Returns' },
+    dd: 'Drawdown', conc: 'Concentratie', returns: 'Returns', weights: 'Weights' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },

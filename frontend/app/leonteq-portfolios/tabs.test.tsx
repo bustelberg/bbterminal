@@ -17,6 +17,7 @@ vi.mock('./LeonteqPanel', () => ({ default: () => <div>Saved Leonteq portfolios<
 vi.mock('./PortfolioLinksPanel', () => ({ default: () => <div>Portfolio connections</div> }));
 vi.mock('./RebalancePanel', () => ({ default: ({ active }: { active: boolean }) => <div data-active={active}>Rebalance content</div> }));
 vi.mock('./ReturnsPanel', () => ({ default: () => <div>Returns content</div> }));
+vi.mock('./BenchmarkPerformancePanel', () => ({ default: () => <div>Monthly performance chart</div> }));
 
 it('nests Rebalance and Returns under Insights and remembers the selected insight', async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -31,16 +32,19 @@ it('nests Rebalance and Returns under Insights and remembers the selected insigh
     expect(host.querySelector<HTMLElement>('#source-panel-insights')!.hidden).toBe(false);
     expect(host.querySelector('[data-active=true]')?.textContent).toBe('Rebalance content');
     expect(Array.from(host.querySelectorAll('[aria-label="Insights"] [role=tab]'), tab => tab.textContent))
-      .toEqual(['Rebalance', 'Returns', 'Prices']);
+      .toEqual(['Rebalance', 'Returns', 'Prices', 'Monthly performance']);
     await act(async () => button('insight-tab-rebalance').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     expect(button('insight-tab-returns').getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(button('insight-tab-returns'));
     expect(host.querySelector<HTMLElement>('#source-panel-returns')!.hidden).toBe(false);
+    await act(async () => button('insight-tab-performance').click());
+    expect(host.querySelector<HTMLElement>('#source-panel-performance')!.hidden).toBe(false);
+    expect(host.textContent).toContain('Monthly performance chart');
     await act(async () => button('section-tab-portfolios').click());
     expect(host.querySelector<HTMLElement>('#source-panel-insights')!.hidden).toBe(true);
     await act(async () => button('section-tab-insights').click());
-    expect(button('insight-tab-returns').getAttribute('aria-selected')).toBe('true');
-    expect(host.querySelector<HTMLElement>('#source-panel-returns')!.hidden).toBe(false);
+    expect(button('insight-tab-performance').getAttribute('aria-selected')).toBe('true');
+    expect(host.querySelector<HTMLElement>('#source-panel-performance')!.hidden).toBe(false);
   } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
 });
 

@@ -373,8 +373,40 @@ def test_freshness_reads_actual_dates_and_reports_unmapped_coverage(monkeypatch)
     result = D.freshness(date(2026, 10, 30))
     assert result["incomplete"] == 1
     assert result["accounts"][0]["unmapped_isins"] == ["UNMAPPED"]
+    assert 'UNMAPPED: no verified Yahoo price mapping' in result['accounts'][0]['issues']
     assert any("expected 2026-10-29" in issue for issue in result["accounts"][0]["issues"])
     assert db.writes == []
+
+
+@pytest.mark.parametrize('status,vendor,error,explanation', [
+    ('unavailable', '2026-11-09', None, 'newer close not published'),
+    ('error', None, 'Yahoo throttled', 'price refresh failed: Yahoo throttled'),
+    ('unavailable', '2026-11-10', None, 'Yahoo offers a 2026-11-10 close that is not stored'),
+    ('unchanged', None, None, 'provider availability was not confirmed'),
+])
+def test_price_freshness_retains_failure_and_explains_provider_evidence(status, vendor, error, explanation):
+    mapped = {'yahoo_symbol': 'FUND', 'analysis_id': 42}
+    source = {'started_at': '2026-11-11T10:00:00Z', 'summary': {'results': [{
+        'isin': 'TEST', 'symbol': 'FUND', 'analysis_id': 42, 'latest_close': '2026-11-09',
+        'status': status, 'vendor_latest_close': vendor, 'error': error}]}}
+    issue = D._price_freshness_issue('TEST', mapped, '2026-11-09', '2026-11-10', source, '2026-11-11')
+    assert issue.startswith('TEST: price dated 2026-11-09; expected 2026-11-10')
+    assert explanation in issue
+
+
+@pytest.mark.parametrize('changed', ['day', 'symbol', 'analysis_id', 'latest_close'])
+def test_price_freshness_does_not_reuse_outdated_or_different_listing_evidence(changed):
+    mapped = {'yahoo_symbol': 'FUND', 'analysis_id': 42}
+    receipt = {'isin': 'TEST', 'symbol': 'FUND', 'analysis_id': 42, 'latest_close': '2026-11-09',
+               'status': 'unavailable', 'vendor_latest_close': '2026-11-09'}
+    source = {'started_at': '2026-11-11T10:00:00Z', 'summary': {'results': [receipt]}}
+    if changed == 'day':
+        source['started_at'] = '2026-11-10T10:00:00Z'
+    else:
+        receipt[changed] = 43 if changed == 'analysis_id' else 'different'
+    issue = D._price_freshness_issue('TEST', mapped, '2026-11-09', '2026-11-10', source, '2026-11-11')
+    assert 'no matching provider-availability receipt today' in issue
+    assert 'newer close not published' not in issue
 
 
 def test_missing_month_opening_is_saved_as_incomplete_without_fetching_airs(monkeypatch):

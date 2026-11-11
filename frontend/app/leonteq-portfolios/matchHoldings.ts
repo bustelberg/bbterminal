@@ -1,7 +1,7 @@
 export type Holding = { isin: string | null; name: string | null; weight: string | null };
 export type HoldingRule = { leonteq_key: string; airs_key: string | null };
 const cashNames = new Set(['cash', 'eur', 'euro', 'usd', 'us dollar', 'us dollars', 'gbp', 'british pound', 'chf', 'swiss franc', 'liquiditeiten', 'liquide middelen']);
-const isCash = (row: Holding) => {
+export const isCash = (row: Holding) => {
   const name = (row.name ?? '').trim().toLowerCase();
   return name === 'effectenrekening' || (!isinKey(row.isin) && cashNames.has(name));
 };
