@@ -3,6 +3,7 @@ import pytest
 
 import dashboard_daily as daily
 import scheduler
+from scheduler_jobs import market as market_jobs
 from jobs import UserFacingJobError
 
 
@@ -10,9 +11,9 @@ from jobs import UserFacingJobError
 def scheduled_fill(monkeypatch):
     from ingest import api_usage
     from routers import _fundamental_backfill as backfill
-    monkeypatch.setattr(api_usage, "remaining_budget", lambda _: {"usa": scheduler._FUNDAMENTALS_REGION_FLOOR + 100})
+    monkeypatch.setattr(api_usage, "remaining_budget", lambda _: {"usa": market_jobs._FUNDAMENTALS_REGION_FLOOR + 100})
     monkeypatch.setattr(daily, "held_company_ids", lambda: [])
-    monkeypatch.setattr(scheduler, "_FUNDAMENTAL_INDICES", ("ACWI",))
+    monkeypatch.setattr(market_jobs, "_FUNDAMENTAL_INDICES", ("ACWI",))
     monkeypatch.setattr(scheduler, "_fundamental_company_ids", lambda _: [(1, "NYSE"), (2, "NYSE")])
     monkeypatch.setattr(backfill, "smart_flags_bulk", lambda ids: {cid: {"need_fin": True} for cid in ids})
 
@@ -51,7 +52,7 @@ def test_vendor_failures_keep_actual_counts_and_cause(scheduled_fill, monkeypatc
 def test_unsubscribed_listings_do_not_use_quota_reserve(scheduled_fill, monkeypatch):
     from ingest import api_usage
     from routers import _fundamental_fill as fill
-    monkeypatch.setattr(api_usage, "remaining_budget", lambda _: {"europe": scheduler._FUNDAMENTALS_REGION_FLOOR + 2})
+    monkeypatch.setattr(api_usage, "remaining_budget", lambda _: {"europe": market_jobs._FUNDAMENTALS_REGION_FLOOR + 2})
     monkeypatch.setattr(scheduler, "_fundamental_company_ids", lambda _: [(1, "LSE"), (2, "XAMS")])
     def run(ctx, label, ids, *, feeds, receipt, best_effort):
         assert ids == [1, 2]

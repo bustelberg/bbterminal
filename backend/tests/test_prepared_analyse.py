@@ -24,6 +24,35 @@ def test_current_snapshot_round_trips_without_sharing_mutable_rows(store):
     assert P.read('holdings', 'test')[1]['rows'][0]['weight'] == 2
 
 
+def test_overview_freshness_explains_revision_code_and_day_mismatches(store):
+    key = P.holdings_key(1, 'ACWI', False)
+    store.table('analyse_prepared_snapshot').insert({
+        'cache_key': key, 'scope': 'holdings', 'source_version': 9,
+        'code_version': 'old-code', 'calculation_day': '2000-01-01',
+        'payload': {'return_series': {}, 'details_pending': False},
+        'payload->return_series': {}, 'payload->>details_pending': 'false',
+    }).execute()
+    diagnostics = {}
+    states = P.overview_freshness([key, 'absent'], diagnostics=diagnostics)
+    assert states[key] == 'older'
+    assert 'source_version stored=9 expected=10' in diagnostics[key]
+    assert 'code_version stored=old-code expected=code-v1' in diagnostics[key]
+    assert 'calculation_day stored=2000-01-01' in diagnostics[key]
+    assert 'next:' in diagnostics[key]
+    assert 'no complete saved overview' in diagnostics['absent']
+
+
+def test_lightweight_projection_preserves_complete_contribution_reconciliation():
+    payload = {'allocation': [{'contribution_pct': 6.64}],
+               'realised': {'available': True, 'book_ytd_pct': 6.64, 'reconciles': False,
+                            'certificate_adjustments': [{'contribution_pct': -.01}],
+                            'positions': [{'closed_out': True, 'contribution_pct': 0}]}}
+    opening = P.overview(payload)
+    assert opening['realised'] == payload['realised']
+    opening['realised']['certificate_adjustments'][0]['contribution_pct'] = 99
+    assert payload['realised']['certificate_adjustments'][0]['contribution_pct'] == -.01
+
+
 def test_overview_rejects_outdated_sources_and_code(store, monkeypatch):
     key = P.holdings_key(1934, 'ACWI', False)
     assert P.read_overview(key) is None

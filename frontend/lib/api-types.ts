@@ -11447,6 +11447,8 @@ export interface components {
             own_return_source?: string | null;
             /** Realised Result Eur */
             realised_result_eur?: number | null;
+            /** Region */
+            region?: string | null;
             /** Result Eur */
             result_eur?: number | null;
             /** Return Pct */
@@ -12453,7 +12455,7 @@ export interface components {
         /** EtfRegionAllocationResponse */
         EtfRegionAllocationResponse: {
             /** As Of */
-            as_of: string;
+            as_of?: string | null;
             /** Isin */
             isin: string;
             /** Name */
@@ -16399,6 +16401,10 @@ export interface components {
             end_date?: string | null;
             /** End Price */
             end_price?: number | null;
+            /** Fx End */
+            fx_end?: number | null;
+            /** Fx Start */
+            fx_start?: number | null;
             /** Label */
             label?: string | null;
             /** Name */

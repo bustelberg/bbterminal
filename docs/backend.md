@@ -1,5 +1,19 @@
 # Backend map (backend/)
 
+**`services/`** — HTTP-independent job workflows. `airs_refresh.py` owns account
+refresh job work, shared model discovery/composition collection, and paired-model
+pricing for manual and scheduled callers. `airs_market_jobs.py` owns the AIRS
+price/risk/benchmark job workers. Routes register jobs and validate inputs;
+the scheduler owns admission, sequencing and run receipts. See the
+[execution map](execution-paths.md) for lock and cancellation boundaries.
+
+**`scheduler_runtime/`** owns admission state, recorded execution/cancellation,
+retry and watchdog recovery policies, and scheduled worker contexts.
+**`scheduler_jobs/`** owns AIRS, market-data and preparation job implementations.
+`scheduler.py` retains registration, dispatch, lifecycle and health inspection;
+it supplies a `JobRuntime` of callbacks to domain jobs, which never import the
+dispatcher. See [Scheduler code ownership](scheduler.md#code-ownership).
+
 > Split out of `CLAUDE.md` (2026-08-17) to keep the always-loaded file small. Content is verbatim; `CLAUDE.md` carries a one-line index entry pointing here.
 
 **Entry point**: `main.py` (~110 lines) — thin bootstrap: constructs `FastAPI()`, attaches CORS + the API auth-gate middleware, mounts each domain router, registers APScheduler. All endpoints live under `routers/`. Full endpoint list: `main.py` + `backend/openapi.json` (the source of truth — don't catalog endpoints here).

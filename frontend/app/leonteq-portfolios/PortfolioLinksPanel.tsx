@@ -106,7 +106,7 @@ function LinksPanel({ kind, active }: { kind: 'fixed' | 'dynamic'; active: boole
     && targetOptions.some((row) => row.id === Number(target));
   if (!active) return null;
   if (selected) return <ConnectionHoldingsView key={JSON.stringify([selected.leonteq_name, selected.airs_portfolio_id])}
-    link={selected} cache={holdingsCache.current} rulesCache={rulesCache.current} onBack={() => setSelected(null)} />;
+    link={selected} kind={kind} cache={holdingsCache.current} rulesCache={rulesCache.current} onBack={() => setSelected(null)} />;
   return <section className="space-y-5" aria-labelledby="portfolio-connections-heading" aria-busy={loading || busy}>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>

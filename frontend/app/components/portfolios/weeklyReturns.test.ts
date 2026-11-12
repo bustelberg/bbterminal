@@ -35,9 +35,10 @@ describe('Instrument-only weekly returns', () => {
     expect(periodReturn(data(), ['2026-01-11', '2026-01-18'])).toEqual({ value: expect.closeTo(-10), from: '2026-01-04', to: '2026-01-18' });
     expect(periodReturn(data(), ['2026-01-18', '2026-01-18'])?.value).toBe(0);
   });
-  it('requires exact window boundaries and valid opening and closing observations', () => {
+  it('matches selected calendar weeks but still requires valid boundary prices', () => {
     const sample = data();
-    expect(periodReturn(sample, ['2026-01-03', '2026-01-18'])).toBeNull();
+    expect(periodReturn(sample, ['2026-01-03', '2026-01-18'])?.value).toBeCloseTo(-1);
+    expect(periodReturn(sample, ['2025-12-21', '2026-01-18'])).toBeNull();
     sample.selected!.weeks[0].from_price = null;
     expect(periodReturn(sample)).toBeNull();
     expect(periodReturn(sample, ['2026-01-11', '2026-01-18'])?.value).toBeCloseTo(-10);
@@ -88,5 +89,41 @@ describe('Instrument-only weekly returns', () => {
     expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 3 });
     b.selected!.weeks.forEach((cell) => { cell.return_pct = 3.3; });
     expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 3 });
+  });
+
+  function weekdaySeries(dates: string[], returns: number[]): WeeklyReturns {
+    let price = 100;
+    return { ...data(), start_date: dates[0], through: dates.at(-1)!,
+      periods: returns.map((_, index) => ({ target_date: dates[index + 1], week_end: dates[index + 1],
+        from_date: dates[index], as_of_date: dates[index + 1], partial: false, available: true })),
+      selected: { ...data().selected!, weeks: returns.map(return_pct => {
+        const from_price = price;
+        price *= 1 + return_pct / 100;
+        return { status: 'priced', from_price, price, return_pct };
+      }) },
+    };
+  }
+
+  it('correlates overlapping Sunday and Wednesday histories inside a longer selection', () => {
+    const fund = weekdaySeries(['2025-06-15', '2025-06-22', '2025-06-29', '2025-07-06', '2025-07-13'], [1, 0, -3, 4]);
+    const stock = weekdaySeries(['2025-06-11', '2025-06-18', '2025-06-25', '2025-07-02', '2025-07-09'], [2, 0, -6, 8]);
+    expect(weeklyCorrelation(fund, stock, ['2025-02-16', '2025-12-28']))
+      .toEqual({ value: expect.closeTo(1), count: 4 });
+    expect(weeklyCorrelation(stock, fund, ['2025-02-16', '2025-12-28']))
+      .toEqual({ value: expect.closeTo(1), count: 4 });
+    expect(periodReturn(fund, ['2025-02-16', '2025-12-28'])).toBeNull();
+    const selected = periodReturn(stock, ['2025-06-22', '2025-07-13']);
+    expect(selected?.from).toBe('2025-06-11');
+    expect(selected?.to).toBe('2025-07-09');
+    expect(selected?.value).toBeCloseTo(((1.02 * 1 * .94 * 1.08) - 1) * 100);
+  });
+
+  it('does not pair a multiweek return with a single-week return or fill missing prices', () => {
+    const a = weekdaySeries(['2025-06-15', '2025-06-22', '2025-06-29', '2025-07-06'], [1, 2, 3]);
+    const b = weekdaySeries(['2025-06-11', '2025-06-18', '2025-06-25', '2025-07-02'], [2, 4, 6]);
+    b.periods[1].from_date = '2025-06-04';
+    expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 2 });
+    b.selected!.weeks[2].return_pct = null;
+    expect(weeklyCorrelation(a, b)).toEqual({ value: null, count: 1 });
   });
 });

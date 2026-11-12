@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ingest.phases.prices as prices
 import scheduler
+from scheduler_runtime import retries
 
 
 class _FakeSched:
@@ -28,8 +29,8 @@ def _setup(monkeypatch, *, stale: bool, max_per_day: int = 3) -> _FakeSched:
     # `maybe_schedule_price_retry` lazy-imports this from ingest.phases.prices,
     # so patch it at the source module.
     monkeypatch.setattr(prices, "held_prices_lagging", lambda: stale)
-    monkeypatch.setattr(scheduler, "_price_retry_counts", {})
-    monkeypatch.setattr(scheduler, "_PRICE_RETRY_MAX_PER_DAY", max_per_day)
+    monkeypatch.setattr(retries, "_price_retry_counts", {})
+    monkeypatch.setattr(retries, "_PRICE_RETRY_MAX_PER_DAY", max_per_day)
     return fake
 
 
@@ -75,7 +76,7 @@ def test_lag_probe_failure_is_swallowed(monkeypatch):
         raise RuntimeError("DB down")
 
     monkeypatch.setattr(prices, "held_prices_lagging", _boom)
-    monkeypatch.setattr(scheduler, "_price_retry_counts", {})
+    monkeypatch.setattr(retries, "_price_retry_counts", {})
     # Best-effort: a probe failure neither raises nor schedules.
     scheduler.maybe_schedule_price_retry()
     assert fake.jobs == []

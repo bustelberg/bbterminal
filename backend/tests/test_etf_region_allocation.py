@@ -1,5 +1,6 @@
 import html
 import json
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -90,4 +91,64 @@ def test_failures_are_not_cached_and_unknown_funds_are_not_claimed_supported(mon
         R.fetch_region_allocation(ISIN)
     assert ISIN not in R._CACHE
     assert not R.supported('CH1593776334')
-    assert not R.supported('IE000MEQP5U8')
+    assert R.supported('IE000MEQP5U8')
+
+
+LETKO = 'IE000MEQP5U8'
+
+
+def comdirect_page(rows):
+    return '<span>ISIN:</span> ' + LETKO + '<p>NAV Stand 10.11.2026</p><table><thead><tr><th></th><th>Anteil</th><th>Land</th></tr></thead><tbody>' + ''.join(
+        f'<tr><td></td><td>{weight}&nbsp;%</td><td>{country}</td></tr>' for country, weight in rows) + '</tbody></table>'
+
+
+def test_letko_reads_full_public_country_table_and_does_not_use_nav_date():
+    page = (Path(__file__).parent / 'fixtures/comdirect_letko_countries.html').read_text(encoding='utf-8')
+    result = R.parse_comdirect(page, LETKO)
+    countries = {country.country: country.weight_pct for region in result.regions for country in region.provider_weights}
+    assert countries['Brazil'] == 18.73
+    assert countries['Hong Kong'] == 9.41
+    assert countries['Canada'] == 2.5
+    assert countries['South Korea'] == 4.21
+    assert countries['Cash'] == 0.11
+    assert result.as_of is None
+    assert result.source == 'comdirect'
+    assert sum(region.weight_pct for region in result.regions) == pytest.approx(100)
+    assert next(region for region in result.regions if region.region == 'Unclassified').weight_pct >= 0.11
+
+
+def test_partial_country_coverage_preserves_unknown_countries_and_does_not_rebase():
+    result = R.parse_comdirect(comdirect_page([('Brasilien', '18,7'), ('Japan', '10'), ('Unknown country', '5')]), LETKO)
+    regions = {region.region: region.weight_pct for region in result.regions}
+    assert regions == {'Emerging Markets': 18.7, 'Pacific': 10, 'Unclassified': 71.3}
+    unknown = next(region for region in result.regions if region.region == 'Unclassified')
+    assert {row.country: row.weight_pct for row in unknown.provider_weights} == {'Unknown country': 5, 'Unreported remainder': 66.3}
+
+
+@pytest.mark.parametrize('rows', [[], [('Brasilien', '101')], [('Brasilien', '-1')],
+    [('Brasilien', 'NaN')], [('Brasilien', '0')], [('Brasilien', '50'), ('Brasilien', '20')]])
+def test_invalid_country_coverage_is_rejected_instead_of_filled_as_unknown(rows):
+    with pytest.raises(ValueError):
+        R.parse_comdirect(comdirect_page(rows), LETKO)
+
+
+def test_country_parser_does_not_accept_other_funds_or_non_country_tables():
+    with pytest.raises(ValueError, match='requested ISIN'):
+        R.parse_comdirect(comdirect_page([('Brasilien', '20')]).replace(LETKO, 'WRONG'), LETKO)
+    with pytest.raises(ValueError, match='country allocation table'):
+        R.parse_comdirect(comdirect_page([('Brasilien', '20')]).replace('Land', 'Sektor'), LETKO)
+
+
+def test_letko_fetches_country_source_and_caches_only_valid_results(monkeypatch):
+    R._CACHE.clear()
+    get = Mock(side_effect=[Mock(text='invalid page'), Mock(text=comdirect_page([('Brasilien', '20')]))])
+    monkeypatch.setattr(R, '_tracked_get', get)
+    with pytest.raises(ValueError):
+        R.fetch_region_allocation(LETKO)
+    assert LETKO not in R._CACHE
+    result = R.fetch_region_allocation(LETKO)
+    assert R.fetch_region_allocation(LETKO) is result
+    assert get.call_count == 2
+    assert get.call_args.args[1] == R._COUNTRY_PAGES[LETKO]
+    assert get.call_args.kwargs == {'source': 'comdirect', 'job': 'etf_region_allocation'}
+    R._CACHE.clear()

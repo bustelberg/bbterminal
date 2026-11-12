@@ -5836,6 +5836,17 @@
             ],
             "title": "Realised Result Eur"
           },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
           "result_eur": {
             "anyOf": [
               {
@@ -8500,8 +8511,15 @@
       "EtfRegionAllocationResponse": {
         "properties": {
           "as_of": {
-            "title": "As Of",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
           },
           "isin": {
             "title": "Isin",
@@ -8530,7 +8548,6 @@
         "required": [
           "isin",
           "name",
-          "as_of",
           "source",
           "source_url",
           "regions"
@@ -19485,6 +19502,28 @@
               }
             ],
             "title": "End Price"
+          },
+          "fx_end": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx End"
+          },
+          "fx_start": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Start"
           },
           "label": {
             "anyOf": [

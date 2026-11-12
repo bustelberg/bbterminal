@@ -1990,8 +1990,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         # arbitrate and both are ours to have avoided. It follows that a fund reads Unclassified
         # here (its listing says nothing about what it holds) and cash reads Cash — the same
         # answers the bars give, which is what makes a row findable behind a bar.
-        sec = _buckets(grow, is_cash=(r.get("asset_class") == "Cash" or not isin),
-                       isin=isin, codes=codes)[0]
+        sec, region, _ = _buckets(grow, is_cash=(r.get("asset_class") == "Cash" or not isin),
+                                 isin=isin, codes=codes)
         pr = priced_by_id.get(id(r))
         mk = marks.get(isin) if isin else None
         via = r.get("via_names") or []
@@ -2115,6 +2115,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # verified external ETFs and mutual funds, never in-house TopSelectie certificates.
             "sector_allocation_available": etf_sector_allocation_supported(isin or ""),
             "sector": sec,
+            "region": region,
             "company_id": grow.get("company_id") if grow else None,
             "sector_default": _sector(grow.get("sector_default")) if grow else None,
             "sector_overridden": bool(grow and grow.get("sector_overridden")),

@@ -307,7 +307,7 @@ def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, n
     monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
         {"portefeuille": "BOOK", "model_portfolio_id": 1}]})
     batches = []
-    def overview_states(keys):
+    def overview_states(keys, **kwargs):
         batches.append(keys)
         return {"holdings:1:ACWI:0": "older"}
     monkeypatch.setattr(prepared, "overview_freshness", overview_states)
@@ -315,8 +315,9 @@ def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, n
     issues = result["accounts"][0]["issues"]
     assert ("model composition not successfully scanned today" in issues) == needs_scan
     assert batches == [["holdings:1:ACWI:0", "holdings:1:ACWI:1"]]
-    assert "Analyse: older bundle still serving (look-through=False)" in issues
-    assert "Analyse: no bundle published (look-through=True)" in issues
+    assert any(issue.startswith("Analyse: older bundle still serving (look-through=False)")
+               and 'holdings:1:ACWI:0' in issue and 'next:' in issue for issue in issues)
+    assert any(issue.startswith("Analyse: no bundle published (look-through=True)") and 'next:' in issue for issue in issues)
 
 
 @pytest.mark.parametrize('market_failed', [False, True])
@@ -369,7 +370,7 @@ def test_freshness_reads_actual_dates_and_reports_unmapped_coverage(monkeypatch)
     })
     monkeypatch.setattr(D, "supabase", db)
     monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": []})
-    monkeypatch.setattr(prepared, "overview_freshness", lambda keys: {})
+    monkeypatch.setattr(prepared, "overview_freshness", lambda keys, **kwargs: {})
     result = D.freshness(date(2026, 10, 30))
     assert result["incomplete"] == 1
     assert result["accounts"][0]["unmapped_isins"] == ["UNMAPPED"]
@@ -392,6 +393,10 @@ def test_price_freshness_retains_failure_and_explains_provider_evidence(status, 
     issue = D._price_freshness_issue('TEST', mapped, '2026-11-09', '2026-11-10', source, '2026-11-11')
     assert issue.startswith('TEST: price dated 2026-11-09; expected 2026-11-10')
     assert explanation in issue
+    assert 'Yahoo symbol FUND; analysis_id 42' in issue
+    assert '2026-11-11T10:00:00Z' in issue
+    assert '; next:' in issue
+    assert 'asset_price_refresh' in issue
 
 
 @pytest.mark.parametrize('changed', ['day', 'symbol', 'analysis_id', 'latest_close'])
@@ -407,6 +412,20 @@ def test_price_freshness_does_not_reuse_outdated_or_different_listing_evidence(c
     issue = D._price_freshness_issue('TEST', mapped, '2026-11-09', '2026-11-10', source, '2026-11-11')
     assert 'no matching provider-availability receipt today' in issue
     assert 'newer close not published' not in issue
+    assert 'next: run asset_price_refresh' in issue
+
+
+def test_grouped_freshness_issues_preserve_all_causes_and_unique_portfolios():
+    accounts = [
+        {'portefeuille': 'B', 'issues': ['stale fund', 'stale fund', 'missing FX']},
+        {'portefeuille': 'A', 'issues': ['stale fund']},
+        {'portefeuille': 'C', 'issues': ['missing monthly report']},
+    ]
+    assert D.grouped_freshness_issues(accounts) == [
+        {'message': 'stale fund', 'affected': ['A', 'B'], 'affected_count': 2},
+        {'message': 'missing FX', 'affected': ['B'], 'affected_count': 1},
+        {'message': 'missing monthly report', 'affected': ['C'], 'affected_count': 1},
+    ]
 
 
 def test_missing_month_opening_is_saved_as_incomplete_without_fetching_airs(monkeypatch):
@@ -456,7 +475,9 @@ def test_missing_position_marks_trigger_month_repair_even_when_all_sections_are_
     monkeypatch.setattr(D, 'supabase', db)
     monkeypatch.setattr(monthly, '_monthly_rows', lambda *_: [{'month': '2026-10', 'periode': '2026-10-29', 'rendement': 10}])
     result = D.prepare_month('BOOK', date(2026, 10, 30))
-    assert result['errors'] == {'positions': '1 monthly position returns unavailable'}
+    assert list(result['errors']) == ['positions']
+    assert '1 monthly position returns unavailable: Stock [TEST] (marks_missing)' in result['errors']['positions']
+    assert 'next: check dated EUR values' in result['errors']['positions']
     saved = db.tables['airs_monthly_report'][0]['report']
     assert all(section['status'] == 'ok' for section in saved['sections'].values())
 

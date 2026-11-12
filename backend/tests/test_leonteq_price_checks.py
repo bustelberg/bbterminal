@@ -52,8 +52,90 @@ def test_newer_yahoo_closes_cannot_enter_an_older_source_comparison():
     assert result['yahoo_price'] == 100
 
 
+def test_missing_dino_session_explains_source_date_and_prior_close_without_using_future_price():
+    result = prices.compare(
+        row(37.8, source='AIRS', source_currency='PLN', source_date='2026-11-11'),
+        quote(currency='PLN', symbol='DNP.WA', bars=[('2026-11-10', 37.8), ('2026-11-12', 39)]),
+    )
+    assert result['yahoo_date'] == '2026-11-10'
+    assert result['yahoo_price'] == 37.8
+    assert result['difference_pct'] is None
+    assert result['status'] == 'unavailable'
+    assert 'No Yahoo close for 2026-11-11' in result['reason']
+    assert '2026-11-10' in result['reason']
+    assert 'AIRS labels its price 2026-11-11' in result['reason']
+
+
 def test_cash_does_not_require_a_yahoo_mapping():
     assert prices.compare(row(None, cash=True), None)['status'] == 'cash'
+
+
+@pytest.mark.parametrize('value,alert', [(105, False), (95, False), (105.01, True), (94.99, True)])
+def test_direct_bond_comparison_uses_airs_denominator_and_strict_threshold(value, alert):
+    left = row(value, source='Leonteq', name='3,875% Eni spA 24-34', source_currency='EUR')
+    right = row(100, source='AIRS', name='ENI 3.875 2034', source_currency='EUR')
+    result = prices.compare_direct(left, [left, right])
+    assert result['difference_pct'] == pytest.approx(value - 100)
+    assert result['alert'] is alert
+    assert result['comparison_basis'] == 'leonteq_airs'
+    assert result['yahoo_price'] is None
+
+
+@pytest.mark.parametrize('changes,code', [
+    ({'isin': 'OTHER'}, 'source_pair_missing'),
+    ({'source_currency': 'JPY'}, 'currency_mismatch'),
+    ({'source_price': 0}, 'invalid_price'),
+    ({'source_date': '2026-11-05'}, 'valuation_date_mismatch'),
+])
+def test_direct_comparison_does_not_pass_missing_or_incompatible_sources(changes, code):
+    left = row(source='Leonteq')
+    right = row(source='AIRS', **changes)
+    result = prices.compare_direct(left, [left, right])
+    assert result['status'] == 'unavailable'
+    assert result['reason_code'] == code
+
+
+@pytest.mark.parametrize('single', [None, 'Leonteq', 'AIRS'])
+def test_bond_portfolio_skips_yahoo_and_rechecks_both_sources(monkeypatch, single):
+    from leonteq import portfolio_links, price_symbols
+    link = {'leonteq_name': 'ObligatieTopSelectie', 'airs_name': 'OBTopSelectie_DYN', 'airs_portfolio_id': 7}
+    monkeypatch.setattr(portfolio_links, 'options', lambda _: {'links': [link]})
+    read = Mock(side_effect=lambda link, source: [row(106 if source == 'Leonteq' else 100, source=source)])
+    monkeypatch.setattr(prices, '_read_source', read)
+    monkeypatch.setattr(prices, '_executions', lambda isins: {} if not isins else pytest.fail('Bond ISIN sent to Yahoo mappings'))
+    monkeypatch.setattr(prices, 'fetch_yahoo', lambda _: pytest.fail('Bond portfolio fetched Yahoo'))
+    monkeypatch.setattr(price_symbols, 'resolve', lambda *_, **__: pytest.fail('Bond portfolio resolved Yahoo'))
+    kwargs = {'name': link['leonteq_name'], 'portfolio_id': 7, 'source': single, 'isin': 'ONE', 'holding_name': 'Example'} if single else {}
+    result = prices.run(JobCtx(Job(id='test', kind='prices', label='Prices')), **kwargs)
+    assert read.call_count == 2
+    assert result['summary']['yahoo_symbols'] == 0
+    assert result['summary']['alerts'] == 1
+    assert result['summary']['checked'] == 1
+    assert result['summary']['unavailable'] == 0
+    assert result['refresh_error'] is None
+    assert result['portfolios'][0]['rows'][0]['difference_pct'] == pytest.approx(6)
+
+
+def test_explicit_phillips_listing_without_isin_does_not_leak_to_other_holdings(monkeypatch):
+    from leonteq import portfolio_links
+    monkeypatch.setattr(portfolio_links, 'options', lambda _: {'links': [
+        {'leonteq_name': 'Fund', 'airs_portfolio_id': 1, 'airs_name': 'Dynamic'}]})
+    monkeypatch.setattr(prices, '_read_source', lambda link, source: [
+        row(source=source, name='PHILLIPS 66', isin=None),
+        row(source=source, name='Other holding', isin=None),
+        row(source=source, name='PHILLIPS 66', isin=None, source_currency='EUR'),
+    ])
+    monkeypatch.setattr(prices, '_executions', lambda _: {})
+    fetch = Mock(return_value=quote(symbol='PSX'))
+    monkeypatch.setattr(prices, 'fetch_yahoo', fetch)
+    result = prices.run(JobCtx(Job(id='test', kind='prices', label='Prices')))
+    fetch.assert_called_once_with('PSX')
+    rows = result['portfolios'][0]['rows']
+    assert rows[0]['symbol'] == 'PSX'
+    assert rows[0]['status'] == 'ok'
+    assert rows[0]['isin'] is None
+    assert rows[1]['symbol'] is None
+    assert rows[2]['symbol'] is None
 
 
 @pytest.mark.parametrize('source', ['Leonteq', 'AIRS'])
@@ -83,7 +165,40 @@ def test_yahoo_uses_unadjusted_closes_and_excludes_the_forming_session(monkeypat
         'timestamp': [prior, now], 'indicators': {'quote': [{'close': [100, 999]}], 'adjclose': [{'adjclose': [50, 50]}]}})
     monkeypatch.setattr(yahoo, 'chart', chart)
     assert prices.fetch_yahoo('EXAMPLE')['bars'] == [('2026-11-06', 100)]
-    chart.assert_called_once_with('EXAMPLE', rng='3mo', interval='1d')
+    chart.assert_called_once_with('EXAMPLE', rng='3mo', interval='1d', diagnostics=[])
+
+
+@pytest.mark.parametrize('names,expected', [
+    ({'longName': 'Eni S.p.A. 3.875% 2034', 'shortName': 'ENI 34'}, 'Eni S.p.A. 3.875% 2034'),
+    ({'shortName': 'ENI 34'}, 'ENI 34'),
+    ({}, None),
+])
+def test_price_comparison_preserves_yahoo_name_separately_from_source_name(monkeypatch, names, expected):
+    from asset_pipeline import yahoo
+    monkeypatch.setattr(yahoo, 'chart', lambda *_, **__: {
+        'meta': {'symbol': 'EXAMPLE', 'currency': 'EUR', **names},
+        'timestamp': [int(datetime(2026, 11, 6, 12, tzinfo=timezone.utc).timestamp())],
+        'indicators': {'quote': [{'close': [100]}]},
+    })
+    monkeypatch.setattr(yahoo, 'is_closed_bar', lambda _: True)
+    comparison = prices.compare(row(name='3,875% Eni spA 24-34', source_currency='EUR'), prices.fetch_yahoo('EXAMPLE'))
+    assert comparison['name'] == '3,875% Eni spA 24-34'
+    assert comparison['yahoo_name'] == expected
+
+
+@pytest.mark.parametrize('status,body,evidence', [
+    (429, 'private body', 'HTTP 429'),
+    (None, '', 'HTTP unavailable'),
+    (200, 'not JSON', 'invalid chart JSON/schema'),
+    (200, '{"chart":{"result":null,"error":{"code":"Not Found"}}}', 'code=Not Found'),
+])
+def test_yahoo_unusable_response_keeps_safe_evidence(monkeypatch, status, body, evidence):
+    from asset_pipeline import yahoo
+    monkeypatch.setattr(yahoo, '_get', lambda _: (status, body))
+    result = prices.compare(row(), prices.fetch_yahoo('EXAMPLE'))
+    assert result['reason_code'] == 'yahoo_response_unavailable'
+    assert evidence in result['reason']
+    assert 'private body' not in result['reason']
 
 
 def test_batch_checks_all_links_and_reuses_sources_and_yahoo_symbols(monkeypatch):
@@ -170,3 +285,24 @@ def test_resolution_failures_stay_on_the_affected_rows(monkeypatch):
     assert result['errors'] == []
     assert result['summary']['unavailable'] == 2
     assert all('Recheck this row' in r['reason'] for r in result['portfolios'][0]['rows'])
+    assert all('RuntimeError' in r['reason'] for r in result['portfolios'][0]['rows'])
+    assert result['unavailable_reasons'] == {'listing_unresolved': 2}
+
+
+def test_failed_quote_request_retains_evidence_and_aggregate_diagnostics_without_holdings(monkeypatch):
+    from leonteq import portfolio_links, price_symbols
+    monkeypatch.setattr(portfolio_links, 'options', lambda _: {'links': [
+        {'leonteq_name': 'Private fund', 'airs_portfolio_id': 1, 'airs_name': 'Private Dynamic'}]})
+    monkeypatch.setattr(prices, '_read_source', lambda link, source: [row(source=source)])
+    monkeypatch.setattr(prices, '_executions', lambda _: {'ONE': 'EXAMPLE'})
+    monkeypatch.setattr(price_symbols, 'resolve', lambda *_, **__: None)
+    monkeypatch.setattr(prices, 'fetch_yahoo', Mock(side_effect=TimeoutError('secret request URL')))
+    ctx = JobCtx(Job(id='test', kind='prices', label='Prices'))
+    result = prices.run(ctx)
+    assert result['unavailable_reasons'] == {'yahoo_request_failed': 2}
+    assert 'TimeoutError' in result['portfolios'][0]['rows'][0]['reason']
+    assert 'secret request URL' not in str(result)
+    evidence = [event for event in ctx.job.events if event['kind'] == 'diagnostic']
+    assert evidence[0]['count'] == 2
+    assert 'Private fund' not in str(evidence)
+    assert 'EXAMPLE' not in str(evidence)

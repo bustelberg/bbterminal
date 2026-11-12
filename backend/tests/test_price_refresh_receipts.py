@@ -22,7 +22,11 @@ def test_price_slice_receipt_identifies_failed_instruments(monkeypatch):
     })
     errors = []
     prices._run_prices_phase(1, errors, companies_override=[{'cid': 1}])
-    assert errors == ['Yahoo price refresh had 1 failed instrument(s).\nFUND / TEST: rate limited']
+    assert len(errors) == 1
+    assert errors[0].startswith('Yahoo price refresh had 1 failed instrument(s).\nFUND / TEST: rate limited')
+    assert 'provider_latest=unconfirmed' in errors[0]
+    assert 'Next: retry daily_price_slice' in errors[0]
+    assert 'Saved prices are retained' in errors[0]
 
 
 @pytest.mark.parametrize("last,expected_moved,expected_remaining", [

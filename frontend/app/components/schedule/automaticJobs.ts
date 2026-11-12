@@ -77,14 +77,22 @@ export function jobFailure(job: JobRow) {
       const name = record.portefeuille ?? record.symbol ?? record.isin;
       const location = typeof name === 'string' ? name : scope;
       for (const [key, item] of Object.entries(record)) {
-        if (key === 'source_jobs' && item && typeof item === 'object') {
+        if (key === 'issue_groups' && Array.isArray(item)) {
+          for (const group of item) {
+            if (!group || typeof group.message !== 'string') continue;
+            const message = clean(group.message);
+            const scopes = causes.get(message) ?? new Set<string>();
+            for (const name of group.affected ?? []) if (typeof name === 'string') scopes.add(name);
+            causes.set(message, scopes);
+          }
+        } else if (key === 'source_jobs' && item && typeof item === 'object') {
           for (const [source, run] of Object.entries(item)) {
             if (run && run.status !== 'ok') collect(run, source);
           }
         } else if (['error', 'errors', 'issues', 'global_issues', 'account_errors', 'skipped', 'message', 'missing'].includes(key)) {
           collect(item, key === 'missing' ? key : location, true);
         } else if (key === 'detail' || key === 'reason') {
-          if (diagnostic || ['error', 'failed', 'missed', 'interrupted'].includes(String(record.status))) {
+          if (diagnostic || ['error', 'failed', 'missed', 'interrupted', 'unavailable'].includes(String(record.status))) {
             collect(item, location, true);
           }
         } else if (item && typeof item === 'object') {
@@ -98,6 +106,9 @@ export function jobFailure(job: JobRow) {
 
   const { profile: _profile, ...summary } = job.last_summary ?? {};
   collect(summary);
+  // Ingest jobs may only persist error_summary as last_detail. Never copy
+  // an empty causes array beside an actionable error that is already available.
+  if (!causes.size && detail) causes.set(detail, new Set());
   const profile = jobTiming(job);
   const counts = Object.fromEntries(Object.entries(summary).filter(([, value]) => typeof value === 'number'));
   return {

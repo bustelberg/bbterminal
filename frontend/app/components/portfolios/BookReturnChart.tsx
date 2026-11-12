@@ -53,6 +53,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { benchmarkPriceEur } from './benchmarkPrice';
 import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
 
@@ -60,7 +61,7 @@ type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
 type WeightedBenchmarkComponent = {
   name: string; weight_pct: number; ticker: string | null; start_date: string | null;
   start_price: number | null; end_date: string | null; end_price: number | null;
-  currency: string | null; return_pct: number | null;
+  currency: string | null; return_pct: number | null; fx_start?: number | null; fx_end?: number | null;
 };
 
 const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[], policy?: Record<string, number> | null) => {
@@ -234,9 +235,9 @@ export default function BookReturnChart(
       <table className="w-full min-w-[54rem] border-separate border-spacing-y-1 text-left">
         <thead className="text-[10px] uppercase tracking-wide text-fg-faint"><tr>
           <th className="px-2 py-1 font-medium">Weight</th><th className="px-2 py-1 font-medium">Benchmark</th>
-          <th className="px-2 py-1 font-medium">Start date</th><th className="px-2 py-1 font-medium text-right">Start price</th>
+          <th className="px-2 py-1 font-medium">Start date</th><th className="px-2 py-1 font-medium text-right">Start price (EUR)</th>
           <th className="px-2 py-1 font-medium">Currency</th><th className="px-2 py-1 font-medium">End date</th>
-          <th className="px-2 py-1 font-medium text-right">End price</th><th className="px-2 py-1 font-medium text-right">Return</th>
+          <th className="px-2 py-1 font-medium text-right">End price (EUR)</th><th className="px-2 py-1 font-medium text-right">Return</th>
           <th className="px-2 py-1 font-medium text-right">Contribution</th>
         </tr></thead>
         <tbody>{benchmarkComponents.map((component) => {
@@ -244,9 +245,9 @@ export default function BookReturnChart(
           return <tr key={component.name} className="bg-elevated/70">
             <td className="rounded-l-md px-2 py-2 font-mono tabular-nums text-fg">{component.weight_pct.toFixed(1)}%</td>
             <td className="px-2 py-2 font-mono text-fg"><a href={`https://finance.yahoo.com/quote/${encodeURIComponent(component.ticker ?? component.name)}/`} target="_blank" rel="noreferrer" className="text-accent-300 underline decoration-accent-500/50 underline-offset-2 hover:text-accent-200">{component.ticker ?? component.name}</a></td>
-            <td className="px-2 py-2 text-fg-muted">{dateLabel(component.start_date)}</td><td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{component.start_price?.toFixed(2) ?? 'n/a'}</td>
-            <td className="px-2 py-2 font-mono text-fg-muted">{component.currency ?? 'n/a'}</td><td className="px-2 py-2 text-fg-muted">{dateLabel(component.end_date)}</td>
-            <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{component.end_price?.toFixed(2) ?? 'n/a'}</td><td className="px-2 py-2 text-right font-mono tabular-nums text-fg">{pct(component.return_pct)}</td>
+            <td className="px-2 py-2 text-fg-muted">{dateLabel(component.start_date)}</td><td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{benchmarkPriceEur(component.start_price, component.currency, component.fx_start)?.toFixed(2) ?? 'n/a'}</td>
+            <td className="px-2 py-2 font-mono text-fg-muted">EUR</td><td className="px-2 py-2 text-fg-muted">{dateLabel(component.end_date)}</td>
+            <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{benchmarkPriceEur(component.end_price, component.currency, component.fx_end)?.toFixed(2) ?? 'n/a'}</td><td className="px-2 py-2 text-right font-mono tabular-nums text-fg">{pct(component.return_pct)}</td>
             <td className="rounded-r-md px-2 py-2 text-right font-mono tabular-nums text-fg">{pct(contribution)}</td>
           </tr>;
         })}</tbody>

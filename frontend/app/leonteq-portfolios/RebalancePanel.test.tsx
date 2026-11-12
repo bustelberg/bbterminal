@@ -24,7 +24,7 @@ it('uses the same saved preview in both modes without upgrading metadata or fetc
   try {
     await act(async () => root.render(<RebalancePanel />));
     expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/portfolio-links?kind=fixed'), { cache: 'no-store', noReadCache: true });
-    await act(async () => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+    expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
     await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Prepare action list')!.click());
     expect(vi.mocked(apiFetch).mock.calls.filter(([url]) => url.includes('composition?refresh=true'))).toHaveLength(0);
     const beforeToggle = vi.mocked(apiFetch).mock.calls.length;
@@ -94,8 +94,8 @@ it.each(['complete', 'limit', 'stop-before-first', 'stop-after-first', 'live-lim
   const click = async (text: string) => act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === text)!.click());
   try {
     await act(async () => root.render(<RebalancePanel />));
-    expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(true);
-    if (scenario.startsWith('live-')) await act(async () => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+    expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
+    if (!scenario.startsWith('live-')) await act(async () => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
     await click('Prepare action list');
     expect(vi.mocked(apiFetch).mock.calls.some(([url]) => url.includes('refresh=true'))).toBe(false);
     const sourceRead = vi.mocked(apiFetch).mock.calls.find(([url]) => url.endsWith('/portfolios/composition'))!;

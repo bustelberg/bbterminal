@@ -118,7 +118,7 @@ def read_overview(key: str) -> dict | None:
     return {**payload, 'overview_prepared_at': stored['prepared_at']}
 
 
-def overview_freshness(keys: list[str]) -> dict[str, str]:
+def overview_freshness(keys: list[str], *, diagnostics: dict | None = None) -> dict[str, str]:
     """Check publication metadata without downloading any overview payloads."""
     if not keys:
         return {}
@@ -133,8 +133,24 @@ def overview_freshness(keys: list[str]) -> dict[str, str]:
                 .eq('payload->>details_pending', 'false').execute().data or [])
     except Exception as exc:
         _unavailable(exc)
+        if diagnostics is not None:
+            diagnostics.update({key: f'{type(exc).__name__}: {exc}; next: check analyse_prepared_snapshot storage access, then run analyse_prepare' for key in keys})
         return {key: 'unavailable' for key in keys}
     stable = version is not None and version == source_version('holdings') and code == code_version()
+    if diagnostics is not None:
+        by_key = {row['cache_key']: row for row in rows}
+        for key in keys:
+            row = by_key.get(key)
+            if not row:
+                diagnostics[key] = 'no complete saved overview; next: run analyse_prepare after source jobs finish'
+                continue
+            differences = [f'{field} stored={row.get(field)} expected={expected}'
+                           for field, expected in (('source_version', version), ('code_version', code), ('calculation_day', day))
+                           if row.get(field) != expected]
+            if not stable:
+                differences.append('source/code revision changed during audit or source revision unavailable')
+            if differences:
+                diagnostics[key] = '; '.join(differences) + '; next: finish source refreshes, then run analyse_prepare and dashboard_freshness; saved data remains available'
     return {row['cache_key']: 'current' if stable and (
         row['source_version'], row['code_version'], row['calculation_day']
     ) == (version, code, day) else 'older' for row in rows}
@@ -147,6 +163,7 @@ def overview(payload: dict) -> dict:
               'looked_through_pct', 'opaque_pct', 'looked_through')
     realised = payload.get('realised')
     summary = {**{key: realised.get(key) for key in ('available', 'book_ytd_pct', 'reconciles')},
+               'certificate_adjustments': deepcopy(realised.get('certificate_adjustments') or []),
                'positions': [deepcopy(row) for row in realised.get('positions', []) if row.get('closed_out')]} if realised else None
     return {**{key: deepcopy(payload[key]) for key in fields if key in payload},
             'axes': [], 'book_holdings': [], 'realised': summary, 'details_pending': True}

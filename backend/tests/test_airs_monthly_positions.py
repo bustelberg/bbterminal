@@ -59,6 +59,11 @@ def test_split_or_unknown_transfer_never_produces_a_false_loss():
     row = result(sections([holding(1000, 10)], [holding(1000, 100)]))
     assert row['return_pct'] is None
     assert row['reason'] == 'quantity_not_reconciled'
+    from routers._airs_monthly_positions import position_return_issue
+    evidence = row['return_diagnostics']
+    assert evidence['opening']['marks'][0]['quantity'] == 10
+    assert evidence['closing']['marks'][0]['quantity'] == 100
+    assert 'check transfers/splits' in position_return_issue(row)
     row = result(sections([holding(1000)], [holding(1100)], unclassified_names=['Stock']))
     assert row['return_pct'] is None
 

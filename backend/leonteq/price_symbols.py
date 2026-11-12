@@ -18,10 +18,12 @@ def currency(value):
     return SUBUNIT.get(value, (value.upper(), 1))[0]
 
 
-def resolve(isin, source_currency, *, force=False, check=lambda: None, warn=lambda message: None):
+def resolve(isin, source_currency, *, force=False, check=lambda: None, warn=lambda message: None, diagnostics=None):
     """Only accept FIGI-derived listings with matching issuer, currency and real closes."""
     ccy = currency(source_currency)
+    evidence = diagnostics if diagnostics is not None else []
     if not isin or not ccy:
+        evidence.append('Missing ISIN or source currency.')
         return None
     if not force:
         try:
@@ -36,20 +38,34 @@ def resolve(isin, source_currency, *, force=False, check=lambda: None, warn=lamb
     check()
     identity = openfigi.lookup_isin(isin)
     if not identity:
+        evidence.append('OpenFIGI returned no security identity; cannot verify Yahoo listings.')
         return None
     # Generated candidates retain the FIGI security identity, including ADR/GDR class.
     anchored = build_candidates(isin, identity, limit=40)
     hits = yahoo.search(isin)
     candidates = list(dict.fromkeys([h['symbol'] for h in hits if h.get('symbol') in anchored] + anchored))
+    if not candidates:
+        evidence.append('No Yahoo listing candidates could be built from the OpenFIGI identity.')
     for symbol in candidates[:12]:
         check()
-        data = yahoo.chart(symbol, rng='3mo', interval='1d') or {}
+        chart_evidence = []
+        data = yahoo.chart(symbol, rng='3mo', interval='1d', diagnostics=chart_evidence) or {}
         meta = data.get('meta') or {}
         name = meta.get('longName') or meta.get('shortName')
         closes = (((data.get('indicators') or {}).get('quote') or [{}])[0]).get('close') or []
-        if (meta.get('symbol', '').upper() != symbol.upper() or currency(meta.get('currency')) != ccy
-                or not name or not any(item.get('name') and same_company(name, item['name']) for item in identity)
-                or not any(isinstance(p, (int, float)) and math.isfinite(p) and p > 0 for p in closes)):
+        rejection = None
+        if not data:
+            rejection = '; '.join(chart_evidence) or 'no chart result'
+        elif meta.get('symbol', '').upper() != symbol.upper():
+            rejection = f'Yahoo returned symbol {meta.get("symbol") or "unknown"}'
+        elif currency(meta.get('currency')) != ccy:
+            rejection = f'Yahoo currency {currency(meta.get("currency")) or "unknown"}, source requires {ccy}'
+        elif not name or not any(item.get('name') and same_company(name, item['name']) for item in identity):
+            rejection = 'issuer name missing or does not match the OpenFIGI identity'
+        elif not any(isinstance(p, (int, float)) and math.isfinite(p) and p > 0 for p in closes):
+            rejection = 'no valid positive closes in Yahoo history'
+        if rejection:
+            evidence.append(f'{symbol}: {rejection}.')
             continue
         check()
         try:

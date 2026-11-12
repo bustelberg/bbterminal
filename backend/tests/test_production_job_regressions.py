@@ -1,3 +1,4 @@
+from scheduler_runtime import admission
 from datetime import datetime
 
 import pytest
@@ -70,7 +71,7 @@ def test_queue_pauses_for_daily_refresh_in_another_process(monkeypatch):
     import scheduler
     from asset_pipeline import queue
     monkeypatch.setattr(dashboard_daily, 'daily_refresh_active', lambda: True)
-    monkeypatch.setattr(scheduler, '_scheduled_futures', {})
+    monkeypatch.setattr(admission, '_scheduled_futures', {})
     def unexpected_slice(**kwargs):
         pytest.fail('A daily refresh in another process has priority')
     monkeypatch.setattr(queue, 'process_slice', unexpected_slice)
@@ -112,7 +113,7 @@ def test_queue_defers_on_database_shutdown_and_resumes_on_next_tick(monkeypatch,
     connect = Mock(side_effect=[shutdown if stage == 'connect' else failed, healthy])
     monkeypatch.setattr(common.pg, '_db_url', lambda: 'test-database')
     monkeypatch.setattr(psycopg, 'connect', connect)
-    monkeypatch.setattr(scheduler, '_scheduled_futures', {})
+    monkeypatch.setattr(admission, '_scheduled_futures', {})
     process = Mock(return_value={'processed': 0})
     monkeypatch.setattr(queue, 'process_slice', process)
 
@@ -207,7 +208,7 @@ def test_date_repair_removes_only_proven_artifacts_in_this_instrument(monkeypatc
 
 
 def test_old_vendor_price_is_unavailable_not_current(monkeypatch):
-    monkeypatch.setattr(yahoo, 'chart_window', lambda *a: {
+    monkeypatch.setattr(yahoo, 'chart_window', lambda *a, **kw: {
         'timestamp': [stamp('2026-10-30T14:30:00+00:00'), stamp('2026-11-02T14:30:00+00:00')],
         'indicators': {'quote': [{'close': [100, None]}]}, 'meta': {'exchangeTimezoneName': 'America/New_York'}})
     result = price_refresh._unavailable_close('FUND', '2026-10-30', '2026-11-02')
@@ -216,7 +217,7 @@ def test_old_vendor_price_is_unavailable_not_current(monkeypatch):
 
 
 def test_newer_vendor_price_not_saved_remains_a_real_failure(monkeypatch):
-    monkeypatch.setattr(yahoo, 'chart_window', lambda *a: {
+    monkeypatch.setattr(yahoo, 'chart_window', lambda *a, **kw: {
         'timestamp': [stamp('2026-11-02T14:30:00+00:00')], 'indicators': {'quote': [{'close': [100]}]}})
     with pytest.raises(RuntimeError, match='storage still ends'):
         price_refresh._unavailable_close('STOCK', '2026-10-30', '2026-11-02')
@@ -245,6 +246,7 @@ def test_available_newer_close_gets_one_verified_recovery_attempt(monkeypatch, p
     assert result['moved'] == (1 if persisted else 0)
     assert result['results'][0]['still_stale'] is True
     assert result['results'][0]['status'] == ('moved' if persisted else 'error')
+    assert result['results'][0]['vendor_latest_close'] == '2026-10-22'
 
 
 def test_availability_retries_empty_response_once_without_hiding_outage(monkeypatch):
@@ -258,3 +260,18 @@ def test_availability_retries_empty_response_once_without_hiding_outage(monkeypa
     with pytest.raises(RuntimeError, match='price-availability response'):
         price_refresh._unavailable_close('BMW3.DE', '2026-10-30', '2026-11-04')
     assert fetch.call_count == 4
+
+
+@pytest.mark.parametrize('status,body,evidence', [
+    (503, 'unavailable', 'HTTP 503'),
+    (200, 'invalid json', 'invalid chart JSON/schema'),
+    (200, '{"chart":{"error":{"code":"Not Found"},"result":null}}', 'code=Not Found'),
+])
+def test_unavailable_close_retains_provider_response_evidence(monkeypatch, status, body, evidence):
+    monkeypatch.setattr(yahoo, '_get', lambda _: (status, body))
+    with pytest.raises(RuntimeError) as caught:
+        price_refresh._unavailable_close('BMW3.DE', '2026-11-09', '2026-11-10')
+    message = str(caught.value)
+    assert evidence in message
+    assert 'BMW3.DE' in message and 'stored=2026-11-09' in message and 'expected=2026-11-10' in message
+    assert 'Next: retry' in message

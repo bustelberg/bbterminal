@@ -529,15 +529,31 @@ def _parse_chart(status: int | None, text: str) -> dict | None:
         return None
 
 
-def chart(symbol: str, rng: str = "3mo", interval: str = "1d") -> dict | None:
+def chart(symbol: str, rng: str = "3mo", interval: str = "1d", *, diagnostics: list[str] | None = None) -> dict | None:
     """Chart for `symbol` over a named range. Returns the first `chart.result`
     (or None). NOTE: `range=max` COARSENS the interval (Yahoo returns ~quarterly
     bars), so use `chart_window` for true daily candles at the far end."""
     s, t = _get(f"{_CHART}/{_urlquote(symbol, safe='=^.:-')}?range={rng}&interval={interval}")
-    return _parse_chart(s, t)
+    result = _parse_chart(s, t)
+    if result is None and diagnostics is not None:
+        _chart_diagnostics(s, t, diagnostics)
+    return result
 
 
-def chart_window(symbol: str, period1: int, period2: int, interval: str = "1d") -> dict | None:
+def _chart_diagnostics(status, body, diagnostics):
+    # Never retain raw provider bodies or request URLs.
+    if status != 200:
+        diagnostics.append(f'HTTP {status if status is not None else "unavailable"}')
+    else:
+        try:
+            chart_data = json.loads(body).get('chart') or {}
+            error = chart_data.get('error') or {}
+            diagnostics.append(f"Yahoo chart error code={error.get('code') or 'absent'}; no chart result")
+        except (ValueError, AttributeError, TypeError):
+            diagnostics.append('HTTP 200 with invalid chart JSON/schema')
+
+
+def chart_window(symbol: str, period1: int, period2: int, interval: str = "1d", *, diagnostics: list[str] | None = None) -> dict | None:
     """Chart for an explicit epoch-seconds window. Unlike `range=max`, a bounded
     `period1/period2` window returns TRUE daily bars — used to fetch the oldest
     candles right at the listing's inception.
@@ -550,7 +566,10 @@ def chart_window(symbol: str, period1: int, period2: int, interval: str = "1d") 
         f"?period1={int(period1)}&period2={int(period2)}&interval={interval}"
         f"&events=div%2Csplits"
     )
-    return _parse_chart(s, t)
+    result = _parse_chart(s, t)
+    if result is None and diagnostics is not None:
+        _chart_diagnostics(s, t, diagnostics)
+    return result
 
 
 def closed_daily_bars(symbol: str) -> list[tuple[date, float, float | None]]:

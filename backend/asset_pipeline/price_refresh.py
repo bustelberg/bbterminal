@@ -551,14 +551,21 @@ def _unavailable_close(symbol: str, stored: str, expected: str) -> dict:
     start = int((datetime.now(timezone.utc) - timedelta(days=14)).timestamp())
     end = int(time.time())
     raw = None
+    diagnostics: list[str] = []
     for attempt in range(2):
         # Use Yahoo's shared pacer/circuit breaker, not an unbounded local
         # retry loop. Throttling propagates immediately to the caller.
-        raw = yahoo.chart_window(symbol, start, end, '1d')
+        raw = yahoo.chart_window(symbol, start, end, '1d', diagnostics=diagnostics)
         if raw:
             break
     if not raw:
-        raise RuntimeError('Yahoo did not return a price-availability response')
+        raise RuntimeError(
+            f'Yahoo did not return a price-availability response for {symbol} after 2 attempts '
+            f'(stored={stored}, expected={expected}, interval=1d, window=14 days). '
+            f'Responses: {"; ".join(diagnostics) or "no response details recorded"}. '
+            'Provider availability is unknown; saved prices are retained. '
+            'Next: retry the price job after provider recovery; if repeated, check the Yahoo listing and provider request logs.'
+        )
     closes = (((raw.get('indicators') or {}).get('quote') or [{}])[0]).get('close') or []
     days = [yahoo.session_date(stamp, raw.get('meta')) for i, stamp in enumerate(raw.get('timestamp') or [])
             if i < len(closes) and closes[i] is not None and yahoo.is_closed_bar(stamp)]
@@ -634,6 +641,8 @@ def refresh_stale(
                 try:
                     outcome.update(_unavailable_close(sym, now, latest_all))
                 except NewerCloseAvailable as available:
+                    # Keep provider evidence even when the recovery write fails.
+                    outcome['vendor_latest_close'] = available.available
                     try:
                         # The diagnostic may succeed after the first chart request
                         # returned empty. Persist that exact response, once.

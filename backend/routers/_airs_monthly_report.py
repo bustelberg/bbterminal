@@ -371,6 +371,7 @@ class _PerformancePreparation:
 def _prepare_performance(portefeuille: str) -> dict:
     """Return positions in the initial bundle, repairing missing reports before responding."""
     from dashboard_daily import prepare_month
+    from jobs import UserFacingJobError
 
     with _PREPARATION_LOCKS[hash(portefeuille) % len(_PREPARATION_LOCKS)]:
         bundle = read_performance(portefeuille)
@@ -391,6 +392,10 @@ def _prepare_performance(portefeuille: str) -> dict:
                 # Reusing the same saved valuation cannot restore a lost AIRS component label.
                 if reason == "ambiguous_position" or prepare_month(portefeuille, month=month, complete_only=True)["errors"]:
                     collect_report(portefeuille, month, _PerformancePreparation())
+            except UserFacingJobError as exc:
+                # The collector persisted usable data; missing position marks
+                # are a report limitation, not an unexpected preparation crash.
+                log.warning("[monthly-report] partial preparation for %s %s: %s", portefeuille, month, exc)
             except Exception:
                 log.exception("[monthly-report] could not prepare %s %s", portefeuille, month)
 
@@ -517,5 +522,15 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
     unavailable = missing_position_returns(payload['positions'])
     if failures or unavailable:
         from jobs import UserFacingJobError
-        raise UserFacingJobError(f"Saved a partial report for {month}: {failures} AIRS report(s) failed; {len(unavailable)} position returns unavailable. Open Report for details.")
+        from routers._airs_monthly_positions import position_return_issue
+        details = "; ".join(position_return_issue(row) for row in unavailable)
+        failed_sections = "; ".join(f"{key}: {section.get('message') or 'unknown error'}"
+                                    for key, section in sections.items() if section['status'] == 'error')
+        raise UserFacingJobError(
+            f"Saved a partial report for {month}: {failures} AIRS report(s) failed; "
+            f"{len(unavailable)} position returns unavailable. "
+            + (f"Unavailable positions: {details}. " if details else "")
+            + (f"Failed AIRS sections: {failed_sections}. " if failed_sections else "")
+            + "Open Report for details."
+        )
     return 'Performance updated.'

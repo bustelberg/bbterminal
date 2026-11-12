@@ -18,6 +18,22 @@ def missing_position_returns(positions: list[dict]) -> list[dict]:
             and not (not row.get('isin') and (row.get('name') or '').casefold() in {'effectenrekening', 'liquiditeiten'})]
 
 
+def position_return_issue(row: dict) -> str:
+    reason = row.get('reason') or 'unknown_reason'
+    actions = {
+        'reports_missing': 'check missing/unreadable AIRS sections, then reload this month',
+        'unclassified_activity': 'inspect unclassified AIRS transactions and their dates/types',
+        'ambiguous_position': 'check duplicate valuation lines and principal/accrued-interest labels',
+        'identity_changed': 'check ISIN/currency changes between the two AIRS valuations',
+        'marks_missing': 'check dated EUR values, quantities and buy/sell execution marks',
+        'quantity_not_reconciled': 'reconcile opening quantity plus buys minus sells to closing quantity; check transfers/splits',
+        'holding_period_discontinuous': 'the position was sold and repurchased; a single continuous holding-period return is unavailable',
+    }
+    evidence = row.get('return_diagnostics') or {}
+    return (f"{row['name']} [{row.get('isin') or 'ISIN absent'}] ({reason}); "
+            f"evidence={evidence}; next: {actions.get(reason, 'inspect the saved monthly source reports')}")
+
+
 def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
     """One comparable security mark; explicit interest components remain separate.
 
@@ -169,4 +185,18 @@ def position_performance(sections: dict, start: str, end: str) -> list[dict]:
                        start_price_eur=first, end_price_eur=last,
                        start_date=first_date, end_date=last_date,
                        status="held" if before and after else "bought" if after else "sold")
+    for row in missing_position_returns(result):
+        def boundary_evidence(valuation):
+            return {'as_of': (valuation or {}).get('as_of'), 'marks': [
+                {key: record.get(key) for key in ('isin', 'currency', 'quantity', 'value_eur', 'valuation_component')}
+                for record in (valuation or {}).get('rows', []) if record['name'] == row['name']]}
+        row['return_diagnostics'] = {
+            'opening': boundary_evidence(opening), 'closing': boundary_evidence(closing),
+            'activity': [dict(trade) for trade in (transactions or {}).get('activity', []) if trade['name'] == row['name']],
+            'unclassified_names': (transactions or {}).get('unclassified_names', []),
+            'unclassified_unassigned': (transactions or {}).get('unclassified_unassigned', False),
+            'sections': {key: {'status': section.get('status'), 'message': section.get('message'),
+                               **({'readable': (section.get('data') or {}).get('readable')} if key == 'transactions' else {})}
+                         for key, section in sections.items()},
+        }
     return sorted(result, key=lambda r: (r["return_pct"] is None, -(r["return_pct"] or 0), r["name"]))

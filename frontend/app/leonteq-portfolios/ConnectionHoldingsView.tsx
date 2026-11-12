@@ -6,7 +6,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { useLang } from '../../lib/i18n';
 import type { CompositionResult } from './CompositionTable';
 import type { AirsComposition } from './AirsCompositionView';
-import { holdingKey, matchHoldings, soldRuleKey, type Holding, type HoldingRule } from './matchHoldings';
+import { holdingKey, isCash, matchHoldings, soldRuleKey, type Holding, type HoldingRule } from './matchHoldings';
 import SearchablePortfolioPicker from './SearchablePortfolioPicker';
 import { refreshRequest } from './refreshProgress';
 
@@ -35,6 +35,10 @@ const formatDate = (value: string, withTime = false) => {
 export const connectionSnapshotKey = (link: PortfolioConnection, side: Side) => side === 'leonteq'
   ? `leonteq:${link.leonteq_name}` : `airs:security-v2:${link.airs_portfolio_id}`;
 const keyFor = connectionSnapshotKey;
+const addWeight = (row: Holding) => {
+  const value = row.weight?.trim().replace(/%$/, '').trim().replace(',', '.') ?? '';
+  return /^\d+(?:\.\d{1,6})?$/.test(value) && Number(value) > 0 && Number(value) <= 100 ? value : null;
+};
 
 export async function readConnectionHoldings(link: PortfolioConnection, side: Side, refresh: boolean, nl = false, savedOnly = false): Promise<Snapshot> {
   const fetcher = refresh ? (url: string, init: Parameters<typeof apiFetch>[1]) => refreshRequest(url, init,
@@ -63,8 +67,9 @@ export async function readConnectionHoldings(link: PortfolioConnection, side: Si
 
 const read = readConnectionHoldings;
 
-export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack }: {
+export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, rulesCache, onBack }: {
   link: PortfolioConnection; cache: Map<string, Snapshot>; rulesCache: Map<string, HoldingRule[]>; onBack: () => void;
+  kind?: 'fixed' | 'dynamic';
 }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
@@ -85,6 +90,14 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
   const [leftChoice, setLeftChoice] = useState('');
   const [rightChoice, setRightChoice] = useState('');
   const savingRule = useRef(false);
+  const adding = useRef(false);
+  const addQueue = useRef<{ row: Holding; datum: string }[]>([]);
+  const pendingAdds = useRef(new Set<string>());
+  const [queuedKeys, setQueuedKeys] = useState(new Set<string>());
+  const [addingKey, setAddingKey] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addStatus, setAddStatus] = useState<string | null>(null);
+  const [addNeedsRefresh, setAddNeedsRefresh] = useState(false);
   const rulesUrl = `${API_URL}/api/leonteq/portfolio-links/holdings`;
   useEffect(() => {
     let active = true;
@@ -100,7 +113,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
   }, [link.leonteq_name, link.airs_portfolio_id, rulesCache, rulesKey]);
 
   async function saveRule(left: string, right: string | null) {
-    if (savingRule.current) return;
+    if (savingRule.current || adding.current) return;
     savingRule.current = true; setRulesSaving(true); setRulesError(false);
     try {
       const response = await apiFetch(rulesUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -133,6 +146,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
   }, [link, cache]);
 
   function refresh() {
+    if (adding.current) return;
     const request = ++version.current;
     setLoading({ leonteq: true, airs: true }); setErrors({});
     setRulesLoading(true); setRulesError(false);
@@ -147,6 +161,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
         if (alive.current && request === version.current) {
           cache.set(keyFor(link, side), result);
           setData((current) => ({ ...current, [side]: result }));
+          if (side === 'airs') { setAddNeedsRefresh(false); setAddError(null); }
         }
       }).catch(() => {
         if (alive.current && request === version.current) setErrors((current) => ({ ...current, [side]: true }));
@@ -158,19 +173,81 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
 
   const comparison = rules && data.leonteq && data.airs && !data.airs.noFixed
     ? matchHoldings(data.leonteq.rows, data.airs.rows, rules) : null;
-  const controlsBusy = rulesLoading || rulesSaving || loading.leonteq || loading.airs;
+  const controlsBusy = rulesLoading || rulesSaving || loading.leonteq || loading.airs || addingKey !== null;
+  function addBlocked(row: Holding): string | null {
+    if (kind !== 'fixed') return 'AIRS Fixed only';
+    if (addNeedsRefresh) return nl ? 'Vernieuw eerst beide composities.' : 'Refresh both compositions before retrying.';
+    if (isCash(row) || !holdingKey(row).startsWith('isin:')) return nl ? 'Een geldige ISIN is vereist.' : 'A valid ISIN is required.';
+    if (!addWeight(row)) return nl ? 'Een geldig positief gewicht is vereist (maximaal 6 decimalen).' : 'A valid positive weight is required (at most 6 decimals).';
+    if (!data.airs?.datum) return nl ? 'Vernieuw eerst de AIRS-compositie.' : 'Refresh the AIRS composition first.';
+    if (rules?.some(rule => rule.leonteq_key === holdingKey(row))) return nl ? 'Controleer eerst de handmatige koppeling.' : 'Review the manual connection rule first.';
+    if (data.leonteq?.rows.filter(item => holdingKey(item) === holdingKey(row)).length !== 1) return nl ? 'De ISIN komt meerdere keren voor.' : 'The ISIN occurs more than once.';
+    return null;
+  }
+  async function addHolding(queuedRow: Holding) {
+    const key = holdingKey(queuedRow);
+    if (rulesLoading || rulesSaving || loading.leonteq || loading.airs || pendingAdds.current.has(key)
+      || addBlocked(queuedRow) || !comparison?.leonteqOnly.includes(queuedRow)) return;
+    pendingAdds.current.add(key);
+    addQueue.current.push({ row: queuedRow, datum: data.airs!.datum! });
+    setQueuedKeys(new Set(pendingAdds.current));
+    if (adding.current) return;
+    adding.current = true; setAddError(null); setAddStatus(null);
+    while (addQueue.current.length && alive.current) {
+      const { row, datum } = addQueue.current.shift()!;
+      setAddingKey(holdingKey(row));
+      const isin = row.isin!.trim().toUpperCase();
+      const percentage = addWeight(row)!;
+      try {
+        const response = await apiFetch(`${API_URL}/api/leonteq/airs/model-portfolios/${link.airs_portfolio_id}/positions`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ datum, isin, percentage, leonteq_name: link.leonteq_name }),
+        });
+        const body = await response.json().catch(() => null) as AirsComposition & { detail?: string } | null;
+        if (!response.ok) throw new Error(typeof body?.detail === 'string' ? body.detail : 'AIRS could not verify the new holding.');
+        const matches = body?.rows?.filter(item => item.ISINCode?.trim().toUpperCase() === isin) ?? [];
+        if (body?.datum !== datum || matches.length !== 1 || !matches[0].id || Number(matches[0].Percentage) !== Number(percentage)) {
+          throw new Error('AIRS save is unverified.');
+        }
+        const snapshot: Snapshot = { datum: body.datum, timestamp: body.retrieved_at ?? body.cached_at,
+          rows: body.rows.map(item => ({ isin: item.ISINCode, name: item.Fonds,
+            weight: item.Percentage == null ? null : `${item.Percentage}%` })) };
+        cache.set(keyFor(link, 'airs'), snapshot);
+        if (alive.current) {
+          setData(current => ({ ...current, airs: snapshot }));
+          setAddStatus(nl ? `${row.name}: toegevoegd met ${formatWeight(row.weight)} en gekoppeld.` : `${row.name}: added at ${formatWeight(row.weight)} and connected.`);
+        }
+      } catch (cause) {
+        cache.delete(keyFor(link, 'airs'));
+        if (alive.current) {
+          setAddNeedsRefresh(true);
+          setAddError(`${cause instanceof Error ? cause.message : 'Could not verify the new holding.'} ${nl ? 'Wachtrij gestopt. Kies Beide vernieuwen voordat je opnieuw probeert.' : 'Queue stopped. Select Refresh both before retrying.'}`);
+        }
+        break;
+      } finally {
+        pendingAdds.current.delete(holdingKey(row));
+        if (alive.current) setQueuedKeys(new Set(pendingAdds.current));
+      }
+    }
+    addQueue.current = []; pendingAdds.current.clear(); adding.current = false;
+    if (alive.current) { setAddingKey(null); setQueuedKeys(new Set()); }
+  }
   function choices(rows: Holding[]) {
     return Array.from(new Map(rows.map((row) => [holdingKey(row), {
       value: holdingKey(row), label: row.name ?? row.isin ?? '—', description: row.isin ?? (nl ? 'Geen ISIN' : 'No ISIN'),
     }])).values());
   }
   function leftoverTable(rows: Holding[], side: Side) {
-    const headers = side === 'leonteq' ? ['ISIN', nl ? 'Naam' : 'Name', nl ? 'Gewicht' : 'Weight'] : ['Fonds', 'Percentage', 'ISIN-code', nl ? 'Actie' : 'Action'];
+    const headers = side === 'leonteq' ? ['ISIN', nl ? 'Naam' : 'Name', nl ? 'Gewicht' : 'Weight', ...(kind === 'fixed' ? [nl ? 'Actie' : 'Action'] : [])] : ['Fonds', 'Percentage', 'ISIN-code', nl ? 'Actie' : 'Action'];
     return <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
       <table className="w-full text-sm"><caption className="sr-only">{side === 'leonteq' ? 'Leonteq' : 'AIRS'} · {nl ? 'Niet gekoppelde posities' : 'Unmatched holdings'}</caption>
         <thead className="bg-elevated text-xs text-fg-muted"><tr>{headers.map((label, column) => <th key={label} scope="col" className={`px-3 py-3 font-medium ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right' : 'text-left'}`}>{label}</th>)}</tr></thead>
         <tbody className="divide-y divide-neutral-800/30">{rows.map((row, index) => <tr key={`${row.isin ?? row.name}-${index}`}>
           {(side === 'leonteq' ? [row.isin, row.name, formatWeight(row.weight)] : [row.name, formatWeight(row.weight), row.isin]).map((value, column) => <td key={column} className={`px-3 py-3 ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right tabular-nums' : ''}`}>{value ?? '—'}</td>)}
+          {side === 'leonteq' && kind === 'fixed' && <td className="px-3 py-3"><button type="button"
+            disabled={rulesLoading || rulesSaving || loading.leonteq || loading.airs || queuedKeys.has(holdingKey(row)) || !!addBlocked(row)} title={addBlocked(row) ?? (nl ? 'Voegt deze positie met het Leonteq-gewicht toe aan AIRS Fixed.' : 'Adds this holding to AIRS Fixed at the Leonteq weight.')}
+            aria-label={`Add ${row.name} to AIRS Fixed`} onClick={() => void addHolding(row)}
+            className="whitespace-nowrap text-accent-300 hover:underline disabled:opacity-50">{addingKey === holdingKey(row) ? (nl ? 'Toevoegen…' : 'Adding…') : queuedKeys.has(holdingKey(row)) ? (nl ? 'In wachtrij…' : 'Queued…') : (nl ? 'Toevoegen' : 'Add to AIRS Fixed')}</button></td>}
           {side === 'airs' && <td className="px-3 py-3">{holdingKey(row).startsWith('isin:') && !data.leonteq?.rows.some((source) => holdingKey(source) === holdingKey(row)) && <button type="button" disabled={controlsBusy} onClick={() => void saveRule(soldRuleKey(holdingKey(row)), holdingKey(row))} className="whitespace-nowrap text-accent-300 hover:underline disabled:opacity-50" aria-label={`Mark ${row.name} sold in Leonteq`}>{nl ? 'Verkocht in Leonteq' : 'Sold in Leonteq'}</button>}</td>}
         </tr>)}
           {!rows.length && <tr><td colSpan={headers.length} className="px-3 py-6 text-center text-fg-muted">{nl ? 'Geen overgebleven posities.' : 'No unmatched holdings.'}</td></tr>}
@@ -180,11 +257,13 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
   }
 
   return <section className="space-y-4 [&_thead_th]:text-center [&_thead_th]:align-middle" aria-labelledby="linked-holdings-heading">
-    <button type="button" disabled={rulesSaving} onClick={onBack} className="text-sm text-accent-300 hover:underline disabled:opacity-50">← {nl ? 'Alle koppelingen' : 'All connections'}</button>
+    <button type="button" disabled={rulesSaving || addingKey !== null} onClick={onBack} className="text-sm text-accent-300 hover:underline disabled:opacity-50">← {nl ? 'Alle koppelingen' : 'All connections'}</button>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 id="linked-holdings-heading" className="text-lg font-semibold">{nl ? 'Portefeuilleposities' : 'Portfolio holdings'}</h2>
       <button type="button" disabled={controlsBusy} onClick={refresh} className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm disabled:opacity-50">{nl ? 'Beide vernieuwen' : 'Refresh both'}</button>
     </div>
+    {addError && <p role="alert" className="text-sm text-neg-300">{addError}</p>}
+    {addStatus && <p role="status" className="text-sm text-fg-muted">{addStatus}</p>}
     {rulesLoading && <p role="status" className="text-sm text-fg-muted">{nl ? 'Opgeslagen rij-koppelingen laden…' : 'Loading saved row connections…'}</p>}
     {rulesError && <p role="alert" className="text-sm text-neg-300">{nl ? 'De rij-koppelingen konden niet worden geladen of opgeslagen. Kies Beide vernieuwen en probeer opnieuw.' : 'Row connections could not be loaded or saved. Select Refresh both and retry.'}</p>}
     <div className="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-2">
@@ -272,7 +351,7 @@ export default function ConnectionHoldingsView({ link, cache, rulesCache, onBack
             </section>;
           })}
         </div>
-        <p className="text-xs text-fg-muted">{nl ? 'Gelijke ISINs worden automatisch gekoppeld, tenzij je ze ontkoppelt. Je kunt overgebleven posities handmatig koppelen, ook cash. Gewichten blijven ongewijzigd.' : 'Matching ISINs connect automatically unless you disconnect them. You can manually connect leftover holdings, including cash. Weights stay unchanged.'}</p>
+        <p className="text-xs text-fg-muted">{nl ? 'Gelijke ISINs worden automatisch gekoppeld, tenzij je ze ontkoppelt. Je kunt overgebleven posities handmatig koppelen, ook cash. Koppelen wijzigt geen gewichten. Toevoegen kopieert het Leonteq-gewicht naar AIRS Fixed.' : 'Matching ISINs connect automatically unless you disconnect them. You can manually connect leftover holdings, including cash. Connecting rows keeps weights unchanged. Adding a holding copies its Leonteq weight to AIRS Fixed.'}</p>
       </section>
     </>}
   </section>;

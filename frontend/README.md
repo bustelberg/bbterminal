@@ -7,7 +7,8 @@ For full setup instructions (Supabase, backend, env vars), see the [project root
 ## Quick start
 
 ```bash
-npm install
+# First copy .env.example to .env.local and fill local keys (see root README).
+npm ci
 npm run dev
 ```
 
@@ -28,5 +29,8 @@ npm run build      # Production build
 npm run lint       # ESLint
 npx tsc --noEmit   # Type check
 npm test           # Unit tests (vitest)
-npm run e2e        # E2E tests (Playwright — runs a production build)
+npm run test:fast  # Fast unit tests
 ```
+
+Tests are unit-only; see the [testing policy](../docs/testing.md). Environment
+variables and local job controls are documented in [Environment setup](../docs/environment.md).

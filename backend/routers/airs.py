@@ -331,87 +331,12 @@ async def airs_model_portfolios_scan_job(force: bool = False):
     and neither does the SSE endpoint above, so those two can still overlap this. Non-blocking, so
     it can never deadlock the session it exists to protect.
     """
-    import jobs as job_registry  # noqa: PLC0415
-    from jobs import JobCancelled  # noqa: PLC0415
 
-    from airs_vermogen import _LOCK  # noqa: PLC0415
-
-    def _work(ctx) -> str:
-        if not _LOCK.acquire(blocking=False):
-            return "Another AIRS scan is already running — nothing was re-read"
-        #  The bar's position is carried, not re-derived per event. `ctx.progress` writes
-        # `done`/`total` onto the job every time, so a narration line emitted mid-count with a
-        # freshly-zeroed pair would blank a bar that is genuinely at 40/58 — and the next `count`
-        # would snap it back. The list phase legitimately has no denominator; 0 renders as
-        # indeterminate (`JobToaster`: `total > 0 ? pct : null`), which is what it is.
-        at = {"done": 0, "total": 0}
-
-        def on_event(kind: str, **kw) -> None:
-            msg = str(kw.get("message") or "")
-            #  `n` ARRIVES ONE LINE BEFORE THE FIRST `i`. The count phase announces its
-            # denominator ("counting holdings for 58 fixed portfolios") before it downloads
-            # anything, so adopting it from ANY event that carries it puts a real 0/58 on the bar
-            # for the ~10s of the first XLS instead of an indeterminate one.
-            if kw.get("n"):
-                at["total"] = int(kw["n"])
-            if kind == "count":
-                at["done"] = int(kw.get("i") or 0)
-            elif kind == "portfolios":
-                # It carries the whole roster as a payload; the job wants the one number.
-                msg = f"{kw.get('count') or 0} portfolios listed — counting holdings…"
-            #  NO `error` BRANCH, AND THAT IS NOT AN OVERSIGHT. Neither of these two scanners
-            # reports a fault as an EVENT — they raise, which the job runner already turns into a
-            # `failed` card. (The Front-Office scraper elsewhere in `airs_scanner` does emit one;
-            # this path does not, and handling a kind that never arrives reads as coverage.)
-            if msg:
-                ctx.progress(at["done"], at["total"], msg)
-
-        try:
-            #  Same reason as the account scan's first line. `_session.get_response` logs in
-            # lazily, so the first narrated event is the first LIST PAGE — everything before it
-            # (launching the browser, signing in) would sit under "starting…". Naming the slow
-            # thing up front is what separates "this takes a minute" from "this is stuck".
-            ctx.progress(0, 0, "signing in to AirSPMS and reading the model-portfolio list…")
-            rows = fetch_model_portfolios_sync(on_event)
-            #  Stored before the slow half, exactly as the SSE path does it. The list is complete
-            # work in its own right — it is what gives every account its readable name — and a
-            # cancel during the count must not throw it away.
-            store.save_portfolios(rows)
-            # A regular dashboard refresh repairs only compositions that are absent or whose last
-            # download failed. `force` (Shift + Refresh all) deliberately re-reads every fixed
-            # model. Previously one unpaired book made the recovery scan download all ~58 fixed
-            # models, which was both slow and why operators avoided the very action that healed
-            # the missing pairings.
-            from management_portfolios import dashboard_model_rows
-            scoped = dashboard_model_rows(rows)
-            missing_ids = (set() if force else
-                           store.unscanned_position_ids([row["id"] for row in scoped]))
-            to_count = scoped if force else [row for row in scoped if row["id"] in missing_ids]
-            if not force:
-                ctx.progress(0, len(to_count),
-                             f"{len(to_count)} model compositions missing — repairing those only…")
-            count_model_portfolio_holdings_sync(
-                to_count, on_event,
-                on_positions=store.save_positions,
-                on_error=store.save_positions_error,
-                should_stop=lambda: ctx.cancelled,
-            )
-        finally:
-            _LOCK.release()
-
-        counted = sum(1 for p in to_count if p.get("holdings") is not None)
-        if ctx.cancelled:
-            #  Raised, not returned — a returned string is a `done` job, and `done` is a word other
-            # code ACTS ON. See the same fix on the account job: returning here would paint a green
-            # card over a run that stopped early. `JobCancelled`'s message becomes the summary, so
-            # nothing is lost by raising it.
-            raise JobCancelled(f"Cancelled — {at['done']}/{at['total']} counted, "
-                               f"{len(rows)} portfolios stored")
-        return (f"{len(rows)} portfolios listed; {counted}/{len(to_count)} "
-                f"model compositions {'re-read' if force else 'repaired'}")
+    import jobs as job_registry
+    from services import airs_refresh as refresh_service
 
     job, reused = job_registry.start(
-        "airs.models.scan", "Scan model portfolios", _work)
+        "airs.models.scan", "Scan model portfolios", lambda ctx: refresh_service.scan_models(ctx, force=force))
     return {"job_id": job.id, "label": "Scan model portfolios", "already_running": reused}
 
 
@@ -431,21 +356,12 @@ async def airs_model_portfolios_refresh_job():
     preceding repair-only scan can retain older ones. The scheduled pipeline instead reuses
     the full composition scan it has just completed.
     """
-    import jobs as job_registry  # noqa: PLC0415
-    from jobs import JobCancelled  # noqa: PLC0415
-    from scheduler import _body_airs_model_prices  # noqa: PLC0415
 
-    def _work(ctx) -> str:
-        message, _summary = _body_airs_model_prices(ctx, stored_composition=False)
-        # The shared batch function keeps every completed portfolio and stops at the next safe
-        # portfolio boundary.  A returned string would mark the job `done`, causing the button to
-        # claim the fleet was fully refreshed after a Cancel.
-        if ctx.cancelled:
-            raise JobCancelled(f"Cancelled — {message}")
-        return message
+    import jobs as job_registry
+    from services import airs_refresh as refresh_service
 
     job, reused = job_registry.start(
-        "airs.models.refresh", "Refresh paired model portfolios", _work)
+        "airs.models.refresh", "Refresh paired model portfolios", refresh_service.refresh_models)
     return {"job_id": job.id, "label": "Refresh paired model portfolios",
             "already_running": reused}
 
@@ -1190,6 +1106,8 @@ class BookHoldingDetail(BaseModel):
     # holds, and cash to Cash. A column that named a sector the bars have never heard of is exactly
     # the taxonomy split this module exists to prevent, one screen apart instead of one chart apart.
     sector: str | None = None
+    # Issuer/ISIN region from the same classifier used by the current composition axes.
+    region: str | None = None
     # Identity and source value travel with the chart-normalised `sector` so an Analyse reader can
     # set a company-wide editorial override, or return to Automatic without guessing what it was.
     company_id: int | None = None
@@ -1941,6 +1859,9 @@ class WeightedBenchmarkComponent(BaseModel):
     end_date: str | None = None
     end_price: float | None = None
     currency: str | None = None
+    # Original currency units per EUR at each actual price date.
+    fx_start: float | None = None
+    fx_end: float | None = None
     return_pct: float | None = None
 
 
@@ -2783,7 +2704,6 @@ async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchma
     """
     import hashlib  # noqa: PLC0415
     import jobs as job_registry  # noqa: PLC0415
-    from asset_pipeline.price_refresh import repair_price_histories  # noqa: PLC0415
     from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
 
     holdings_isins = {
@@ -2809,16 +2729,9 @@ async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchma
     fingerprint = hashlib.sha256("|".join(sorted(isins)).encode()).hexdigest()[:12]
     label = f"risk-history:{fingerprint}:{years}:{int(full_history)}:{int(yahoo_only)}"
 
-    def _work(ctx) -> str:
-        ctx.progress(0, len(isins), "Checking price and FX history for the risk views…")
-        ctx.check()
-        repaired = repair_price_histories(isins, years=years, full_history=full_history, yahoo_only=yahoo_only)
-        ctx.check()
-        ctx.progress(len(isins), len(isins), "Risk price history checked")
-        return (f"Risk price history checked for {len(isins)} instruments "
-                f"({repaired.get('backfill', {}).get('stored', 0)} price histories stored)")
+    from services import airs_market_jobs as market_jobs
 
-    job, reused = job_registry.start("airs.risk-correlation-repair", label, _work)
+    job, reused = job_registry.start("airs.risk-correlation-repair", label, lambda ctx: market_jobs.repair_risk_history(ctx, isins=isins, years=years, full_history=full_history, yahoo_only=yahoo_only))
     return {"job_id": job.id, "label": label, "already_running": reused}
 
 
@@ -4157,15 +4070,12 @@ async def airs_weight_search_bounds(portefeuille: str, profile: str | None = Non
 async def airs_monthly_benchmark_job(portefeuille: str, month: str):
     import jobs as job_registry
     from routers._airs_monthly_report import _account, month_window
-    from routers._monthly_benchmark import ensure
     await asyncio.to_thread(_account, portefeuille)
     month_window(month)
 
-    def work(ctx):
-        ensure(portefeuille, month, ctx)
-        return 'Benchmark updated.'
+    from services import airs_market_jobs as market_jobs
 
-    job, reused = job_registry.start('airs.monthly-benchmark', f'{portefeuille}:{month}', work)
+    job, reused = job_registry.start('airs.monthly-benchmark', f'{portefeuille}:{month}', lambda ctx: market_jobs.refresh_monthly_benchmark(ctx, portefeuille=portefeuille, month=month))
     return {'job_id': job.id, 'already_running': reused}
 
 
@@ -4222,62 +4132,11 @@ async def airs_vermogen_refresh_job(force: bool = False):
     it too), so a second press returns a sentence instead of painting a red toast beside real
     failures — the same rule the per-row refresh follows.
     """
-    import jobs as job_registry  # noqa: PLC0415
-    from jobs import JobCancelled  # noqa: PLC0415
 
-    from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
+    import jobs as job_registry
+    from services import airs_refresh as refresh_service
 
-    def _work(ctx) -> str:
-        from management_portfolios import dashboard_progress_label
-
-        def progress(done, total, message):
-            # Keep scraper receipts in the server log; show one clear activity per portfolio.
-            if total and (match := re.match(r"^\d+/\d+: (.+)$", message)):
-                ctx.progress(max(0, done - 1), total, f"{match[1]} — Reading from AIRS…")
-            elif not total:
-                ctx.progress(0, 0, "Connecting to AIRS…")
-
-        res = run_airs_vermogen_refresh_sync(
-            triggered_by="manual-force" if force else "manual",
-            force=force,
-            dashboard_only=True,
-            include_price_checks=False,
-            on_step=progress,
-            on_account_done=lambda done, total, account: ctx.progress(
-                done, total, f"{dashboard_progress_label(account)} — Updated from AIRS",
-                account=account, account_done=True),
-            #  `ctx.check()` RAISES to unwind a job; here we only need the FLAG, because the scan
-            # has to run its own finalisation (write the status, release `_LOCK`) before returning.
-            # `cancelled` is the registry's own view of whether Cancel was pressed.
-            should_stop=lambda: ctx.cancelled,
-        )
-        if res.get("status") == "busy":
-            return "Another AIRS refresh is already running — nothing was re-read"
-        stopped = res.get("cancelled_at")
-        errs = res.get("errors") or []
-        #  The data's own date rides along. The counts are about what WE fetched; the row
-        # badges measure AIRS's valuation date, and without this the two read as contradictory
-        # ("44 accounts" against "3 trading days old"). See `format_run_message`.
-        summary = (f"{res.get('complete_accounts', 0)}/{res.get('portfolios_found', 0)} accounts, "
-                   f"{res.get('holdings_rows', 0)} holdings"
-                   + (f" · newest AIRS valuation {res['newest_as_of']}"
-                      if res.get('newest_as_of') else ''))
-        if stopped:
-            #  Raised, not returned, and that is a bug fix rather than a tidy-up. A worker that
-            # RETURNS is `done` — and `done` is not decoration here, the button ACTS on it: the
-            # frontend runs phase two (the minutes-long model scan) only `if (job.status ===
-            # 'done')`, precisely so a Cancel does not buy the reader minutes more of exactly what
-            # they asked to stop. Returning a string beginning "Cancelled" satisfied the reader and
-            # not the gate, so Cancel painted a green card and then started the slow half anyway —
-            # which from the outside is a Cancel button that does nothing.
-            #
-            # `JobCancelled`'s message becomes the summary, so the sentence below is not lost.
-            raise JobCancelled(f"Cancelled before {stopped} — {summary} stored before stopping")
-        if res.get("status") == "error":
-            raise RuntimeError(res.get("message") or "AIRS scan stored nothing")
-        return summary + (f" — {len(errs)} report(s) failed, see the console" if errs else "")
-
-    job, reused = job_registry.start("airs.vermogen.refresh", "Refresh all portfolios", _work)
+    job, reused = job_registry.start("airs.vermogen.refresh", "Refresh all portfolios", lambda ctx: refresh_service.refresh_accounts(ctx, force=force))
     return {"job_id": job.id, "label": "Refresh all portfolios", "force": force,
             "already_running": reused}
 
@@ -4405,28 +4264,11 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     the only thing saying otherwise. `JobCancelled` is what makes the card amber, and it carries the
     detail as its message so the summary still names the books left stale.
     """
-    import jobs as job_registry  # noqa: PLC0415
 
-    from routers._airs_full_refresh import (  # noqa: PLC0415
-        job_verdict,
-        refresh_portfolio_fully,
-    )
+    import jobs as job_registry
+    from services import airs_refresh as refresh_service
 
-    def _work(ctx) -> str:
-        from management_portfolios import dashboard_progress_label
-        label = dashboard_progress_label(portefeuille)
-        ctx.progress(0, 1, f"{label} — Reading from AIRS…")
-        full = refresh_portfolio_fully(
-            portefeuille=portefeuille, cascade=cascade,
-            halves=("book",), include_price_checks=False,
-            should_stop=lambda: ctx.cancelled)
-        #  The wording lives in `job_verdict`, NOT HERE. It was a closure, so nothing could test
-        # it — and it read the BOOK's cancel flag alone while `refresh_portfolio_fully` also
-        # cancels at two boundaries where there is no book result to carry one, which turned a
-        # pressed Cancel into a red "AIRS scan failed — no reports returned". See its docstring.
-        return job_verdict(portefeuille, full)
-
-    job, reused = job_registry.start("airs.portfolio.refresh", portefeuille, _work)
+    job, reused = job_registry.start("airs.portfolio.refresh", portefeuille, lambda ctx: refresh_service.refresh_account(ctx, portefeuille=portefeuille, cascade=cascade))
     return {"job_id": job.id, "label": portefeuille, "already_running": reused}
 
 
@@ -5039,18 +4881,10 @@ async def refresh_account_isin_prices_job(portefeuille: str):
     creating concurrent Yahoo work for the same account.
     """
     import jobs as job_registry  # noqa: PLC0415
-    from routers._airs_price_check import save_price_check  # noqa: PLC0415
 
-    def _work(ctx) -> str:
-        ctx.progress(0, 0, f"Refreshing stale price checks for {portefeuille}...")
-        ctx.check()
-        result = save_price_check(portefeuille)['result']
-        ctx.check()
-        count = len(result.get("rows") or [])
-        ctx.progress(1, 1, f"Price checks refreshed for {count} holdings")
-        return f"Price checks refreshed for {count} holdings"
+    from services import airs_market_jobs as market_jobs
 
-    job, reused = job_registry.start("airs.account-price-check", portefeuille, _work)
+    job, reused = job_registry.start("airs.account-price-check", portefeuille, lambda ctx: market_jobs.refresh_account_prices(ctx, portefeuille=portefeuille))
     return {"job_id": job.id, "label": portefeuille, "already_running": reused}
 
 
@@ -5058,35 +4892,22 @@ async def refresh_account_isin_prices_job(portefeuille: str):
 async def refresh_account_isin_price_job(portefeuille: str, isin: str):
     """Force-refresh one displayed holding's Yahoo series and save its account check."""
     import jobs as job_registry  # noqa: PLC0415
-    from routers._airs_price_check import recheck_price_check_row  # noqa: PLC0415
 
     normalized = isin.strip().upper()
 
-    def _work(ctx) -> str:
-        ctx.progress(0, 0, f"Refreshing Yahoo price for {normalized}...")
-        ctx.check()
-        recheck_price_check_row(portefeuille, normalized)
-        ctx.check()
-        ctx.progress(1, 1, f"Price refreshed for {normalized}")
-        return f"Price refreshed for {normalized}"
+    from services import airs_market_jobs as market_jobs
 
     job, reused = job_registry.start("airs.account-holding-price-check",
-                                     f"{portefeuille}:{normalized}", _work)
+                                     f"{portefeuille}:{normalized}", lambda ctx: market_jobs.refresh_holding_price(ctx, portefeuille=portefeuille, normalized=normalized))
     return {"job_id": job.id, "label": normalized, "already_running": reused}
 
 
 @router.post("/api/airs/sold-holdings/{isin}/refresh-price/job")
 async def refresh_sold_holding_price_job(isin: str):
     import jobs as job_registry
-    from routers._airs_price_check import refresh_sold_holding_price
     normalized = isin.strip().upper()
-    def work(ctx):
-        ctx.check()
-        ctx.progress(0, 1, "Checking the latest stock price…")
-        summary = refresh_sold_holding_price(normalized)
-        ctx.progress(1, 1, summary)
-        return summary
-    job, reused = job_registry.start('stock.sold-price', normalized, work)
+    from services import airs_market_jobs as market_jobs
+    job, reused = job_registry.start('stock.sold-price', normalized, lambda ctx: market_jobs.refresh_sold_price(ctx, normalized=normalized))
     return {'job_id': job.id, 'label': normalized, 'already_running': reused}
 
 
@@ -5586,15 +5407,8 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
     isins = sorted({(r.get("isin") or "").strip().upper() for r in pos if r.get("isin")})
     ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
 
-    def _work(ctx) -> str:
-        #  `prices` IS OFF BY DEFAULT so every existing caller is unchanged. The Fundamental modal
-        # asks for it because its own tabs price things — Quick Valuation shows today's share price
-        # and charts the multiple off the daily closes, neither of which is one of the three
-        # GuruFocus fundamentals feeds. See `_refresh_prices`.
-        return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
-                                only_due=only_due, prices=prices, key_ratios=key_ratios)
 
-    job, reused = job_registry.start("fundamentals.portfolio", name, _work)
+    job, reused = job_registry.start("fundamentals.portfolio", name, lambda ctx: fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit, only_due=only_due, prices=prices, key_ratios=key_ratios))
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
             "no_fundamentals": no_fundamentals, "no_company": no_company,
             "already_running": reused}
@@ -5626,18 +5440,8 @@ async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
     isins = sorted({(h.isin or "").strip().upper() for h in (req.holdings or []) if h.isin})
     ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
 
-    def _work(ctx) -> str:
-        #  `prices` FORWARDED, and it was not. This route DECLARED the parameter and then dropped
-        # it on the floor, so the Quick Valuation refresh silently skipped the price leg on every
-        # un-paired book — which, per the  above, is most books on /management-dashboard. The
-        # model-portfolio twin had the opposite half of the same mistake: it passed `prices=prices`
-        # without declaring it, so that path raised `NameError` instead. One feature, two routes,
-        # neither working, and in opposite directions — a loud 500 on the rarer path and a silent
-        # no-op on the common one.
-        return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
-                                only_due=only_due, prices=prices, key_ratios=key_ratios)
 
-    job, reused = job_registry.start("fundamentals.basket", name, _work)
+    job, reused = job_registry.start("fundamentals.basket", name, lambda ctx: fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit, only_due=only_due, prices=prices, key_ratios=key_ratios))
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
             "no_fundamentals": no_fundamentals, "no_company": no_company,
             "already_running": reused}

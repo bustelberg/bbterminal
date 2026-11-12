@@ -12,6 +12,7 @@ import { startJob } from '../../../lib/stores/jobs';
 import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { benchmarkPriceEur } from './benchmarkPrice';
 import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
 import HoldingReturnExplanation from './HoldingReturnExplanation';
 import HoldingsColumnExplanation from './HoldingsColumnExplanation';
@@ -30,6 +31,7 @@ import { trace, traceError } from '../../../lib/debugTrace';
 import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { BookValueSeries, EtfSectorAllocationResponse, EtfRegionAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import { addEtfRegionWeights } from './etfRegionLookThrough';
+import { currentExposureRows } from './currentExposureRows';
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
@@ -225,10 +227,10 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
             <th className="px-2 py-1 font-medium">Weight</th>
             <th className="px-2 py-1 font-medium">Benchmark</th>
             <th className="px-2 py-1 font-medium">Start date</th>
-            <th className="px-2 py-1 font-medium text-right">Start price</th>
+            <th className="px-2 py-1 font-medium text-right">Start price (EUR)</th>
             <th className="px-2 py-1 font-medium">Currency</th>
             <th className="px-2 py-1 font-medium">End date</th>
-            <th className="px-2 py-1 font-medium text-right">End price</th>
+            <th className="px-2 py-1 font-medium text-right">End price (EUR)</th>
             <th className="px-2 py-1 font-medium text-right">Return</th>
             <th className="px-2 py-1 font-medium text-right">Contribution</th>
           </tr>
@@ -243,10 +245,10 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
               <td className="rounded-l-md px-2 py-2 font-mono tabular-nums text-fg">{block.weight_pct.toFixed(1)}%</td>
               <td className="px-2 py-2 font-mono tabular-nums text-fg">{href ? <a href={href} target="_blank" rel="noreferrer" className="text-accent-300 underline decoration-accent-500/50 underline-offset-2 hover:text-accent-200">{ticker}</a> : ticker}</td>
               <td className="px-2 py-2 text-fg-muted">{dateLabel(block.benchmark_start_date)}</td>
-              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{block.benchmark_start_value == null ? 'n/a' : block.benchmark_start_value.toFixed(2)}</td>
-              <td className="px-2 py-2 font-mono text-fg-muted">{block.benchmark_currency ?? 'n/a'}</td>
+              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{benchmarkPriceEur(block.benchmark_start_value, block.benchmark_currency, block.benchmark_fx_start)?.toFixed(2) ?? 'n/a'}</td>
+              <td className="px-2 py-2 font-mono text-fg-muted">EUR</td>
               <td className="px-2 py-2 text-fg-muted">{dateLabel(block.benchmark_end_date)}</td>
-              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{block.benchmark_end_value == null ? 'n/a' : block.benchmark_end_value.toFixed(2)}</td>
+              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{benchmarkPriceEur(block.benchmark_end_value, block.benchmark_currency, block.benchmark_fx_end)?.toFixed(2) ?? 'n/a'}</td>
               <td className="px-2 py-2 text-right font-mono tabular-nums text-fg">{shortReturn(block.benchmark_return_pct)}</td>
               <td className="rounded-r-md px-2 py-2 text-right font-mono tabular-nums text-fg">{shortReturn(contribution)}</td>
             </tr>;
@@ -744,6 +746,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
     count: number;
     loading: boolean;
     unavailable: number;
+    unavailableNames: string[];
   };
 }) {
   const copy = useAnalyseCopy();
@@ -821,9 +824,9 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           )}
           </TipCard>} />
         </div>
-        {axis === 'sector' && etfControl && etfControl.count > 0 && (
+        {(axis === 'sector' || axis === 'region') && etfControl && etfControl.count > 0 && (
           <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted"
-            title={copy.axes.addEtfsTitle}>
+            title={axis === 'region' ? copy.axes.addRegionEtfsTitle : copy.axes.addEtfsTitle}>
             <input type="checkbox" checked={etfControl.enabled}
               onChange={(event) => etfControl.onChange(event.target.checked)}
               className="h-3.5 w-3.5 cursor-pointer accent-accent-500" />
@@ -832,21 +835,12 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
               <span className="text-fg-faint">{copy.axes.loadingEtfs}</span>
             )}
             {etfControl.enabled && !etfControl.loading && etfControl.unavailable > 0 && (
-              <span className="text-warn-300">
+              <span className="text-warn-300" title={etfControl.unavailableNames.join('\n')}>
                 {copy.axes.unavailableEtfs(etfControl.unavailable)}
               </span>
             )}
           </label>
         )}
-        {axis === 'region' && etfControl && etfControl.count > 0 && <div className="flex items-center gap-1.5 text-[11px]">
-          <button type="button" aria-pressed={etfControl.enabled} title={copy.axes.addRegionEtfsTitle}
-            onClick={() => etfControl.onChange(!etfControl.enabled)}
-            className={`rounded-lg border border-neutral-800/40 px-2 py-1 transition-colors ${etfControl.enabled ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
-            {copy.axes.addEtfs}
-          </button>
-          {etfControl.enabled && etfControl.loading && <span role="status" className="text-fg-faint">{copy.axes.loadingEtfs}</span>}
-          {etfControl.enabled && !etfControl.loading && etfControl.unavailable > 0 && <span className="text-warn-300">{copy.axes.unavailableEtfs(etfControl.unavailable)}</span>}
-        </div>}
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{axisNote}</p>
       {/*  ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
@@ -3603,11 +3597,14 @@ export default function PortfolioAnalysisModal({
   const [error, setError] = useState<string | null>(null);
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
   const [includeEtfsInSector, setIncludeEtfsInSector] = useState(true);
-  const [includeEtfsInRegion, setIncludeEtfsInRegion] = useState(false);
+  const includeEtfsInRegion = includeEtfsInSector;
+  const setIncludeEtfsInRegion = setIncludeEtfsInSector;
+  const equityFunds = (data?.book_holdings ?? []).filter(holding => holding.bucket === 'Equity'
+    && holding.is_fund && (holding.weight_now_pct ?? 0) > 0);
   const eligibleSectorEtfs = useMemo(() => {
     const byIsin = new Map<string, BookHolding>();
     for (const holding of data?.book_holdings ?? []) {
-      if (!hasEtfSectorAllocation(holding) || (holding.weight_now_pct ?? 0) <= 0) continue;
+      if (holding.bucket !== 'Equity' || !hasEtfSectorAllocation(holding) || (holding.weight_now_pct ?? 0) <= 0) continue;
       byIsin.set(holding.isin!.trim().toUpperCase(), holding);
     }
     return [...byIsin.values()].sort((a, b) => (a.isin ?? '').localeCompare(b.isin ?? ''));
@@ -3730,10 +3727,9 @@ export default function PortfolioAnalysisModal({
       && loadedRevision.current === revision;
     const preparedOverview = !isBasket && !assetFilter && benchmark === 'ACWI'
       && source === 'book' && !includeHoldingRisk;
-    const overviewOnly = !assetFilter && !data;
     const cachedDetails = !preparedOverview && assetFilter !== EQUITY_BUCKET && holdingDetails.current?.revision === revision
       ? holdingDetails.current.value : null;
-    const requestKey = chartsOnly ? `${analysisKey}|charts` : preparedOverview || overviewOnly ? analysisKey
+    const requestKey = chartsOnly ? `${analysisKey}|charts` : preparedOverview ? analysisKey
       : `${revision}|holdings${assetFilter === EQUITY_BUCKET ? '|axes' : ''}`;
     void (async () => {
       try {
@@ -3749,7 +3745,9 @@ export default function PortfolioAnalysisModal({
               // Sector/region/currency require the full benchmark constituent grid. The opening
               // overview does not render those charts, so defer that work until Stocks is selected.
               + `&include_axes=${assetFilter === EQUITY_BUCKET}`
-              + `&overview_only=${overviewOnly || chartsOnly}`
+              // Opening allocation and reconciliation must use the complete ledger in one
+              // response. Only an explicitly requested Stocks chart may omit holdings.
+              + `&overview_only=${chartsOnly}`
               + (assetFilter === EQUITY_BUCKET ? `&bucket=${EQUITY_BUCKET}` : ''));
           const body = await r.json().catch(() => null);
           if (preparedOverview && r.status === 202) throw new Error('overview-not-prepared');
@@ -3804,39 +3802,6 @@ export default function PortfolioAnalysisModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk]);
 
-  // Paint the lightweight overview first, then automatically fill its holdings section.
-  // Performance has its own loader; ETF sector requests remain gated on the Stocks view.
-  const needsHoldingDetails = !reportOpen && (assetFilter == null || risk);
-  const detailsPending = data?.details_pending;
-  useEffect(() => {
-    if (isBasket || !needsHoldingDetails || !detailsPending || loadedFor !== viewKey) return;
-    let cancelled = false;
-    setDetailsError(false);
-    const loadDetails = () => { void loadPrefetchedAnalysis(`${detailsRevision}|holdings`, async () => {
-      const response = await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
-        + `?benchmark=${benchmark}&weight_by=${source}&source=${source}&look_through=${lookThrough}&include_axes=false&overview_only=false&include_holding_risk=${includeHoldingRisk}`);
-      const body = await response.json();
-      if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
-      return body as ModelPortfolioAnalysis;
-    }).then((detail) => {
-      holdingDetails.current = { revision: detailsRevision, value: detail };
-      if (!cancelled) setData((current) => current?.axes?.length ? { ...detail, axes: current.axes } : detail);
-    }).catch((detailError) => {
-      traceError('analyse', 'Requested holding detail failed; AIRS overview retained', detailError);
-      if (!cancelled) setDetailsError(true);
-    }); };
-    // A second animation frame runs after the browser has painted the overview and spinner.
-    let secondFrame = 0;
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => { if (!cancelled) loadDetails(); });
-    });
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(firstFrame);
-      window.cancelAnimationFrame(secondFrame);
-    };
-  }, [isBasket, needsHoldingDetails, detailsPending, loadedFor, viewKey, detailsRevision, id, benchmark, source, lookThrough, includeHoldingRisk]);
-
   // Receiving the payload and displaying it are different moments. Keep the sector job running
   // through the commit and the next paint, so its completed state cannot precede the changed row.
   useEffect(() => {
@@ -3886,7 +3851,7 @@ export default function PortfolioAnalysisModal({
   }, [assetFilter, eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
 
   useEffect(() => {
-    if (!includeEtfsInRegion || !eligibleRegionEtfKey || etfRegionResult?.key === eligibleRegionEtfKey) return;
+    if (assetFilter !== EQUITY_BUCKET || !includeEtfsInRegion || !eligibleRegionEtfKey || etfRegionResult?.key === eligibleRegionEtfKey) return;
     const controller = new AbortController();
     void (async () => {
       const settled = await Promise.all(eligibleRegionEtfs.map(async holding => {
@@ -3908,7 +3873,7 @@ export default function PortfolioAnalysisModal({
       setEtfRegionResult({ key: eligibleRegionEtfKey, allocations, unavailable });
     })();
     return () => controller.abort();
-  }, [includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfRegionResult?.key]);
+  }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfRegionResult?.key]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -4272,6 +4237,9 @@ export default function PortfolioAnalysisModal({
                   {(data.axes ?? []).map((a) => {
                     const loadedEtfAllocations = etfSectorResult?.key === eligibleSectorEtfKey
                       ? etfSectorResult.allocations : {};
+                    const loadedRegionAllocations = etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {};
+                    const missingSectorFunds = equityFunds.filter(holding => !loadedEtfAllocations[holding.isin?.trim().toUpperCase() ?? '']);
+                    const missingRegionFunds = equityFunds.filter(holding => !loadedRegionAllocations[holding.isin?.trim().toUpperCase() ?? '']);
                     const sectorRows = a.axis === 'sector' && includeEtfsInSector && !lookThrough
                       ? addCertificateSectorWeights(a.rows, data.book_holdings ?? [])
                       : a.rows;
@@ -4279,9 +4247,14 @@ export default function PortfolioAnalysisModal({
                       ? addEtfSectorWeights(
                         sectorRows, data.book_holdings ?? [], loadedEtfAllocations,
                       ) : sectorRows;
-                    const rows = a.axis === 'region' && includeEtfsInRegion
+                    const fallbackRows = a.axis === 'region' && includeEtfsInRegion
                       ? addEtfRegionWeights(fundRows, (data.book_holdings ?? []).filter(holding => !assetFilter || holding.bucket === assetFilter),
                         etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {}) : fundRows;
+                    const rows = data.weight_basis === 'book' && data.book_holdings?.length
+                      && (a.axis === 'sector' || a.axis === 'region')
+                      ? currentExposureRows(a.rows, data.book_holdings, a.axis, includeEtfsInSector, lookThrough,
+                        loadedEtfAllocations, etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {})
+                      : fallbackRows;
                     return (
                     <Chart key={a.axis} axis={a.axis} rows={rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
@@ -4294,19 +4267,20 @@ export default function PortfolioAnalysisModal({
                         ? data.risk_profile_policy?.Stocks : undefined}
                       benchmarkCapsUnstamped={data.benchmark_caps_unstamped}
                       etfControl={a.axis === 'sector'
-                        && (eligibleSectorEtfs.length + eligibleCertificateSectorCount) ? {
+                        && (equityFunds.length + eligibleCertificateSectorCount) ? {
                         enabled: includeEtfsInSector,
                         onChange: setIncludeEtfsInSector,
-                        count: eligibleSectorEtfs.length + eligibleCertificateSectorCount,
+                        count: equityFunds.length + eligibleCertificateSectorCount,
                         loading: includeEtfsInSector && eligibleSectorEtfs.length > 0
                           && etfSectorResult?.key !== eligibleSectorEtfKey,
-                        unavailable: etfSectorResult?.key === eligibleSectorEtfKey
-                          ? etfSectorResult.unavailable : 0,
-                      } : a.axis === 'region' && eligibleRegionEtfs.length ? {
+                        unavailable: missingSectorFunds.length,
+                        unavailableNames: missingSectorFunds.map(holding => `${holding.name ?? holding.isin} (${holding.isin ?? 'No ISIN'})`),
+                      } : a.axis === 'region' && (equityFunds.length + eligibleCertificateSectorCount) ? {
                         enabled: includeEtfsInRegion, onChange: setIncludeEtfsInRegion,
-                        count: eligibleRegionEtfs.length,
-                        loading: includeEtfsInRegion && etfRegionResult?.key !== eligibleRegionEtfKey,
-                        unavailable: etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.unavailable : 0,
+                        count: equityFunds.length + eligibleCertificateSectorCount,
+                        loading: includeEtfsInRegion && eligibleRegionEtfs.length > 0 && etfRegionResult?.key !== eligibleRegionEtfKey,
+                        unavailable: missingRegionFunds.length,
+                        unavailableNames: missingRegionFunds.map(holding => `${holding.name ?? holding.isin} (${holding.isin ?? 'No ISIN'})`),
                       } : undefined} />
                     );
                   })}

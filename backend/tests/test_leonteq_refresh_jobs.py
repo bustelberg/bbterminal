@@ -75,12 +75,26 @@ def test_dutch_progress_is_reported_in_the_same_popup(ctx, monkeypatch):
     assert ctx.job.events[0]['message'].startswith('Verbinding maken')
 
 
-def test_price_batch_returns_partial_results_and_readable_coverage_failure(ctx, monkeypatch):
+def test_price_batch_completes_with_incomplete_coverage_and_keeps_results(ctx, monkeypatch):
     from leonteq import price_checks
     payload = {'success': True, 'refresh_error': 'incomplete_price_checks',
                'summary': {'portfolios': 2, 'checked': 3, 'alerts': 1, 'unavailable': 2},
                'portfolios': [], 'errors': []}
     monkeypatch.setattr(price_checks, 'run', lambda _: payload)
-    with pytest.raises(UserFacingJobError, match='2 uncheckable'):
+    summary = refresh.run(ctx, 'prices')
+    assert summary.startswith('Completed with incomplete coverage:')
+    assert '2 uncheckable' in summary
+    assert refresh.result_for(ctx.job.id)['payload'] == payload
+    assert ctx.job.events[-1]['done'] == 1
+
+
+@pytest.mark.parametrize('refresh_error', [None, 'incomplete_price_checks'])
+def test_price_batch_source_refresh_failure_still_fails_with_partial_results(ctx, monkeypatch, refresh_error):
+    from leonteq import price_checks
+    payload = {'success': True, 'refresh_error': refresh_error,
+               'summary': {'portfolios': 2, 'checked': 3, 'alerts': 0, 'unavailable': 1},
+               'portfolios': [], 'errors': ['AIRS could not refresh: TimeoutError.']}
+    monkeypatch.setattr(price_checks, 'run', lambda _: payload)
+    with pytest.raises(UserFacingJobError, match='1 uncheckable'):
         refresh.run(ctx, 'prices')
     assert refresh.result_for(ctx.job.id)['payload'] == payload

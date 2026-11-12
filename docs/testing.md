@@ -32,6 +32,22 @@
 - **Frontend** (`cd frontend`): `npx tsc --noEmit` (typecheck) · `npm test` (vitest, `*.test.ts` colocated) · `npx eslint <files>`.
 - **Backend** (`cd backend`): `uv run pytest tests/` (momentum-engine units) · `uv run ruff check .`. After changing a route/Pydantic model, regenerate the API contract — see **API contract pipeline**.
 
+### Refresh orchestration boundaries
+
+These unit checks use event-coordinated threads and in-memory providers/database
+fakes, without sleeps, a browser, network calls, or a database server.
+
+| Guarantee | Coverage |
+| --- | --- |
+| Concurrent work respects ownership | [test_refresh_boundaries.py](../backend/tests/test_refresh_boundaries.py) rejects a competing daily lease and duplicate job even with spare worker capacity; [test_airs_refresh_service.py](../backend/tests/test_airs_refresh_service.py) prevents overlapping AIRS model scans. |
+| Completed partial work remains saved | [test_automatic_price_checks.py](../backend/tests/test_automatic_price_checks.py) exercises the real comparison-save helper with fake storage when a later account fails or cancellation stops further comparisons. |
+| Failures retain evidence | [test_refresh_boundaries.py](../backend/tests/test_refresh_boundaries.py) runs the real recorder against fake storage and checks full structured provider evidence, saved counts, final status and timing profile. |
+| Cancellation/failure releases resources | The boundary tests verify advisory unlock commands, lease-context reset, worker-slot return and a successful subsequent run; service tests verify AIRS session release and retained completed positions. |
+
+The advisory-lock fake models competing database sessions. These tests verify
+our acquisition/release and control-flow contracts; they do not certify the
+availability or configuration of a deployed PostgreSQL server.
+
 ### The default local loop: `npm run test:fast` (repo root)
 
 One command, both halves: `npm --prefix frontend run test:fast` then `cd backend && uv run pytest -m fast`. **~23s** (frontend ~6s / backend ~17s) against ~34s for everything. Per half: `npm run test:fast` in `frontend/`, `uv run pytest -m fast` in `backend/`.

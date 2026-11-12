@@ -10,6 +10,46 @@ import { startJob, type JobProgress, type JobToast } from '../../../lib/stores/j
 vi.mock('../../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
 vi.mock('../../../lib/stores/jobs', () => ({ startJob: vi.fn() }));
 
+it('shows correlation for weekly histories recorded on different weekdays', async () => {
+  const options = [
+    { id: 'FUND', name: 'High Income Quality fund', isin: 'FUND', currency: 'EUR' },
+    { id: 'STOCK', name: 'Adyen', isin: 'STOCK', currency: 'EUR' },
+  ];
+  const dates = [
+    ['2025-06-15', '2025-06-22', '2025-06-29', '2025-07-06'],
+    ['2025-06-11', '2025-06-18', '2025-06-25', '2025-07-02'],
+  ];
+  const instruments = Object.fromEntries(options.map((option, instrument) => [option.id, {
+    selected: { ...option, held: true, weeks: [1, -2, 3].map(value => ({
+      status: 'priced', from_price: 100, price: 100 + value * (instrument + 1), return_pct: value * (instrument + 1),
+    })) },
+    periods: dates[instrument].slice(1).map((date, index) => ({
+      target_date: date, week_end: date, as_of_date: date, from_date: dates[instrument][index],
+      partial: false, available: true,
+    })), missing_observations: 0,
+  }]));
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<RiskBundleContext.Provider value={{ error: null, views: {
+      'weekly-returns': { portefeuille: 'BOOK', start_date: '2025-01-01', through: '2025-07-06', options, instruments },
+    } }}><WeeklyReturnsPanel portefeuille="BOOK" /></RiskBundleContext.Provider>));
+    for (const [index, input] of Array.from(host.querySelectorAll<HTMLInputElement>('[role="combobox"]')).entries()) {
+      await act(async () => input.focus());
+      await act(async () => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[index].click());
+    }
+    const correlation = Array.from(host.querySelectorAll('span')).find(span => /^(Correlation|Correlatie)$/.test(span.textContent ?? ''))?.parentElement;
+    expect(correlation?.textContent).toContain('1.00');
+    expect(correlation?.textContent).toMatch(/3 (weeks|weken)/);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+  }
+});
+
 it('selects either weekly instrument from the Risk bundle without another request', async () => {
   const options = [
     { id: 'A', name: 'First instrument', isin: 'A', currency: 'EUR' },

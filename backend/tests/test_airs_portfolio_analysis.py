@@ -930,6 +930,7 @@ class TestBookWeighting:
         out = pa._book_port_items(7, {})
         assert out["total_w"] == 1000
         assert out["holdings"] == 2
+        assert out["holdings_detail"][0]["region"] == "North America"
         # 750/1000 of the book is US1's sector.
         pw = pa._weigh(out["items"])
         assert pw["sector"]["Technology"] == 75.0

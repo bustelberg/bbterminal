@@ -29,11 +29,20 @@ export function visibleWeeklyReturns(data: WeeklyReturns): WeeklyReturns {
     selected: data.selected ? { ...data.selected, weeks: indices.map(index => data.selected!.weeks[index]) } : null };
 }
 
+/** Calendar-week identity independent of a report's request/valuation weekday. */
+function calendarWeek(value: string | null): string | null {
+  if (!value) return null;
+  const day = new Date(`${value}T12:00:00Z`);
+  if (!Number.isFinite(day.getTime())) return null;
+  day.setUTCDate(day.getUTCDate() - (day.getUTCDay() + 6) % 7);
+  return day.toISOString().slice(0, 10);
+}
+
 /** A price return uses the opening and closing quotes, never a sum of weekly percentages. */
 export function periodReturn(data: WeeklyReturns | undefined, window?: [string, string] | null) {
   if (!data?.selected || !data.periods.length) return null;
-  const first = window ? data.periods.findIndex((period) => period.target_date === window[0]) : 0;
-  const last = window ? data.periods.findIndex((period) => period.target_date === window[1]) : data.periods.length - 1;
+  const first = window ? data.periods.findIndex((period) => calendarWeek(period.target_date) === calendarWeek(window[0])) : 0;
+  const last = window ? data.periods.findIndex((period) => calendarWeek(period.target_date) === calendarWeek(window[1])) : data.periods.length - 1;
   if (first < 0 || last < first) return null;
   const opening = data.selected.weeks[first]?.from_price;
   const closing = data.selected.weeks[last]?.price;
@@ -61,19 +70,28 @@ export function fullHistoryReturn(data: WeeklyReturns | undefined) {
   return Number.isFinite(value) ? { value, from, to } : null;
 }
 
-/** Pearson correlation of paired weekly returns over identical actual quote intervals. */
+/** Pair calendar-week intervals, allowing each instrument's quote weekday to differ.
+ * Match both boundaries so a return spanning a missing week cannot pair with one week. */
 export function weeklyCorrelation(first: WeeklyReturns | null, second: WeeklyReturns | null, window: [string, string] | null = null) {
   const other = new Map<string, number>();
-  const key = (period: WeeklyReturns['periods'][number]) => `${period.target_date}|${period.from_date}|${period.as_of_date}`;
+  const key = (period: WeeklyReturns['periods'][number]) => {
+    const from = calendarWeek(period.from_date), to = calendarWeek(period.as_of_date);
+    if (!from || !to || !period.from_date || !period.as_of_date || period.from_date >= period.as_of_date) return null;
+    // Partial observations inside one week must still have the same actual interval.
+    return from === to ? `${from}|${to}|${period.from_date}|${period.as_of_date}` : `${from}|${to}`;
+  };
   second?.periods.forEach((period, index) => {
     const value = second.selected?.weeks[index]?.return_pct;
-    if (period.from_date && period.as_of_date && value != null && Number.isFinite(value)) other.set(key(period), value);
+    const interval = key(period);
+    if (interval && value != null && Number.isFinite(value)) other.set(interval, value);
   });
   const pairs: [number, number][] = [];
   first?.periods.forEach((period, index) => {
-    if (window && (period.target_date < window[0] || period.target_date > window[1])) return;
+    const week = calendarWeek(period.target_date);
+    if (window && (!week || week < calendarWeek(window[0])! || week > calendarWeek(window[1])!)) return;
     const a = first.selected?.weeks[index]?.return_pct;
-    const b = other.get(key(period));
+    const interval = key(period);
+    const b = interval ? other.get(interval) : undefined;
     if (a != null && Number.isFinite(a) && b != null) pairs.push([a, b]);
   });
   const count = pairs.length;

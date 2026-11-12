@@ -5,6 +5,22 @@ import pytest
 from tests._fake_supabase import FakeSupabase
 
 
+def test_benchmark_response_preserves_dated_fx_for_eur_price_display():
+    from routers.airs import WeightedBenchmarkComponent
+
+    payload = WeightedBenchmarkComponent.model_validate({
+        'name': 'Equity', 'weight_pct': 100, 'currency': 'USD',
+        'start_price': 100, 'end_price': 120,
+        'fx_start': 1.25, 'fx_end': 1.2, 'return_pct': 25,
+    }).model_dump(mode='json')
+
+    opening_eur = payload['start_price'] / payload['fx_start']
+    closing_eur = payload['end_price'] / payload['fx_end']
+    assert opening_eur == pytest.approx(80)
+    assert closing_eur == pytest.approx(100)
+    assert (closing_eur / opening_eur - 1) * 100 == pytest.approx(payload['return_pct'])
+
+
 def test_headline_etf_return_stops_at_airs_date_even_when_newer_prices_exist(monkeypatch):
     from routers import _benchmark_etf as etf, _benchmark_index as index
 

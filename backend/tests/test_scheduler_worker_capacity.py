@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import threading
 import logging
+import pytest
 from concurrent.futures import Future
 from datetime import date
 
 import scheduler as S
+from scheduler_runtime import admission
+from scheduler_jobs import market as market_jobs
 
 
 def test_automatic_price_checks_refresh_and_persist_without_a_browser(monkeypatch):
@@ -21,6 +24,36 @@ def test_automatic_price_checks_refresh_and_persist_without_a_browser(monkeypatc
     assert result["saved"] == 3
     assert "3 account" in message
     assert calls == [{"isins": {"STOCK"}, "stale_days": 1}]
+
+
+@pytest.mark.parametrize('checks_fail', [False, True])
+def test_automatic_price_check_failure_keeps_instrument_evidence_and_saved_work(monkeypatch, checks_fail):
+    from routers import _airs_price_check as checks
+    from asset_pipeline import price_refresh, queue
+    from dashboard_daily import IncompleteRefresh
+    monkeypatch.setattr(queue, 'is_worker_active', lambda: False)
+    monkeypatch.setattr(price_refresh, 'watched_isins', lambda: {'TEST'})
+    prices = {'failed': 1, 'results': [{'symbol': 'BMW3.DE', 'isin': 'TEST', 'analysis_id': 42,
+               'latest_close': '2026-11-09', 'expected_close': '2026-11-10',
+               'status': 'error', 'error': 'HTTP 503'}]}
+    monkeypatch.setattr(price_refresh, 'refresh_stale', lambda **kw: prices)
+    def save(**kwargs):
+        if checks_fail:
+            raise RuntimeError('database unavailable')
+        return {'saved': 3, 'errors': {'BOOK': 'missing FX'}}
+    monkeypatch.setattr(checks, 'refresh_price_checks', save)
+    with pytest.raises(IncompleteRefresh) as caught:
+        S._body_airs_price_checks()
+    assert caught.value.summary['prices'] == prices
+    assert 'retry airs_price_checks' in str(caught.value)
+    if checks_fail:
+        assert 'database unavailable' in str(caught.value)
+    else:
+        assert caught.value.summary['saved'] == 3
+        assert 'BMW3.DE / TEST' in str(caught.value)
+        assert 'HTTP 503' in str(caught.value)
+        assert 'expected=2026-11-10' in str(caught.value)
+        assert 'missing FX' in str(caught.value)
 
 
 
@@ -42,9 +75,9 @@ class _ShuttingDownExecutor:
 def test_scheduled_work_deduplicates_a_live_job_and_releases_its_slot(monkeypatch):
     """A slow interval run costs one slot, never a new thread per subsequent tick."""
     executor = _Executor()
-    monkeypatch.setattr(S, "_scheduled_executor", executor)
-    monkeypatch.setattr(S, "_scheduled_futures", {})
-    monkeypatch.setattr(S, "_scheduled_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(admission, "_scheduled_executor", executor)
+    monkeypatch.setattr(admission, "_scheduled_futures", {})
+    monkeypatch.setattr(admission, "_scheduled_slots", threading.BoundedSemaphore(1))
 
     assert S._submit_scheduled_work("prices", lambda: None) is True
     assert S._submit_scheduled_work("prices", lambda: None) is False
@@ -71,9 +104,9 @@ def test_queue_overrun_is_one_rate_limited_backpressure_summary(monkeypatch, cap
 
 
 def test_shutdown_race_skips_work_without_a_traceback(monkeypatch, caplog):
-    monkeypatch.setattr(S, "_scheduled_executor", _ShuttingDownExecutor())
-    monkeypatch.setattr(S, "_scheduled_futures", {})
-    monkeypatch.setattr(S, "_scheduled_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(admission, "_scheduled_executor", _ShuttingDownExecutor())
+    monkeypatch.setattr(admission, "_scheduled_futures", {})
+    monkeypatch.setattr(admission, "_scheduled_slots", threading.BoundedSemaphore(1))
 
     with caplog.at_level(logging.INFO):
         assert S._submit_scheduled_work("blend-prewarm", lambda: None) is False
@@ -84,11 +117,11 @@ def test_shutdown_race_skips_work_without_a_traceback(monkeypatch, caplog):
 
 def test_watchdog_retains_reserved_capacity_when_data_workers_are_full(monkeypatch):
     executor = _Executor()
-    monkeypatch.setattr(S, "_scheduled_slots", threading.BoundedSemaphore(1))
-    assert S._scheduled_slots.acquire(False)
-    monkeypatch.setattr(S, "_maintenance_slots", threading.BoundedSemaphore(1))
-    monkeypatch.setattr(S, "_maintenance_executor", executor)
-    monkeypatch.setattr(S, "_scheduled_futures", {})
+    monkeypatch.setattr(admission, "_scheduled_slots", threading.BoundedSemaphore(1))
+    assert admission._scheduled_slots.acquire(False)
+    monkeypatch.setattr(admission, "_maintenance_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(admission, "_maintenance_executor", executor)
+    monkeypatch.setattr(admission, "_scheduled_futures", {})
     assert not S._submit_scheduled_work("prices", lambda: None)
     assert S._submit_scheduled_work("job_watchdog", lambda: None)
     executor.submitted[0].set_result(None)
@@ -120,7 +153,7 @@ def test_benchmark_log_context_implements_the_fill_cancellation_protocol():
 
 
 def test_benchmark_fill_does_not_turn_cancellation_into_an_index_failure(monkeypatch):
-    monkeypatch.setattr(S, "_FUNDAMENTAL_INDICES", ("ACWI",))
+    monkeypatch.setattr(market_jobs, "_FUNDAMENTAL_INDICES", ("ACWI",))
     monkeypatch.setattr(S, "_fundamental_company_ids", lambda _label: [(1, "NYSE")])
     monkeypatch.setattr("ingest.api_usage.remaining_budget", lambda _supabase: {"usa": 3000})
     monkeypatch.setattr("routers._fundamental_fill.fill_company_ids", lambda ctx, *_args, **_kw: ctx.check())

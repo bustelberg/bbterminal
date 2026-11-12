@@ -16,6 +16,7 @@ import pytest
 
 import job_runlog
 import scheduler as S
+from scheduler_runtime import recovery
 
 
 @pytest.fixture
@@ -37,7 +38,7 @@ def wd(monkeypatch):
     monkeypatch.setattr(S, "start_job_now",
                         lambda jid, **_kw: started.append(jid))
     monkeypatch.setattr(S, "JOB_BODIES", {"a": object(), "b": object(), "c": object()})
-    monkeypatch.setattr(S, "_watchdog_fired", {})
+    monkeypatch.setattr(recovery, "_watchdog_fired", {})
     monkeypatch.setattr(S, "_WATCHDOG_STARTERS", {})
     monkeypatch.setattr(job_runlog, "watchdog_runs_today", lambda jid, today: 0)
     monkeypatch.setattr(job_runlog, "ingest_runs_today", lambda names, today: 0)

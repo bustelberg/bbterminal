@@ -235,7 +235,9 @@ def prepare_month(account: str, today=None, *, month: str | None = None, complet
     from routers._airs_monthly_positions import missing_position_returns
     unavailable = missing_position_returns(positions)
     if unavailable:
-        errors['positions'] = f'{len(unavailable)} monthly position returns unavailable'
+        from routers._airs_monthly_positions import position_return_issue
+        errors['positions'] = (f'{len(unavailable)} monthly position returns unavailable: '
+                               + '; '.join(position_return_issue(row) for row in unavailable))
     supabase.table("airs_monthly_report").upsert({
         "portefeuille": account, "month": start, "datum_tot": end, "fetched_at": fetched,
         "report": payload, "performance": performance, "performance_basis": "year_start",
@@ -246,22 +248,41 @@ def prepare_month(account: str, today=None, *, month: str | None = None, complet
 def _price_freshness_issue(isin, mapped, close, expected, source, day):
     """Explain dated prices using matching evidence from today's saved refresh only."""
     message = f"{isin}: price dated {close or 'absent'}; expected {expected}"
+    context = (f"; Yahoo symbol {mapped.get('yahoo_symbol') or 'unmapped'}"
+               f"; analysis_id {mapped.get('analysis_id')}"
+               f"; asset_price_refresh status {source.get('status') or 'unknown'}"
+               f" at {source.get('started_at') or 'not recorded'}")
     summary = source.get('summary') or {}
     receipts = [row for row in summary.get('results', [])
                 if row.get('isin') == isin and row.get('symbol') == mapped.get('yahoo_symbol')
                 and row.get('analysis_id') == mapped.get('analysis_id')
                 and str(row.get('latest_close') or '')[:10] == close]
     if str(source.get('started_at') or '')[:10] != day or len(receipts) != 1:
-        return message + '; no matching provider-availability receipt today'
+        return (message + '; no matching provider-availability receipt today' + context
+                + '; next: run asset_price_refresh, then dashboard_freshness; inspect the instrument receipt if still stale')
     receipt = receipts[0]
     if receipt.get('status') == 'error':
-        return message + f"; price refresh failed: {str(receipt.get('error') or 'unknown error')[:300]}"
+        return (message + f"; price refresh failed: {str(receipt.get('error') or 'unknown error')[:300]}" + context
+                + '; next: resolve the provider/storage error in asset_price_refresh, retry that job, then dashboard_freshness')
     vendor = str(receipt.get('vendor_latest_close') or '')[:10]
     if receipt.get('status') == 'unavailable' and vendor and vendor <= close:
-        return message + f"; Yahoo's latest completed close was {vendor} at the last refresh (newer close not published)"
+        return (message + f"; Yahoo's latest completed close was {vendor} at the last refresh (newer close not published)" + context
+                + '; next: retry asset_price_refresh after the provider publishes a close; if persistent, check the listing and trading calendar; saved data remains available')
     if vendor and vendor > close:
-        return message + f'; Yahoo offers a {vendor} close that is not stored'
-    return message + '; provider availability was not confirmed'
+        return (message + f'; Yahoo offers a {vendor} close that is not stored' + context
+                + '; next: inspect asset_price_refresh persistence errors for this analysis_id, retry, then dashboard_freshness')
+    return (message + '; provider availability was not confirmed' + context
+            + '; next: run asset_price_refresh to verify this listing, then dashboard_freshness')
+
+
+def grouped_freshness_issues(accounts: list[dict]) -> list[dict]:
+    """Keep every issue and its affected portfolios in the durable audit receipt."""
+    grouped: dict[str, set[str]] = {}
+    for account in accounts:
+        for issue in account.get('issues') or []:
+            grouped.setdefault(issue, set()).add(account['portefeuille'])
+    return [dict(message=issue, affected=sorted(names), affected_count=len(names))
+            for issue, names in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))]
 
 
 def freshness(today=None, *, dashboard_only: bool = False) -> dict:
@@ -287,7 +308,8 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
         if (pid := (links.get(row["portefeuille"]) or {}).get("model_portfolio_id")) is not None
         for look in (False, True)
     }
-    overview_states = prepared.overview_freshness(sorted(overview_keys))
+    overview_diagnostics: dict[str, str] = {}
+    overview_states = prepared.overview_freshness(sorted(overview_keys), diagnostics=overview_diagnostics)
     models = {r["id"]: r for r in rows("airs_model_portfolio", "id,portfolio_type,positions_scanned_at,positions_error")}
     checks = {r["portefeuille"]: r for r in rows("airs_price_check", "portefeuille,checked_at")}
     execution = {r["isin"]: r for r in rows("asset_execution", "isin,status,analysis_id,yahoo_symbol,currency")}
@@ -370,7 +392,9 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
                         "missing": "no bundle published",
                         "unavailable": "bundle metadata could not be checked",
                     }[state]
-                    issues.append(f"Analyse: {reason} (look-through={look})")
+                    cache_key = prepared.holdings_key(pid, "ACWI", look)
+                    explanation = overview_diagnostics.get(cache_key, 'next: run analyse_prepare after source jobs finish, then dashboard_freshness')
+                    issues.append(f"Analyse: {reason} (look-through={look}); {cache_key}; {explanation}")
         if str((checks.get(name) or {}).get("checked_at") or "")[:10] < day:
             issues.append("price checks not saved today")
         report = monthly.get(name) or {}
@@ -390,4 +414,5 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
     incomplete = sum(r["status"] != "ok" for r in accounts)
     return {"day": day, "expected_market_date": expected, "accounts": accounts,
             "checked": len(accounts), "incomplete": incomplete, "empty_roster": not bool(accounts),
-            "source_jobs": sources, "global_issues": global_issues, "fx_dates": fx_dates}
+            "source_jobs": sources, "global_issues": global_issues, "fx_dates": fx_dates,
+            "issue_groups": grouped_freshness_issues(accounts)}

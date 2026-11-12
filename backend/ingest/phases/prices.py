@@ -120,10 +120,15 @@ def _run_prices_phase(
         samples = []
         for row in failures:
             instrument = " / ".join(filter(None, (row.get("symbol"), row.get("isin")))) or "Unknown instrument"
-            message = f"{instrument}: {row.get('error') or 'Unknown Yahoo error'}"
+            message = (f"{instrument}: {row.get('error') or 'Unknown Yahoo error'}; "
+                       f"analysis_id={row.get('analysis_id', 'unknown')}, "
+                       f"stored={row.get('latest_close') or row.get('previous_close') or 'unknown'}, "
+                       f"expected={row.get('expected_close') or 'unknown'}, "
+                       f"provider_latest={row.get('vendor_latest_close') or 'unconfirmed'}. "
+                       'Next: retry daily_price_slice after provider recovery; if repeated, inspect this listing and the prices-phase steps. Saved prices are retained.')
             _step(message, level="error")
             if len(samples) < 3:
-                samples.append(message[:240])
+                samples.append(message[:600])
         summary = f"Yahoo price refresh had {errors} failed instrument(s)."
         if samples:
             summary += "\n" + "\n".join(samples)

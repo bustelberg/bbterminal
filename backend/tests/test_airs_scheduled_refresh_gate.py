@@ -80,11 +80,11 @@ def test_gate_runs_when_airs_has_a_new_portfolio_even_without_a_new_valuation(mo
 
 
 def test_every_morning_slot_runs_the_full_accounts_models_and_pricing_refresh():
-    src = inspect.getsource(scheduler._body_airs_vermogen)
+    src = inspect.getsource(scheduler.airs_jobs._body_airs_vermogen)
 
     assert 'triggered_by="auto", force=True' in src
     assert "scheduled_account_refresh_decision" not in src
     assert "models_deferred" not in src
     assert "pricing_deferred" not in src
-    assert "count_model_portfolio_holdings_sync(" in src
-    assert "_body_airs_model_prices(ctx)" in src
+    assert "collect_model_compositions(" in src
+    assert "runtime.model_prices(ctx)" in src

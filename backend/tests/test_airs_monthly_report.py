@@ -371,6 +371,38 @@ def test_partial_failure_is_saved_and_reported_instead_of_silent_success(collect
     assert sections['performance']['status'] == 'ok'
 
 
+def test_partial_preparation_keeps_saved_positions_and_logs_without_traceback(collection, monkeypatch, caplog):
+    import dashboard_daily
+
+    db, _lock, _calls, _ctx = collection
+    bundle = {'years': {'2026': {
+        'warning': None, 'months': ['2026-04'],
+        'rows': {'2026-04': {'rendement': -2}},
+        'details': {'2026-04': {'refresh_reason': 'missing_report'}},
+    }}}
+
+    def read(_account):
+        if db.tables.get('airs_monthly_report'):
+            bundle['years']['2026']['details']['2026-04'] = {
+                'refresh_reason': 'incomplete_report',
+                'snapshot': db.tables['airs_monthly_report'][0]['report'],
+            }
+        return bundle
+
+    monkeypatch.setattr(report, 'read_performance', read)
+    monkeypatch.setattr(dashboard_daily, 'prepare_month', lambda *_args, **_kwargs: {'errors': {'opening': 'missing'}})
+    result = report._prepare_performance('BOOK')
+    details = result['years']['2026']['details']['2026-04']
+    assert details['refresh_reason'] == 'preparation_failed'
+    assert details['snapshot']['positions'][0]['return_pct'] is None
+    record, = [r for r in caplog.records if 'partial preparation' in r.message]
+    assert record.levelname == 'WARNING'
+    assert record.exc_info is None
+    assert 'Stock [TEST] (reports_missing)' in record.message
+    assert 'readable' in record.message
+    assert 'next: check missing/unreadable AIRS sections' in record.message
+
+
 def test_cancel_releases_session_and_does_not_persist_partial_work(collection):
     db, lock, calls, _ctx = collection
     def check():

@@ -33,3 +33,17 @@ it('copies compact causes even when scheduler registration overrides the run sta
   expect(jobFailure({ ...job, last_status: 'done' })).toBeNull();
   expect(jobFailure({ ...job, status: 'error', last_status: 'running' })?.detail).toBe('Refresh failed');
 });
+
+it('retains detail-only ingest errors and grouped portfolio evidence in copied failures', () => {
+  const job: JobRow = {
+    id: 'daily_price_slice', label: 'Prices', fills: '', cadence: '', registered: true,
+    observable: true, runnable: true, status: 'error', reason: 'Failed',
+    last_detail: 'BMW3.DE: Yahoo returned no response; next: retry after provider recovery',
+  };
+  expect(jobFailure(job)?.causes).toEqual([{ message: job.last_detail }]);
+  const message = 'stored=2026-11-09 expected=2026-11-10; next: retry prices';
+  expect(jobFailure({ ...job, last_summary: {
+    issue_groups: [{ message, affected: ['B', 'A'], affected_count: 2 }],
+    accounts: [{ portefeuille: 'A', issues: [message] }],
+  } })?.causes).toEqual([{ message, affected: ['B', 'A'], affected_count: 2 }]);
+});

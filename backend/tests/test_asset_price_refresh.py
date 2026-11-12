@@ -144,7 +144,7 @@ class TestTheSchedulerJob:
 
         # The guard lives in the SHARED body, so neither the tick nor the startup catch-up can
         # slip past it.
-        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        src = inspect.getsource(scheduler.market_jobs._run_asset_price_refresh)
         assert "if _q.is_worker_active():" in src
         guard = src.split("if _q.is_worker_active():", 1)[1].split("watched =", 1)[0]
         assert "return" in guard
@@ -194,7 +194,7 @@ class TestTheSchedulerJob:
         import scheduler
 
         assert "price_refresh.refresh_stale(" in inspect.getsource(
-            scheduler._run_asset_price_refresh)
+            scheduler.market_jobs._run_asset_price_refresh)
 
     def test_it_refreshes_analyse_yahoo_benchmarks_even_when_holdings_are_current(self):
         """An Analyse request must not be the normal path that updates its benchmark ETF.
@@ -205,7 +205,7 @@ class TestTheSchedulerJob:
         """
         import scheduler
 
-        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        src = inspect.getsource(scheduler.market_jobs._run_asset_price_refresh)
         proxies_at = src.index("refresh_index_proxies()")
         current_at = src.index("if not stale:")
         assert "from routers._benchmark_etf import refresh_index_proxies" in src
@@ -242,7 +242,7 @@ class TestTheStartupCatchUp:
         Yahoo calls per keystroke-triggered reload just to discover there was nothing to do."""
         import scheduler
 
-        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        src = inspect.getsource(scheduler.market_jobs._run_asset_price_refresh)
         find_at = src.index("find_stale(isins=watched, stale_days=1)")
         fetch_at = src.index("refresh_stale(isins=watched, stale_days=1)")
         assert find_at < fetch_at
@@ -256,7 +256,7 @@ class TestTheStartupCatchUp:
         """A non-Yahoo fund must not wait for a failed risk calculation to receive its NAV."""
         import scheduler
 
-        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        src = inspect.getsource(scheduler.market_jobs._run_asset_price_refresh)
         assert "backfill_nav_fallbacks(watched)" in src
         assert src.index("backfill_nav_fallbacks(watched)") < src.index("if not stale:")
 
@@ -266,7 +266,7 @@ class TestTheStartupCatchUp:
         import scheduler
 
         assert "if _q.is_worker_active():" in inspect.getsource(
-            scheduler._run_asset_price_refresh)
+            scheduler.market_jobs._run_asset_price_refresh)
 
 
 class TestTheAnchorQueryMustNotSCAN:
@@ -406,13 +406,13 @@ class TestTheBootRace:
     def test_the_gate_comes_BEFORE_every_probe_the_job_makes(self):
         import scheduler
 
-        src = inspect.getsource(scheduler._run_asset_price_refresh)
-        gate = src.index("_await_db_ready(")
+        src = inspect.getsource(scheduler.market_jobs._run_asset_price_refresh)
+        gate = src.index("runtime.await_db_ready(")
         assert gate < src.index("_q.is_worker_active()")
         assert gate < src.index("find_stale(isins=watched, stale_days=1)")
         # ...and a database that never answers ends the job, rather than falling through into
         # queries that are all guaranteed to fail.
-        gate = src.split("_await_db_ready(", 1)[1].split("if _q.is_worker_active():", 1)[0]
+        gate = src.split("runtime.await_db_ready(", 1)[1].split("if _q.is_worker_active():", 1)[0]
         assert "return" in gate
         assert "raise RuntimeError" in gate
 
@@ -422,7 +422,7 @@ class TestTheBootRace:
         opens, the refresh runs exactly once and any further error is a real one."""
         import scheduler
 
-        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        src = inspect.getsource(scheduler.market_jobs._run_asset_price_refresh)
         assert src.count("refresh_stale(isins=watched, stale_days=1)") == 1
         assert "for attempt" not in src
 

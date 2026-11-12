@@ -1,5 +1,66 @@
 # Deployment + in-process pipeline & scheduling
 
+For incident diagnosis and recovery steps, start with
+[Refresh troubleshooting](troubleshooting.md). For safe local job controls, see
+[Environment setup](environment.md).
+For request/timer dispatch, lock ownership, persistence and cancellation paths,
+see the [execution map](execution-paths.md).
+
+## Code ownership
+
+| Module | Responsibility |
+| --- | --- |
+| `scheduled_jobs.py` | Job IDs, cadence, dependency declarations and health allowances; no workers or database calls. |
+| `scheduler.py` | Lifecycle hooks, APScheduler registration/listeners, health inspection, timer callbacks and manual dispatch adapters. |
+| `scheduler_runtime/admission.py` | Bounded data/maintenance workers, active-job state and duplicate suppression. |
+| `scheduler_runtime/execution.py` | Daily lease entry, run recording, structured failure receipts and cancellation translation. Durable storage remains in `job_runlog.py`. |
+| `scheduler_runtime/retries.py` | Held-price retry delay and per-UTC-day budget. The dispatcher supplies the scheduler and timer callback. |
+| `scheduler_runtime/recovery.py` | Watchdog eligibility, durable/local retry budgets and recovery actions through supplied dispatch callbacks. |
+| `scheduler_runtime/readiness.py` | Bounded PostgREST warmup checks before work begins; never retries partially completed domain work. |
+| `scheduler_runtime/context.py` | Scheduled-worker context compatible with shared collectors and cooperative cancellation. |
+| `scheduler_jobs/airs.py` | AIRS daily orchestration, using shared refresh services. |
+| `scheduler_jobs/price_checks.py` | One automatic price-check flow with only progress, queue-wait and provider dependencies. |
+| `scheduler_jobs/market.py` | Asset/benchmark prices, FX, ranks, fundamentals and ACWI coverage jobs. |
+| `scheduler_jobs/preparation.py` | Dashboard preparation/audit, Analyse, history drift and table-size sampling. |
+
+Domain jobs receive a `JobRuntime` containing explicit dispatch, progress,
+source-idleness, and recording callbacks. They do not import `scheduler.py`.
+The `_body_*` functions retained there are dispatch adapters, not second
+implementations. Timer and manual entry points continue using the same registry
+and recorded execution path. To add a job, implement its domain body, add its
+dispatch adapter/registry entry, and declare its schedule in `scheduled_jobs.py`.
+
+### Automatic price checks: single-flow boundary
+
+The unchanged job ID is `airs_price_checks`. Its timer and scheduled-job “Run
+now” both enter recorded execution, then the same `_body_airs_price_checks`
+dispatch adapter, then `scheduler_jobs.price_checks.run`. The flow receives only
+a progress reporter, the existing queue-wait callback, and its three provider
+functions (`watched_isins`, price refresh, comparison save); it does not need the
+full `JobRuntime` or import the scheduler.
+
+The preserved order is: check cancellation → wait for a quiet Yahoo queue window
+→ refresh watched prices once with `stale_days=1` → save comparisons using
+`freshen=False` and `only_if_changed=True` → check cancellation → report success
+or a structured partial failure. The comparison helper keeps completed saves
+when another account fails or cancellation stops further comparisons.
+
+No daily advisory lease or AIRS browser lock was added. Queue admission/waiting,
+provider locking, the scheduled run recorder, job registration and endpoint
+contracts remain with their existing owners. Provider failures still permit
+stored-price comparisons to be saved before the job reports an incomplete result.
+
+```mermaid
+flowchart LR
+    D[scheduled_jobs declarations] --> S[scheduler registration and dispatch]
+    S --> A[admission: bounded worker]
+    A --> E[execution: lease and run receipt]
+    E --> J[AIRS / market / preparation job]
+    J --> V[Shared services and collectors]
+    S --> R[Retry and recovery policies]
+    R --> S
+```
+
 ## Dashboard daily sequence
 
 At **11:00 Europe/Amsterdam**, `airs_vermogen_refresh` scans AIRS accounts and

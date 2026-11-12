@@ -81,12 +81,23 @@ def run(ctx, operation: str, *, name: str | None = None, portfolio_id: int | Non
                 counts = payload['summary']
                 summary = (f'{counts["portfolios"]} linked portfolios · {counts["checked"]} prices checked · '
                            f'{counts["alerts"]} differences over 5% · {counts["unavailable"]} uncheckable.')
+                if payload.get('errors'):
+                    summary += f' {len(payload["errors"])} source refresh(es) failed.'
             else:
                 raise HTTPException(400, 'Unknown refresh operation')
         # Keep a recoverable result even when a source returned its older saved data.
         _save_result(ctx, 200, payload)
         failed = (payload.get('success') is False or payload.get('refresh_error')
-                  or payload.get('refresh_errors') or payload.get('snapshot_saved') is False)
+                  or payload.get('refresh_errors') or payload.get('snapshot_saved') is False
+                  or (operation == 'prices' and payload.get('errors')))
+        if (operation == 'prices' and payload.get('success') is True
+                and not payload.get('errors') and not payload.get('refresh_errors')
+                and payload.get('snapshot_saved') is not False
+                and payload.get('refresh_error') in (None, 'incomplete_price_checks')):
+            # Coverage gaps are completed findings, not a failed source refresh.
+            failed = False
+            if payload['summary']['unavailable']:
+                summary = 'Completed with incomplete coverage: ' + summary + ' Open Prices for the reason breakdown.'
         if failed:
             reason = payload.get('refresh_error') or payload.get('status')
             if operation == 'prices':

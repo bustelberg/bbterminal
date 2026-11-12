@@ -59,3 +59,16 @@ def test_cache_failure_does_not_discard_a_verified_listing(setup, monkeypatch):
     assert len(warnings) == 1
     assert 'database migration' in next(iter(warnings))
     chart.assert_called_once()
+
+
+def test_unresolved_listing_explains_missing_security_identity(setup, monkeypatch):
+    monkeypatch.setattr(symbols.openfigi, 'lookup_isin', lambda _: [])
+    evidence = []
+    assert symbols.resolve('ISIN', 'USD', diagnostics=evidence) is None
+    assert 'OpenFIGI returned no security identity' in evidence[0]
+
+
+def test_currency_rejection_retains_the_candidate_and_required_currency(setup):
+    evidence = []
+    assert symbols.resolve('ISIN', 'EUR', diagnostics=evidence) is None
+    assert evidence == ['RIGHT: Yahoo currency USD, source requires EUR.']

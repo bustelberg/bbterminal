@@ -39,7 +39,7 @@ async function json<T>(url: string, options = {}) {
 function FullPortfolioRebalance({ active = true, onBusyChange }: { active?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const [links, setLinks] = useState<PortfolioConnection[]>([]);
   const [selected, setSelected] = useState('');
-  const [dummy, setDummy] = useState(true);
+  const [dummy, setDummy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);

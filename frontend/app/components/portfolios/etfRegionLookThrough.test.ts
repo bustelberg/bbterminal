@@ -32,3 +32,14 @@ it('normalizes publication rounding and counts separate held portions without re
   const result = addEtfRegionWeights([], [holding, { ...holding, weight_now_pct: 2 }], { ETF: rounded });
   expect(result.reduce((sum, row) => sum + (row.portfolio_pct ?? 0), 0)).toBeCloseTo(5.91);
 });
+
+it('keeps uncovered fund exposure unclassified without inflating the known regions', () => {
+  const partial: EtfRegionAllocationResponse = { ...allocation, isin: 'IE000MEQP5U8', as_of: null, source: 'comdirect', regions: [
+    { region: 'Emerging Markets', weight_pct: 70, provider_weights: [{ country: 'Brazil', weight_pct: 70 }] },
+    { region: 'Unclassified', weight_pct: 30, provider_weights: [{ country: 'Unreported remainder', weight_pct: 30 }] },
+  ] };
+  const result = addEtfRegionWeights([], [{ ...holding, isin: partial.isin, weight_now_pct: 10 }], { [partial.isin]: partial });
+  expect(result.find(row => row.bucket === 'Emerging Markets')?.portfolio_pct).toBeCloseTo(7);
+  expect(result.find(row => row.bucket === 'Unclassified')?.portfolio_pct).toBeCloseTo(3);
+  expect(result.reduce((sum, row) => sum + (row.portfolio_pct ?? 0), 0)).toBeCloseTo(10);
+});

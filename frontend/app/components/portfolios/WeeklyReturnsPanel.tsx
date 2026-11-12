@@ -356,12 +356,12 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
       <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} linked={linked} />
       <div className="flex self-center justify-self-center flex-wrap items-center justify-center gap-2 rounded-xl border border-neutral-800/40 bg-elevated px-4 py-1 text-center md:max-w-32 md:flex-col md:px-3 md:py-3"
         title={lang === 'nl'
-          ? 'Correlatie van wekelijkse koersrendementen: −1 tegenovergesteld, 0 geen lineair verband, +1 gelijkgericht. Alleen overeenkomende koersdatums; minimaal 3 weken. Volgt de geselecteerde periode.'
-          : 'Weekly price-return correlation: −1 opposite, 0 no linear relationship, +1 together. Matching price dates only; at least 3 weeks. Follows the selected period.'}>
+          ? 'Correlatie van wekelijkse koersrendementen: −1 tegenovergesteld, 0 geen lineair verband, +1 gelijkgericht. Overeenkomende kalenderweekintervallen; koersdagen kunnen verschillen. Minimaal 3 gepaarde waarnemingen binnen de geselecteerde periode; ontbrekende koersen tellen niet mee.'
+          : 'Weekly price-return correlation: −1 opposite, 0 no linear relationship, +1 together. Matching calendar-week intervals; quote weekdays may differ. Requires 3 paired observations within the selected period; missing prices are excluded.'}>
         <span className="text-[11px] text-fg-muted">{lang === 'nl' ? 'Correlatie' : 'Correlation'}</span>
         <span className="text-2xl font-semibold tabular-nums text-fg">{correlation.value == null ? '—' : correlation.value.toFixed(2)}</span>
         <span className="text-[10px] text-fg-muted">{!first || !second ? (lang === 'nl' ? 'Kies 2 instrumenten' : 'Choose 2 instruments')
-          : correlation.count < 3 ? (lang === 'nl' ? 'Minimaal 3 weken' : 'At least 3 weeks')
+          : correlation.count < 3 ? (lang === 'nl' ? `${correlation.count} gepaarde weken; minimaal 3` : `${correlation.count} paired weeks; need 3`)
           : correlation.value == null ? (lang === 'nl' ? 'Geen variatie' : 'No variation')
           : `${correlation.count} ${lang === 'nl' ? 'weken' : 'weeks'}`}</span>
       </div>
