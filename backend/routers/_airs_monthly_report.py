@@ -482,6 +482,7 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
             return {"columns": sheet.columns, "rows": sheet.rows, "kinds": sheet.kinds,
                     "activity": activity, "readable": not realised_results(sheet).unreadable,
                     "unclassified_names": sorted({str(r[COL_FONDS]) for r in uncertain if r.get(COL_FONDS)}),
+                    "unclassified_activity": uncertain,
                     "unclassified_unassigned": any(not r.get(COL_FONDS) for r in uncertain)}
 
         tasks = [("performance", "Loading returns…", performance),

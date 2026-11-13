@@ -146,3 +146,52 @@ def test_conflicting_duplicate_rows_are_never_resolved_by_largest_value(extra):
     row = result(sections([holding(1000), extra], [holding(1100), extra]))
     assert row['return_pct'] is None
     assert row['reason'] in ('ambiguous_position', 'identity_changed')
+
+
+def test_lvmh_name_change_joins_exact_isin_boundaries_and_sale_without_mutating_sources():
+    from copy import deepcopy
+    data = sections([holding(40635, 63, 'LVMH - Moet Hennesy Louis Vuitton', 'FR0000121014')],
+                    [holding(17500.8, 32, 'LVMH', 'FR0000121014')],
+                    [{'name': 'LVMH', 'kind': 'sell', 'date': '2026-01-13', 'amount_eur': 20097.3, 'quantity': 31}])
+    data['opening']['data']['as_of'] = '2025-12-31'
+    data['closing']['data']['as_of'] = '2026-01-30'
+    original = deepcopy(data)
+    rows = position_performance(data, '2026-01-01', '2026-01-31')
+    assert len(rows) == 1
+    assert rows[0]['status'] == 'held'
+    assert rows[0]['isin'] == 'FR0000121014'
+    assert rows[0]['return_pct'] == pytest.approx((17500.8 / 32 / (40635 / 63) - 1) * 100)
+    assert rows[0]['source_names'] == ['LVMH', 'LVMH - Moet Hennesy Louis Vuitton']
+    assert data == original
+
+
+def test_similar_names_without_a_shared_isin_are_not_merged():
+    rows = position_performance(sections([holding(100, 1, 'Old name', 'FIRST')],
+                                         [holding(110, 1, 'New name', 'SECOND')]), '2026-10-01', '2026-10-31')
+    assert len(rows) == 2
+    assert all(row['return_pct'] is None for row in rows)
+
+
+def test_shared_display_name_does_not_merge_different_security_ids():
+    data = sections([holding(100, 1, 'Same', 'A'), holding(200, 2, 'Same', 'B')],
+                    [holding(110, 1, 'Renamed', 'A'), holding(220, 2, 'Same', 'B')])
+    rows = position_performance(data, '2026-10-01', '2026-10-31')
+    assert all(row['return_pct'] is None for row in rows)
+    assert len(rows) == 2
+
+
+@pytest.mark.parametrize('saved_evidence', [False, True])
+def test_kla_unknown_activity_includes_raw_type_date_and_quantity_without_inventing_split_return(saved_evidence):
+    from airs_transacties import COL_DATE, COL_FONDS, TT
+    raw = {COL_DATE: '2026-06-15', COL_FONDS: 'KLA Corp.', TT: 'UNKNOWN_TRANSFER', 'quantity': 234}
+    data = sections([holding(42910.05, 26, 'KLA Corp.', 'US4824801009')],
+                    [holding(68847.29, 260, 'KLA Corp.', 'US4824801009')],
+                    unclassified_names=['KLA Corp.'], rows=[raw, {**raw, COL_DATE: '2026-01-15'}])
+    data['opening']['data']['as_of'] = '2026-05-31'
+    data['closing']['data']['as_of'] = '2026-06-30'
+    if saved_evidence:
+        data['transactions']['data']['unclassified_activity'] = [raw]
+    row = position_performance(data, '2026-06-01', '2026-06-30')[0]
+    assert row['return_pct'] is None
+    assert row['reason'] == 'unclassified_activity'
+    assert row['return_diagnostics']['unclassified_activity'] == [raw]

@@ -416,6 +416,10 @@ export async function attachRunningJobs() {
         }[];
         for (const j of rows) {
           if (j.kind === 'airs.risk-bundle') continue; // Analyse warms Risk silently; its panel owns loading/errors.
+          // Background returns preparation belongs in Schedule, not in an
+          // unsolicited toast on app load. An explicit Run now still calls
+          // watchJob through startJob and retains its progress card.
+          if (j.kind === 'scheduled.airs_weekly_returns') continue;
           if (j.status !== 'running') continue;   // finished ones are history, not a toast
           if (jobsStore.get().jobs.some((x) => x.id === j.id)) continue;
           void watchJob(j.id, j.label, 0, { kind: j.kind, label: j.label });

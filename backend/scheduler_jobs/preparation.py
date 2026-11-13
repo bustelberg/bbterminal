@@ -83,7 +83,7 @@ def _body_dashboard_freshness(ctx=None, *, runtime: JobRuntime) -> tuple[str, di
         from routers._prepared_analyse import run_controlled
         try:
             repair = run_controlled(busy=runtime.sources_busy, should_stop=lambda: cancel_requested(ctx),
-                                    on_step=runtime.reporter(ctx), max_portfolios=max(2, result['checked']), max_seconds=900)
+                                    on_step=runtime.reporter(ctx), max_portfolios=None, max_seconds=900)
         except Exception as exc:
             repair = {'errors': {'repair': f'{type(exc).__name__}: {exc}'}}
         result = {**freshness(dashboard_only=True), 'analyse_repair': repair}
@@ -158,11 +158,18 @@ def _body_dashboard_post_airs(ctx=None, *, runtime: JobRuntime) -> tuple[str, di
         except Exception as exc:
             failures[account] = str(exc)
     try:
+        from scheduler_jobs.weekly_returns import run as prepare_weekly
+        _, summary['weekly_returns'] = prepare_weekly(ctx, collect_history=False, report=runtime.reporter(ctx))
+    except Cancelled:
+        raise
+    except Exception as exc:
+        failures['weekly_returns'] = f'{type(exc).__name__}: {exc}'
+    try:
         step(0, 0, "Preparing Analyse views")
         summary["analyse"] = run_controlled(busy=lambda: runtime.sources_busy(ignore_airs=True),
                                             should_stop=stop, on_step=runtime.reporter(ctx),
-                                            max_portfolios=max(2, len(accounts)), max_seconds=900)
-        if any(summary["analyse"].get(key) for key in ("errors", "unavailable", "skipped", "budget_exhausted", "changed_during_run")):
+                                            max_portfolios=None, max_seconds=900)
+        if any(summary["analyse"].get(key) for key in ("errors", "unavailable", "skipped", "batch_exhausted", "budget_exhausted", "changed_during_run", "pending_keys", "cancelled")):
             failures["analyse"] = summary["analyse"]
     except Exception as exc:
         failures["analyse"] = str(exc)
@@ -175,7 +182,13 @@ def _body_dashboard_post_airs(ctx=None, *, runtime: JobRuntime) -> tuple[str, di
     if failures:
         for stage, reason in failures.items():
             _log.error("[scheduler] Post-AIRS %s failed: %s", stage, reason)
-        require_complete("Post-AIRS preparation incomplete; see per-portfolio receipt", summary)
+        causes = []
+        for stage, reason in failures.items():
+            message = reason.get('message', reason) if isinstance(reason, dict) else reason
+            causes.append(f'{stage}: {str(message)[:600]}')
+        require_complete('Post-AIRS preparation incomplete: ' + ' · '.join(causes)
+                         + '. Completed work is saved. Next: resolve the listed source errors, '
+                         'then retry dashboard_post_airs; full evidence is in the job receipt.', summary)
     return "Price checks, monthly reports and Analyse prepared; freshness verified", summary
 
 

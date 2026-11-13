@@ -73,3 +73,42 @@ it('keeps displayed totals equal despite different bucket rounding and preserves
   expect(sum(b)).toBe(2.01);
   expect(b.find(row => row.bucket === 'Europe')?.portfolio_pct).toBe(2.01);
 });
+
+
+it('uses underlying fund currencies and preserves the same equity denominator', () => {
+  const book = [
+    { isin: 'US', name: 'US stock', bucket: 'Equity', currency: 'USD', weight_now_pct: 20 },
+    { isin: 'GB', name: 'UK stock', bucket: 'Equity', currency: 'GBp', weight_now_pct: 5 },
+    { isin: 'FUND', name: 'EUR fund class', bucket: 'Equity', currency: 'EUR', is_fund: true, weight_now_pct: 10 },
+    { isin: 'MISSING', bucket: 'Equity', is_fund: true, currency: 'EUR', weight_now_pct: 3 },
+  ] as Holding[];
+  const allocations = { FUND: { holdings: [
+    { currency: 'USD', weight_pct: 20 }, { currency: 'Unclassified', weight_pct: 80 },
+  ] } } as unknown as Parameters<typeof currentExposureRows>[7];
+  const rows = currentExposureRows([], book, 'currency', true, false, {}, {}, allocations);
+  expect(sum(rows)).toBe(38);
+  expect(rows.find(row => row.bucket === 'USD')?.portfolio_pct).toBe(22);
+  expect(rows.find(row => row.bucket === 'GBP')?.portfolio_pct).toBe(5);
+  expect(rows.find(row => row.bucket === 'EUR')).toBeUndefined();
+  expect(rows.find(row => row.bucket === 'Unclassified')?.portfolio_pct).toBe(11);
+  expect(rows.find(row => row.bucket === 'USD')?.holdings?.map(row => row.name)).toContain('EUR fund class');
+});
+
+
+it('retains original provider categories, source, precise weight and request failures for Unclassified', () => {
+  const book = [{ isin: 'FUND', name: 'Utilities ETF', bucket: 'Equity', is_fund: true, weight_now_pct: 1.28 }] as Holding[];
+  const allocations = { FUND: { source: 'comdirect', source_url: 'https://www.comdirect.de/inf/fonds/FUND', holdings: [
+    { name: 'Published allocation · Other currencies', currency: 'Unclassified', weight_pct: .27, reason: 'Provider reports other currencies' },
+    { name: 'USD allocation', currency: 'USD', weight_pct: 99.73 },
+  ] } } as unknown as Parameters<typeof currentExposureRows>[7];
+  const rows = currentExposureRows([], book, 'currency', true, false, {}, {}, allocations);
+  const evidence = rows.find(row => row.bucket === 'Unclassified')!.holdings![0].classification_evidence!;
+  expect(evidence.providerLabel).toContain('Other currencies');
+  expect(evidence.reason).toBe('Provider reports other currencies');
+  expect(evidence.source).toBe('comdirect');
+  expect(evidence.sourceUrl).toContain('comdirect.de');
+  expect(evidence.fundWeightPct).toBe(.27);
+  expect(evidence.portfolioWeightPct).toBeCloseTo(.003456);
+  const failed = currentExposureRows([], book, 'currency', true, false, {}, {}, {}, { FUND: 'HTTP 502: currency table unavailable' });
+  expect(failed.find(row => row.bucket === 'Unclassified')!.holdings![0].classification_evidence?.reason).toBe('HTTP 502: currency table unavailable');
+});

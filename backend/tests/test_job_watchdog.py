@@ -285,7 +285,7 @@ class TestTheBootPassHealsWhateverTheScanFound:
     def boot(self, monkeypatch):
         """`(set_scan, spawned)` — stub the scan's verdict, record what the pass spawns."""
         spawned: list[str] = []
-        monkeypatch.setattr(S, "_spawn_body", lambda jid: spawned.append(jid))
+        monkeypatch.setattr(S, "_run_body", lambda jid: spawned.append(jid))
         monkeypatch.delenv("DISABLE_BOOT_HEAL", raising=False)
 
         def set_scan(result=None, raises=None):

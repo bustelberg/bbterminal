@@ -1,0 +1,277 @@
+{
+  "checked_at": "2026-11-13T11:25:58.456095+00:00",
+  "unique_holdings": 288,
+  "direct_stocks": 215,
+  "existing_company_links": 193,
+  "resolved_by_bridge": [
+    {
+      "isin": "GB0004052071",
+      "name": "Halma",
+      "portfolios": [
+        "DealmakersTopSel OFF DYN",
+        "model:DealmakersTopSel OFF FX"
+      ],
+      "link": {
+        "company_id": 191,
+        "method": "reviewed_exchange_ticker",
+        "matched_isin": "GB0004052071"
+      }
+    },
+    {
+      "isin": "GB0032398678",
+      "name": "Judges Scientific Plc.",
+      "portfolios": [
+        "DealmakersTopSel OFF DYN",
+        "model:DealmakersTopSel OFF FX"
+      ],
+      "link": {
+        "company_id": 192,
+        "method": "reviewed_exchange_ticker",
+        "matched_isin": "GB0032398678"
+      }
+    },
+    {
+      "isin": "GB00B5ZN1N88",
+      "name": "Segro",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "link": {
+        "company_id": 4033,
+        "method": "reviewed_exchange_ticker",
+        "matched_isin": "GB00B5ZN1N88"
+      }
+    },
+    {
+      "isin": "INE040A01034",
+      "name": "HDFC Bank",
+      "portfolios": [
+        "AzTopSelectie_DYN",
+        "model:AztopSelectie_FX"
+      ],
+      "link": {
+        "company_id": 5277,
+        "method": "alias",
+        "matched_isin": "US40415F1012"
+      }
+    },
+    {
+      "isin": "JP3786800000",
+      "name": "HOYA Corporation",
+      "portfolios": [
+        "AzTopSelectie_DYN",
+        "model:AztopSelectie_FX"
+      ],
+      "link": {
+        "company_id": 102,
+        "method": "alias",
+        "matched_isin": "JP3837800006"
+      }
+    },
+    {
+      "isin": "KR7005930003",
+      "name": "Samsung Electron",
+      "portfolios": [
+        "AzTopSelectie_DYN",
+        "model:AztopSelectie_FX"
+      ],
+      "link": {
+        "company_id": 134,
+        "method": "alias",
+        "matched_isin": "US7960508882"
+      }
+    },
+    {
+      "isin": "US0567521085",
+      "name": "Baidu ADR",
+      "portfolios": [
+        "BUS_WTS_StMerken_Dyn"
+      ],
+      "link": {
+        "company_id": 3562,
+        "method": "alias",
+        "matched_isin": "KYG070341048"
+      }
+    },
+    {
+      "isin": "US4385162056",
+      "name": "Honeywell",
+      "portfolios": [
+        "BUS_WTS_Dividend_Dyn",
+        "model:BUS_WTS_Dividend_Fx"
+      ],
+      "link": {
+        "company_id": 3273,
+        "method": "alias",
+        "matched_isin": "US4385161066"
+      }
+    },
+    {
+      "isin": "US8740391003",
+      "name": "Taiwan Semiconductor",
+      "portfolios": [
+        "AITopSelectie OFF DYN",
+        "BUS_2.0_ OFF_DYN",
+        "BUS_IF_DYN",
+        "BUS_MTS_BEPOFF_AFS_DYN",
+        "BUS_MTS_DEF_AFS_DYN",
+        "BUS_MTS_NEU_AFS_DYN",
+        "BUS_MTS_OFF_AFS_DYN",
+        "BUS_Ris_bepOff_Kl_AFS_Dy",
+        "BUS_WTS_Dividend_Dyn",
+        "BUS_WTS_Duurzaam_Dyn",
+        "BUS_WTS_Familie_Dyn",
+        "model:AITopSelectie OFF FX",
+        "model:BUS_2.0_BOFF_FX",
+        "model:BUS_2.0_NEU_FX",
+        "model:BUS_2.0_OFF_FX",
+        "model:BUS_DUTS_BEPOF_AFS",
+        "model:BUS_DUTS_DEF_AFS",
+        "model:BUS_DUTS_NEU_AFS",
+        "model:BUS_DUTS_OFF_AFS",
+        "model:BUS_IF_FX",
+        "model:BUS_MTS_BEPOFF_AFS",
+        "model:BUS_MTS_DEF_AFS",
+        "model:BUS_MTS_NEU_AFS",
+        "model:BUS_MTS_OFF_AFS",
+        "model:BUS_WTS_Dividend_Fx",
+        "model:BUS_WTS_Duurzaam_Fx",
+        "model:BUS_WTS_Familie_Fx"
+      ],
+      "link": {
+        "company_id": 3223,
+        "method": "alias",
+        "matched_isin": "TW0002330008"
+      }
+    }
+  ],
+  "isin_notes_fallback": [
+    {
+      "isin": "BE0003851681",
+      "name": "Aedifica",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches BE0003851681. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "BE0974349814",
+      "name": "Warehouses De Pauw",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches BE0974349814. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "DE0006450000",
+      "name": "LPKF LaserElectronics",
+      "portfolios": [
+        "BUS_IF_DYN",
+        "model:BUS_IF_FX"
+      ],
+      "reason": "No active company record matches DE0006450000. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "DE0006618309",
+      "name": "CHAPTERS Group AG",
+      "portfolios": [
+        "DealmakersTopSel OFF DYN",
+        "model:DealmakersTopSel OFF FX"
+      ],
+      "reason": "No active company record matches DE0006618309. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "NL0000289213",
+      "name": "Wereldhave",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches NL0000289213. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "NL0015000K93",
+      "name": "Eurocomm. Prop.",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches NL0015000K93. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US02665T3068",
+      "name": "American Homes 4 Rent",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches US02665T3068. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US18507C1036",
+      "name": "ClearPoint Neuro, Inc.",
+      "portfolios": [
+        "BUS_IF_DYN",
+        "model:BUS_IF_FX"
+      ],
+      "reason": "No active company record matches US18507C1036. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US2772761019",
+      "name": "EastGroup Properties",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches US2772761019. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US29415C1018",
+      "name": "EOS Energy Enterprises",
+      "portfolios": [
+        "BUS_IF_DYN",
+        "model:BUS_IF_FX"
+      ],
+      "reason": "No active company record matches US29415C1018. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US29472R1086",
+      "name": "Equity Lifestyle",
+      "portfolios": [
+        "model:VTopSelectie OFF FX",
+        "VTopSelectie OFF DY"
+      ],
+      "reason": "No active company record matches US29472R1086. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US56035L1044",
+      "name": "Main Street Capital",
+      "portfolios": [
+        "model:BUS_Alternatives_FX"
+      ],
+      "reason": "No active company record matches US56035L1044. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    },
+    {
+      "isin": "US97785W1062",
+      "name": "Wolfspeed Inc",
+      "portfolios": [
+        "BUS_IF_DYN",
+        "model:BUS_IF_FX"
+      ],
+      "reason": "No active company record matches US97785W1062. Add a verified issuer link or company record; prices alone do not establish a notes identity."
+    }
+  ],
+  "blocked": [],
+  "unclassified_holdings": [],
+  "missing_stock_identifiers": [
+    {
+      "name": "Brown &amp; Brown",
+      "portfolios": [
+        "model:BUS_WTS_Familie_Fx"
+      ]
+    }
+  ]
+}

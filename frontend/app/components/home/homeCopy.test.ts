@@ -38,7 +38,6 @@ describe('HOME_TILE_ORDER', () => {
         '/management-dashboard',
         '/research-dashboard',
         '/log-dashboard',
-        '/schedule',
         '/momentum',
         '/debet-calculation',
       ]);

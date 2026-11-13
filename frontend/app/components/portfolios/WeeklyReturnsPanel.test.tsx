@@ -92,7 +92,7 @@ it('selects either weekly instrument from the Risk bundle without another reques
   }
 });
 
-it('renders saved bars on progress before the history job finishes', async () => {
+it('reloads all saved instrument series once after the history job finishes', async () => {
   const option = { id: 'A', name: 'Amazon.com', isin: 'A', currency: 'USD' };
   const periods = [{ week_end: '2026-01-02', target_date: '2026-01-02', as_of_date: '2026-01-02',
     from_date: '2025-12-31', partial: false, available: true }];
@@ -108,7 +108,7 @@ it('renders saved bars on progress before the history job finishes', async () =>
     return { id: 'history', done, body: {} };
   });
   vi.mocked(apiFetch).mockResolvedValue({ ok: true, json: async () => ({ ...base, ...series,
-    selected: { ...series.selected, weeks: [{ status: 'priced', price: 105, from_price: 100, return_pct: 5 }] },
+    instruments: { A: { ...series, selected: { ...series.selected, weeks: [{ status: 'priced', price: 105, from_price: 100, return_pct: 5 }] } } },
   }) } as Response);
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement('div');
@@ -123,16 +123,45 @@ it('renders saved bars on progress before the history job finishes', async () =>
     const load = Array.from(host.querySelectorAll('button')).find((button) => /Load full history|Volledige geschiedenis laden/.test(button.textContent ?? ''))!;
     await act(async () => load.click());
     expect(host.querySelector('rect.text-pos-300')).toBeNull();
-    await act(async () => { progress!({ done: 1, total: 3 }); });
+    await act(async () => { progress?.({ done: 1, total: 3 }); });
     expect(load.disabled).toBe(true);
+    expect(host.querySelector('rect.text-pos-300')).toBeNull();
+    await act(async () => { finish({ status: 'done' } as JobToast); });
     expect(host.querySelector('rect.text-pos-300')).not.toBeNull();
     expect(host.textContent).toContain('+5.00%');
-    expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('weekly-returns?instrument_id=A'),
-      { cache: 'no-store', noReadCache: true });
-    await act(async () => { finish({ status: 'done' } as JobToast); });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('weekly-returns/all'),
+      expect.objectContaining({ cache: 'no-store', noReadCache: true }));
   } finally {
     await act(async () => root.unmount());
     host.remove();
     vi.clearAllMocks();
   }
+});
+
+
+it('fetches one saved portfolio bundle for both instrument selectors', async () => {
+  vi.mocked(apiFetch).mockReset();
+  const options = [
+    { id: 'A', name: 'Amazon.com', isin: 'A', currency: 'USD' },
+    { id: 'B', name: 'Microsoft', isin: 'B', currency: 'USD' },
+  ];
+  const instruments = Object.fromEntries(options.map(option => [option.id, {
+    selected: { ...option, held: true, weeks: [] }, periods: [], missing_observations: 0,
+  }]));
+  vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ready: true, portefeuille: 'BOOK',
+    start_date: '2025-02-01', through: '2026-11-13', options, instruments })));
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<WeeklyReturnsPanel portefeuille="BOOK" />));
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining('/BOOK/weekly-returns/all'), expect.anything());
+    const pickers = host.querySelectorAll<HTMLInputElement>('[role="combobox"]');
+    await act(async () => pickers[0].focus());
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[0].click());
+    await act(async () => pickers[1].focus());
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1].click());
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
 });

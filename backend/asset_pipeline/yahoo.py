@@ -57,6 +57,19 @@ def is_closed_bar(ts: int) -> bool:
     series, candles, and liquidity."""
     return utc_dt(ts).date() < datetime.now(timezone.utc).date()
 
+
+def is_completed_daily_bar(ts: int, meta: dict | None = None, *, now: float | None = None) -> bool:
+    """Use the exchange day and confirmed regular-session end, including today's ASX close."""
+    now = time.time() if now is None else now
+    if ts > now:
+        return False
+    day, today = session_date(ts, meta), session_date(now, meta)
+    if day != today:
+        return day < today
+    end = ((((meta or {}).get('currentTradingPeriod') or {}).get('regular') or {}).get('end'))
+    return (isinstance(end, (int, float)) and 0 < end <= now
+            and session_date(end - 1, meta) == day)
+
 try:
     from curl_cffi import requests as _creq
     _HAS_CURL = True
@@ -216,8 +229,8 @@ _FUND_SECTOR_LABELS = {
 }
 
 
-def _fund_sector_weightings(symbol: str, *, vehicle: str) -> list[dict]:
-    """One explicitly registered fund's Yahoo sector weights, as percentage rows.
+def _fund_profile(symbol: str, *, vehicle: str) -> dict:
+    """Read an explicitly registered fund's verified Yahoo profile.
 
     Yahoo identifies ETFs through ``fundProfile.legalType`` and mutual funds through
     ``price.quoteType``. Keep those as separate accepted identities: callers hold a mixture of
@@ -226,7 +239,7 @@ def _fund_sector_weightings(symbol: str, *, vehicle: str) -> list[dict]:
     """
     global _quote_sess, _quote_crumb
     if not symbol or not _HAS_CURL:
-        return []
+        return {}
 
     def request() -> tuple[int | None, str]:
         global _quote_sess, _quote_crumb
@@ -259,18 +272,29 @@ def _fund_sector_weightings(symbol: str, *, vehicle: str) -> list[dict]:
 
     status, text = _throttle.run(request)
     if status != 200:
-        return []
+        return {}
     try:
         result = ((json.loads(text).get("quoteSummary") or {}).get("result") or [])[0]
         legal_type = (result.get("fundProfile") or {}).get("legalType")
         quote_type = (result.get("price") or {}).get("quoteType")
         if vehicle == "etf" and legal_type != "Exchange Traded Fund":
-            return []
+            return {}
         if vehicle == "mutual_fund" and quote_type != "MUTUALFUND":
-            return []
-        raw_rows = (result.get("topHoldings") or {}).get("sectorWeightings") or []
-    except (IndexError, TypeError, ValueError):
-        return []
+            return {}
+        return result
+    except (IndexError, TypeError, ValueError, AttributeError):
+        return {}
+
+
+def fund_holdings(symbol: str, *, vehicle: str = "etf") -> list[dict]:
+    """Published holdings with original whole-fund weights; never rebase a partial list."""
+    profile = _fund_profile(symbol, vehicle=vehicle)
+    return (profile.get("topHoldings") or {}).get("holdings") or []
+
+
+def _fund_sector_weightings(symbol: str, *, vehicle: str) -> list[dict]:
+    profile = _fund_profile(symbol, vehicle=vehicle)
+    raw_rows = (profile.get("topHoldings") or {}).get("sectorWeightings") or []
 
     rows = []
     for item in raw_rows:

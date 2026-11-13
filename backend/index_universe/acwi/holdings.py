@@ -114,14 +114,33 @@ def parse_holdings_csv(stream) -> tuple[list[dict], str]:
 
 
 def load_latest_acwi_holdings() -> tuple[list[dict], str]:
-    """Use the newest archived source. Keep the bundled export as the bootstrap."""
+    """Choose the newest dated source; an older archive must not override a newer bundle."""
     from deps import supabase
 
+    candidates = []
     try:
         rows = (supabase.table('acwi_holdings_snapshot').select('as_of,holdings')
                 .order('as_of', desc=True).limit(1).execute().data or [])
         if rows:
-            return rows[0]['holdings'], rows[0]['as_of']
+            candidates.append((rows[0]['holdings'], rows[0]['as_of']))
     except Exception:
         log.warning('Could not read the archived ACWI holdings; using the bundled snapshot', exc_info=True)
-    return load_acwi_holdings()
+    try:
+        candidates.append(load_acwi_holdings())
+    except Exception:
+        log.warning('Could not read the bundled ACWI holdings; using an archived snapshot if available', exc_info=True)
+    dated = []
+    for members, stamp in candidates:
+        if not members:
+            continue
+        for fmt in ('%Y-%m-%d', '%d-%b-%Y'):
+            try:
+                dated.append((datetime.strptime(str(stamp), fmt).date(), members, stamp))
+                break
+            except ValueError:
+                continue
+    if not dated:
+        raise ValueError('No usable dated ACWI holdings snapshot is available')
+    # Archive is first and wins ties, preserving the canonical imported copy.
+    _, members, stamp = max(dated, key=lambda item: item[0])
+    return members, stamp

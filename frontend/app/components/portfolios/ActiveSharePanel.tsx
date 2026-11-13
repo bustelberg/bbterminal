@@ -28,6 +28,7 @@
  * said issuers. Same rename in Concentration and Effective positions, which fold identically.
  */
 import { Fragment, useMemo, useState } from 'react';
+import { useIsAdmin } from '../../../lib/hooks/useEffectiveRole';
 import { chartTheme } from '../../../lib/chartTheme';
 import InfoTip from '../InfoTip';
 import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
@@ -201,6 +202,7 @@ export default function ActiveSharePanel({
    */
   const [view, setView] =
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'returns' | 'weights'>('active');
+  const isAdmin = useIsAdmin();
   const [weightsOpened, setWeightsOpened] = useState(false);
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
@@ -308,7 +310,7 @@ export default function ActiveSharePanel({
                 here in one language is exactly the drift `riskCopy`'s compile-time guarantee
                 exists to prevent. */}
             {/* Tracking error is temporarily hidden; keep its implementation below. */}
-            {(['active', 'corr', 'vol', 'dd', 'conc', 'returns', 'weights'] as const).map((k) => (
+            {(['active', 'corr', 'vol', 'dd', 'conc', 'returns', 'weights'] as const).filter(k => k !== 'weights' || isAdmin).map((k) => (
               <button key={k} type="button" onClick={() => { if (k === 'weights') setWeightsOpened(true); setView(k); }}
                 aria-pressed={view === k}
                 className={`cursor-pointer px-3 py-1.5 font-medium whitespace-nowrap
@@ -330,7 +332,7 @@ export default function ActiveSharePanel({
 
       {/* Each view renders from the shared Risk bundle. */}
       {view === 'returns' && <WeeklyReturnsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}
-      <div hidden={view !== 'weights'}>{weightsOpened && <WeightsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}</div>
+      <div hidden={view !== 'weights'}>{isAdmin && weightsOpened && <WeightsPanel portefeuille={returnsAccount ?? portefeuille} key={returnsAccount ?? portefeuille} />}</div>
       {view === 'te' && (
         <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           portefeuille={portefeuille}

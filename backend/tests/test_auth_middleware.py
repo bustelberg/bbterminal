@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import types
+import pytest
 
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
@@ -117,10 +118,17 @@ class TestM1_ReadsRequireAuth:
     def test_non_admin_read_of_admin_path_is_403(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/admin/health", "user") == (403, False)
 
-    def test_scheduled_strategies_read_allowed_for_user(self, monkeypatch):
-        # The read-only /schedule view: users may GET (the endpoint filters to
-        # user_visible rows); writes stay admin-only (see TestWriteTiers).
-        assert _run(monkeypatch, "GET", "/api/scheduled-strategies", "user") == (200, True)
+    @pytest.mark.parametrize('method,path', [
+        ('GET', '/api/scheduled-strategies'),
+        ('HEAD', '/api/scheduled-strategies/42/runs'),
+        ('GET', '/api/scheduled-strategies/held-companies'),
+        ('POST', '/api/scheduled-strategies/42/actual-fills'),
+        ('DELETE', '/api/scheduled-strategies/42'),
+    ])
+    def test_schedule_resources_require_admin(self, monkeypatch, method, path):
+        assert _run(monkeypatch, method, path, 'user') == (403, False)
+        assert _run(monkeypatch, method, path, 'admin') == (200, True)
+        assert _run(monkeypatch, method, path, None) == (401, False)
 
     def test_fx_and_benchmarks_reads_allowed_for_user(self, monkeypatch):
         # Reference data the read-only /schedule portfolio card needs (FX
@@ -616,3 +624,21 @@ class TestEveryLongEquityCardReadAUserOpens:
         assert _run(monkeypatch, 'POST', '/api/earnings/fundamental-coverage/ingest', 'user') == (200, True)
         # The line that IS drawn: a write that changes what the page SAYS stays admin-only.
         assert _run(monkeypatch, 'DELETE', '/api/airs/accounts/BUS_TEST', 'user') == (403, False)
+
+
+@pytest.mark.parametrize('method,path', [
+    ('POST', '/api/airs/accounts/BOOK/weight-search'),
+    ('GET', '/api/airs/accounts/BOOK/weight-search/bounds'),
+    ('HEAD', '/api/airs/accounts/BOOK/weight-search/bounds'),
+])
+def test_weights_optimizer_is_admin_only(monkeypatch, method, path):
+    assert _run(monkeypatch, method, path, 'user') == (403, False)
+    assert _run(monkeypatch, method, path, 'admin') == (200, True)
+
+
+def test_isin_notes_keep_the_same_private_user_access_as_company_notes(monkeypatch):
+    path = '/api/companies/by-isin/US18507C1036/investment-note'
+    assert _run(monkeypatch, 'PUT', path, 'user') == (200, True)
+    assert _run(monkeypatch, 'GET', path, 'user') == (200, True)
+    assert _run(monkeypatch, 'DELETE', path, 'user') == (403, False)
+    assert _run(monkeypatch, 'PUT', path + '/other', 'user') == (403, False)

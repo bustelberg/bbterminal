@@ -1000,7 +1000,7 @@ def _analyse_sources_busy(*, ignore_airs: bool = False) -> bool:
     from asset_pipeline import queue as ingest_queue  # noqa: PLC0415
     from deps import supabase  # noqa: PLC0415
     import jobs  # noqa: PLC0415
-    sources = {'dashboard_market', 'airs_vermogen_refresh', 'benchmark_price_slice', 'asset_price_refresh', 'fx_sync', 'airs_price_checks'}
+    sources = {'airs_weekly_returns', 'dashboard_market', 'airs_vermogen_refresh', 'benchmark_price_slice', 'asset_price_refresh', 'fx_sync', 'airs_price_checks'}
     if ignore_airs:
         sources.discard('airs_vermogen_refresh')
     if admission.active_jobs() & sources:
@@ -1101,6 +1101,15 @@ def _body_table_size_sample(ctx=None) -> tuple[str, dict]:
     return preparation_jobs._body_table_size_sample(ctx, runtime=_job_runtime())
 
 
+def _fire_airs_weekly_returns():
+    _spawn_body("airs_weekly_returns")
+
+
+def _body_airs_weekly_returns(ctx=None):
+    from scheduler_jobs.weekly_returns import run
+    return run(ctx, report=_reporter(ctx))
+
+
 def _register_bodies() -> None:
     """Fill `JOB_BODIES` once every body is defined.
 
@@ -1109,6 +1118,7 @@ def _register_bodies() -> None:
     references to functions that do not exist yet.
     """
     JOB_BODIES.update({
+        "airs_weekly_returns": _body_airs_weekly_returns,
         "dashboard_market": _body_dashboard_market,
         "dashboard_post_airs": _body_dashboard_post_airs,
         "dashboard_freshness": _body_dashboard_freshness,
@@ -1357,7 +1367,13 @@ def _boot_gap_pass() -> None:
         # A deployment that wants the evidence without the action can have exactly that.
         _log.warning("[scheduler] DISABLE_BOOT_HEAL set — not re-running the broken jobs")
         return
-    _spawn_body("job_watchdog")
+    # This function already owns the sole maintenance worker as job_gap_scan.
+    # Submitting another maintenance task here always loses admission. Run the
+    # recorded watchdog on this worker instead, preserving the capacity bound.
+    try:
+        _run_body("job_watchdog")
+    except Exception as e:  # noqa: BLE001 — same isolation as a scheduled body
+        _log.exception("[scheduler] startup job_watchdog failed: %s: %s", type(e).__name__, e)
 
 
 def register_scheduler(app) -> None:
@@ -1496,6 +1512,7 @@ def register_scheduler(app) -> None:
         # Weekly due-only fundamentals pass. It fetches only companies whose next filing could
         # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
+        _register("airs_weekly_returns", _fire_airs_weekly_returns)
         _register("acwi_weekly_coverage", _fire_acwi_weekly_coverage)
         _register("acwi_monthly_fundamentals", lambda: _spawn_body("acwi_monthly_fundamentals"))
         # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week

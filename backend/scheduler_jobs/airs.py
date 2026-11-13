@@ -175,7 +175,7 @@ def _body_airs_vermogen(ctx=None, *, runtime: JobRuntime) -> tuple[str, dict]:
           summary["post_airs"] = getattr(exc, "summary", {"error": str(exc)})
           failures.append(f"post-AIRS: {exc}")
       if failures:
-          require_complete(" · ".join(failures)[:400], {**summary, "errors": failures})
+          require_complete(" · ".join(failures), {**summary, "errors": failures})
       return (f"{summary.get('accounts')} account(s), {summary.get('models')} model(s), "
               f"{(summary.get('pricing') or {}).get('priced', 0)} model(s) priced", summary)
 

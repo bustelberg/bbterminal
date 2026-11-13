@@ -95,3 +95,14 @@ def test_scheduler_keeps_unrepaired_price_receipt_without_crashing_startup(monke
     assert rec.status == "error"
     assert rec.summary == receipt
     assert "FUND (TEST) still dated 2026-08-21" in caplog.text
+
+
+def test_nav_failure_keeps_the_exact_reviewed_source_and_exception(monkeypatch):
+    def unavailable(issue_id):
+        raise RuntimeError('provider returned HTTP 503')
+    monkeypatch.setattr(price_refresh, '_iex_nav_rows', unavailable)
+    result = price_refresh.backfill_nav_fallbacks({'XS1002121454'})
+    assert result['failed'] == 1
+    assert result['stored'] == 0
+    assert result['results'] == [{'isin': 'XS1002121454', 'provider': 'IEX', 'issue_id': '600015811',
+                                  'status': 'error', 'error': 'RuntimeError: provider returned HTTP 503'}]

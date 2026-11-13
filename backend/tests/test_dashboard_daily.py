@@ -10,6 +10,11 @@ import scheduler as S
 from tests._fake_supabase import FakeSupabase
 
 
+@pytest.fixture(autouse=True)
+def no_weekly_provider_work(monkeypatch):
+    monkeypatch.setattr('scheduler_jobs.weekly_returns.run', lambda *args, **kwargs: ('saved', {}))
+
+
 def test_schedule_reports_nested_market_stages_under_the_airs_clock(monkeypatch):
     from datetime import datetime, timezone
     from scheduled_jobs import BY_ID
@@ -261,7 +266,11 @@ def test_post_airs_keeps_nested_audit_receipt_and_logs_root_cause(monkeypatch, c
     monkeypatch.setattr(_airs_accounts, "list_accounts", lambda: [])
     monkeypatch.setattr(airs_history, "finalise_previous_year", lambda ctx, **kw: [])
     monkeypatch.setattr(_airs_price_check, "refresh_price_checks", lambda *a, **kw: {})
-    monkeypatch.setattr(_prepared_analyse, "run_controlled", lambda **kw: {})
+    def prepare_all(**kwargs):
+        assert kwargs['max_portfolios'] is None
+        assert kwargs['max_seconds'] == 900
+        return {}
+    monkeypatch.setattr(_prepared_analyse, "run_controlled", prepare_all)
     receipt = {"accounts": [{"portefeuille": "BOOK", "issues": ["missing close"]}]}
     def audit(*a):
         raise D.IncompleteRefresh("incomplete audit", receipt)
@@ -270,6 +279,8 @@ def test_post_airs_keeps_nested_audit_receipt_and_logs_root_cause(monkeypatch, c
         S._body_dashboard_post_airs()
     assert caught.value.summary["errors"]["audit"]["receipt"] == receipt
     assert "missing close" in caplog.text
+    assert "audit: incomplete audit" in str(caught.value)
+    assert "Completed work is saved" in str(caught.value)
 
 
 def test_post_airs_downloads_month_when_daily_snapshots_are_incomplete(monkeypatch):
@@ -374,7 +385,8 @@ def test_freshness_reads_actual_dates_and_reports_unmapped_coverage(monkeypatch)
     result = D.freshness(date(2026, 10, 30))
     assert result["incomplete"] == 1
     assert result["accounts"][0]["unmapped_isins"] == ["UNMAPPED"]
-    assert 'UNMAPPED: no verified Yahoo price mapping' in result['accounts'][0]['issues']
+    assert any(issue.startswith('UNMAPPED: no verified Yahoo price mapping;') and 'execution_status=absent' in issue
+               and 'next:' in issue for issue in result['accounts'][0]['issues'])
     assert any("expected 2026-10-29" in issue for issue in result["accounts"][0]["issues"])
     assert db.writes == []
 
@@ -561,3 +573,56 @@ def test_daily_month_report_keeps_accrued_interest_out_of_security_price_return(
     else:
         assert saved['positions'][0]['return_pct'] == pytest.approx(10)
         assert saved['positions'][0]['accrued_interest_closing_eur'] == 60
+
+
+@pytest.mark.parametrize('isin,symbol,close,expected,unmapped', [
+    ('XS1002121454', 'IEX:600015811', '2026-11-12', '2026-11-12', False),
+    ('NL0010776951', 'IEX:60045725', '2026-10-30', '2026-10-30', False),
+    ('NL0010776951', 'IEX:60045725', '2026-09-30', '2026-10-30', False),
+    ('XS1002121454', 'WRONG', '2026-11-12', None, True),
+])
+def test_freshness_recognises_only_verified_nav_sources_and_their_cadence(monkeypatch, isin, symbol, close, expected, unmapped):
+    from routers import _airs_account_links as links, _prepared_analyse as prepared
+    db = FakeSupabase({
+        'airs_account_roster': [{'portefeuille': 'BOOK', 'last_seen_at': '2026-11-13T10:00:00Z'}],
+        'airs_holding': [dict(portefeuille='BOOK', isin=isin, as_of_date='2026-11-12') for _ in range(2)],
+        'asset_execution': [dict(isin=isin, status='ok', analysis_id=1, yahoo_symbol=None, currency='EUR')],
+        'asset_analysis': [dict(analysis_id=1, symbol=symbol, price_to=close)],
+    })
+    monkeypatch.setattr(D, 'supabase', db)
+    monkeypatch.setattr(links, 'list_account_links', lambda: {'accounts': []})
+    monkeypatch.setattr(prepared, 'overview_freshness', lambda *a, **k: {})
+    result = D.freshness(date(2026, 11, 13))['accounts'][0]
+    assert result['unmapped_isins'] == ([isin] if unmapped else [])
+    related = [issue for issue in result['issues'] if issue.startswith(isin)]
+    if unmapped:
+        assert len(related) == 1  # Principal and accrued-interest rows share one mapping.
+    else:
+        assert result['price_sources'][isin]['expected_date'] == expected
+        assert bool(related) == (close < expected)
+        if related:
+            assert 'IEX NAV dated' in related[0]
+        assert result['price_dates'][isin] == close
+    assert db.writes == []
+
+
+def test_missing_mapping_receipt_preserves_resolver_reason_and_identity(monkeypatch):
+    from routers import _airs_account_links as links, _prepared_analyse as prepared
+    db = FakeSupabase({
+        'airs_account_roster': [{'portefeuille': 'BOOK', 'last_seen_at': '2026-11-13T10:00:00Z'}],
+        'airs_holding': [dict(portefeuille='BOOK', isin='JP3786800000', holding_name='HOYA', as_of_date='2026-11-12')],
+        'asset_execution': [dict(isin='JP3786800000', name='HOYA', status='unmapped', yahoo_symbol=None,
+                                 reason='ISIN does not match provider listing', updated_at='2026-11-13T10:00:00Z')],
+    })
+    monkeypatch.setattr(D, 'supabase', db)
+    monkeypatch.setattr(links, 'list_account_links', lambda: {'accounts': []})
+    monkeypatch.setattr(prepared, 'overview_freshness', lambda *a, **k: {})
+    issue = next(issue for issue in D.freshness(date(2026, 11, 13))['accounts'][0]['issues'] if issue.startswith('JP3786800000'))
+    assert 'invalid ISIN format/checksum' in issue
+    assert 'verify the identifier in AIRS' in issue
+    assert 'holding=HOYA' in issue
+    assert 'execution_status=unmapped' in issue
+    assert 'resolution_reason=ISIN does not match provider listing' in issue
+    assert '2026-11-13T10:00:00Z' in issue
+    assert 'do not substitute an unverified ticker' in issue
+    assert not db.writes

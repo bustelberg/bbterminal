@@ -22,11 +22,13 @@ it('retains quick reload progress in the generic popup Details', async () => {
 it('does not turn silent Risk warmups into popups when running jobs are reattached', async () => {
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify([
     { id: 'silent-risk', kind: 'airs.risk-bundle', label: 'risk-bundle:hash', status: 'running' },
+    { id: 'silent-weekly', kind: 'scheduled.airs_weekly_returns', label: 'Weekly AIRS instrument returns', status: 'running' },
     { id: 'visible-refresh', kind: 'airs.refresh', label: 'Refresh', status: 'running' },
   ])));
   vi.mocked(runSSE).mockImplementation(async (_url, _init, onEvent) => { onEvent({ type: 'job', status: 'done' }); });
   await attachRunningJobs();
   expect(jobsStore.get().jobs.some((job) => job.id === 'silent-risk')).toBe(false);
+  expect(jobsStore.get().jobs.some((job) => job.id === 'silent-weekly')).toBe(false);
   expect(jobsStore.get().jobs.some((job) => job.id === 'visible-refresh')).toBe(true);
   expect(runSSE).toHaveBeenCalledOnce();
 });
@@ -34,6 +36,14 @@ it('does not turn silent Risk warmups into popups when running jobs are reattach
 afterEach(() => {
   jobsStore.set({ jobs: [] });
   vi.clearAllMocks();
+});
+
+it('still follows weekly preparation explicitly started by the user', async () => {
+  vi.mocked(runSSE).mockImplementation(async (_url, _init, onEvent) => {
+    onEvent({ type: 'job', kind: 'scheduled.airs_weekly_returns', status: 'done' });
+  });
+  await watchJob('manual-weekly', 'Weekly AIRS instrument returns');
+  expect(jobsStore.get().jobs.find(job => job.id === 'manual-weekly')?.status).toBe('done');
 });
 
 it('distinguishes a saved AIRS account from start/report narration on the progress stream', async () => {

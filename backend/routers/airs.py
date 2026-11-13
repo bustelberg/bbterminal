@@ -29,6 +29,7 @@ from routers._etf_sector_allocation import (
 )
 from routers._sse import sse_event, sse_message
 from routers._etf_region_allocation import EtfRegionAllocationResponse, fetch_region_allocation, supported as region_allocation_supported
+from routers._etf_currency_allocation import EtfCurrencyAllocationResponse, fetch_currency_allocation, supported as currency_allocation_supported
 import queue as thread_queue
 import threading
 from datetime import UTC, datetime
@@ -54,6 +55,17 @@ router = APIRouter(tags=["airs"])
 _log = logging.getLogger(__name__)
 
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+@router.get('/api/airs/etf/{isin}/currency-allocation', response_model=EtfCurrencyAllocationResponse)
+async def etf_currency_allocation(isin: str) -> EtfCurrencyAllocationResponse:
+    normalized = isin.strip().upper()
+    if not currency_allocation_supported(normalized):
+        raise HTTPException(404, 'Currency allocation is not available for this fund yet')
+    try:
+        return await asyncio.to_thread(fetch_currency_allocation, normalized)
+    except Exception as exc:
+        raise HTTPException(502, f'Could not read the fund holdings and quote currencies: {exc}') from exc
 
 
 @router.get('/api/airs/etf/{isin}/region-allocation', response_model=EtfRegionAllocationResponse)
@@ -819,6 +831,7 @@ class CompositionHolding(BaseModel):
     name: str | None = None
     isin: str | None = None
     in_both: bool = False
+    issuer_key: str | None = None
     # Share of the complete current AIRS book, or of the visible model axis on fallback.
     # Σ over a bucket == that bucket's `portfolio_pct`.
     weight_pct: float = 0.0
@@ -1108,9 +1121,12 @@ class BookHoldingDetail(BaseModel):
     sector: str | None = None
     # Issuer/ISIN region from the same classifier used by the current composition axes.
     region: str | None = None
+    in_both: bool = False
+    issuer_key: str | None = None
     # Identity and source value travel with the chart-normalised `sector` so an Analyse reader can
     # set a company-wide editorial override, or return to Automatic without guessing what it was.
     company_id: int | None = None
+    company_link_reason: str | None = None
     sector_default: str | None = None
     sector_overridden: bool | None = None
     currency: str | None = None
@@ -2369,8 +2385,13 @@ async def airs_portfolio_risk_bundle(req: RiskBundleRequest, prepare_if_missing:
     policy = req.benchmark_weights
     def with_weekly(saved):
         if req.returns_account:
-            from routers._airs_instrument_returns import bundle
-            saved = {**saved, 'views': {**saved['views'], 'weekly-returns': bundle(req.returns_account)}}
+            from services.weekly_returns import read
+            try:
+                weekly = read(req.returns_account)
+            except HTTPException as exc:
+                weekly = {'portefeuille': req.returns_account, 'ready': False, 'detail': str(exc.detail),
+                          'options': [], 'instruments': {}}
+            saved = {**saved, 'views': {**saved['views'], 'weekly-returns': weekly}}
         return saved
 
     def load():
@@ -4021,8 +4042,9 @@ async def airs_weekly_returns_job(portefeuille: str, instrument_id: str = Query(
     _, _, _, _, selected = await asyncio.to_thread(state, portefeuille, instrument_id)
     label = f"{selected['name']} · Full AIRS history"
     key = hashlib.sha256(f'{instrument_id}:{start_date or "full"}'.encode()).hexdigest()[:16]
+    from services.weekly_returns import collect_and_publish
     job, reused = job_registry.start(f'airs.weekly-returns.{portefeuille}.{key}', label,
-                                    lambda ctx: collect(portefeuille, instrument_id, ctx, full_history=True, earliest_date=start_date))
+                                    lambda ctx: collect_and_publish(portefeuille, lambda: collect(portefeuille, instrument_id, ctx, full_history=True, earliest_date=start_date)))
     return {'job_id': job.id, 'label': label, 'already_running': reused}
 
 
@@ -4034,15 +4056,16 @@ async def airs_weekly_returns_all_job(portefeuille: str, start_date: dt_date = Q
         raise HTTPException(422, 'Earliest date must be between 1 January 1900 and today.')
     await asyncio.to_thread(_snapshots, portefeuille)
     label = f'{portefeuille} · All AIRS instrument histories'
+    from services.weekly_returns import collect_and_publish
     job, reused = job_registry.start(f'airs.weekly-returns-all.{portefeuille}.{start_date}', label,
-                                    lambda ctx: collect_all(portefeuille, ctx, start_date))
+                                    lambda ctx: collect_and_publish(portefeuille, lambda: collect_all(portefeuille, ctx, start_date)))
     return {'job_id': job.id, 'label': label, 'already_running': reused}
 
 
 @router.get('/api/airs/accounts/{portefeuille}/weekly-returns/all')
 async def airs_weekly_returns_all(portefeuille: str):
-    from routers._airs_instrument_returns import bundle
-    return await asyncio.to_thread(bundle, portefeuille)
+    from services.weekly_returns import read
+    return await asyncio.to_thread(read, portefeuille)
 
 
 @router.post('/api/airs/accounts/{portefeuille}/weight-search')

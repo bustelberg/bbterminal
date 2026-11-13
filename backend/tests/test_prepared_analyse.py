@@ -117,6 +117,7 @@ def test_batch_is_bounded_and_next_batch_skips_current_rows(store, monkeypatch):
     assert first['holdings'] == 4
     assert first['benchmarks'] == 1
     assert first['batch_exhausted']
+    assert first['pending_keys'] == [P.holdings_key(3, 'ACWI', False), P.holdings_key(3, 'ACWI', True)]
     assert calls == [1, 1, 2, 2]
     _, bundle = P.read('holdings', P.holdings_key(1, 'ACWI', False))
     assert bundle['book_holdings'] == []
@@ -253,3 +254,27 @@ def test_process_code_is_frozen_but_live_config_changes_invalidate(monkeypatch, 
     assert P.code_version() == before
     config.write_text('{"changed_config":true}')
     assert P.code_version() != before
+
+
+def test_full_roster_preparation_is_not_capped_by_account_count(store, monkeypatch):
+    from routers import _airs_portfolio_analysis as A, _active_share as S
+    monkeypatch.setattr(A, 'compute_portfolio_analysis', lambda pid, *a: {'portfolio_id': pid, 'book_holdings': []})
+    monkeypatch.setattr(S, '_load_benchmark_weights', lambda *a: {})
+    progress = []
+    result = P.prepare(portfolio_ids=[1, 2, 3], max_portfolios=None, max_seconds=900,
+                       on_step=lambda *args: progress.append(args))
+    assert result['holdings'] == 6
+    assert result['pending_keys'] == []
+    assert not result.get('batch_exhausted')
+    assert progress[-1] == (7, 7, 'Prepared Analyse views complete')
+
+
+def test_capped_preparation_reports_its_unfinished_keys_in_progress(store, monkeypatch):
+    from routers import _airs_portfolio_analysis as A, _active_share as S
+    monkeypatch.setattr(A, 'compute_portfolio_analysis', lambda pid, *a: {'portfolio_id': pid, 'book_holdings': []})
+    monkeypatch.setattr(S, '_load_benchmark_weights', lambda *a: {})
+    progress = []
+    result = P.prepare(portfolio_ids=[1, 2, 3], max_portfolios=1, on_step=lambda *args: progress.append(args))
+    assert len(result['pending_keys']) == 4
+    assert progress[-1][0:2] == (3, 7)
+    assert 'incomplete' in progress[-1][2]

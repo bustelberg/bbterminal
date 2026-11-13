@@ -220,6 +220,15 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "indicators refresh on their own staleness schedule. The regional quota reserve still applies.",
     ),
     JobSpec(
+        id='airs_weekly_returns', label='Weekly AIRS instrument returns',
+        fills='Saved weekly observations and one published returns bundle per portfolio',
+        cadence='Every Sunday, 04:00 Amsterdam',
+        trigger={'day_of_week': 'sun', 'hour': 4, 'minute': 0, 'timezone': 'Europe/Amsterdam'},
+        options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
+        max_age_hours=24 * 8,
+        note='Resumes shared weekly AIRS history from February 2025. Keeps committed observations and atomically publishes portfolio bundles. Daily AIRS preparation republishes saved data.',
+    ),
+    JobSpec(
         id='acwi_weekly_coverage',
         label='Weekly ACWI coverage and saved charts',
         fills='Dated iShares ACWI holdings, mapped membership, company coverage and chart snapshots',

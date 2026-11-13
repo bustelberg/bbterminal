@@ -371,6 +371,7 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
         for i in range(0, len(isins), IN_CHUNK_SIZE):
             rows += (supabase.table("asset_grid").select(_GRID_COLS)
                      .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
+    _fill_annotation_company_ids(rows)
     # A management sector is an overlay, never a rewrite of vendor metadata.  Keeping the source
     # value alongside it makes the UI able to offer "Automatic" honestly, and applying it here
     # means every analysis consumer (table, composition bars and attribution) shares one answer.
@@ -421,6 +422,34 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
                 r["sector_overridden"] = False
             out[r["isin"]] = r
     return out
+
+
+def _fill_annotation_company_ids(rows):
+    """Bridge an ADR to its existing company for notes and sector overrides only.
+
+    The asset grid may correctly price TSM's USD ADR without joining the company's
+    Taiwan ISIN. Do not change its analysis_id, symbol, currency or price history.
+    Only exact company ISINs and explicitly configured canonical aliases qualify.
+    """
+    missing = {row['isin'] for row in rows if row.get('isin') and row.get('company_id') is None}
+    if not missing:
+        return
+    from services.company_notes_identity import load
+    try:
+        links, _ = load([row for row in rows if row.get('company_id') is None], supabase)
+        for row in rows:
+            if row.get('company_id') is not None or row.get('isin') not in missing:
+                continue
+            link = links[row['isin']]
+            if link.get('company_id') is not None:
+                row['company_id'] = link['company_id']
+            else:
+                row['company_link_reason'] = link['reason']
+    except Exception as exc:
+        _log.warning('[analysis] company identity for notes unavailable: %s', exc)
+        for row in rows:
+            if row.get('company_id') is None:
+                row['company_link_reason'] = 'The company link could not be checked. Refresh Analyse after database recovery.'
 
 
 def _foreign_listing(row: dict) -> bool:
@@ -735,11 +764,11 @@ def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]], labels: list
     return out
 
 
-def _benchmark_sector_holdings(items, labels, total: float) -> dict[str, list[dict]]:
+def _benchmark_sector_holdings(items, labels, total: float, *, axis: str = 'sector') -> dict[str, list[dict]]:
     holdings: dict[str, list[dict]] = defaultdict(list)
     if total > 0:
         for (weight, buckets), label in zip(items, labels):
-            holdings[buckets[0]].append({**label, "weight_pct": weight / total * 100.0})
+            holdings[buckets[{'sector': 0, 'region': 1, 'currency': 2}[axis]]].append({**label, "weight_pct": weight / total * 100.0})
     return holdings
 
 
@@ -758,7 +787,7 @@ def _acwi_sector_snapshot(labels, items, codes):
     resolved_by_issuer = {membership_key(r.get("name"), as_of): r for r in resolved}
     grid = _grid(sorted({r["isin"] for r in resolved if r.get("isin")}))
     classified = {
-        membership_key(label.get("name"), as_of): (label.get("isin"), buckets[0])
+        membership_key(label.get("name"), as_of): (label.get("isin"), buckets[0], buckets[1])
         for label, (_, buckets) in zip(labels, items) if label.get("name")
     }
     holdings = defaultdict(list)
@@ -770,16 +799,38 @@ def _acwi_sector_snapshot(labels, items, codes):
             continue
         issuer = membership_key(name, as_of)
         match = resolved_by_issuer.get(issuer, {})
-        isin, sector = classified.get(issuer, (None, UNKNOWN_BUCKET))
+        isin, sector, region = classified.get(issuer, (None, UNKNOWN_BUCKET, UNKNOWN_BUCKET))
         if resolved_isin := match.get("isin"):
             isin = resolved_isin
-            sector = _buckets(grid.get(isin), is_cash=False, isin=isin, codes=codes)[0]
+            sector, region, _ = _buckets(grid.get(isin), is_cash=False, isin=isin, codes=codes)
+        # A source constituent remains in its region even when the local listing
+        # or price mapping is absent. iShares' Location is the issuer country.
+        region = msci_region_of(member.get('Location')) or region
         display_name = (grid.get(isin) or {}).get("name") or match.get("display_name") or name
         if display_name.isupper() and " " in display_name:
             display_name = " ".join(word if len(word) <= 2 else word.title() for word in display_name.split())
         holdings[sector].append({"name": display_name, "isin": isin, "weight_pct": weight,
-                                 "_snapshot_issuer": issuer})
+                                 "_snapshot_issuer": issuer, '_snapshot_region': region, '_snapshot_currency': member.get('Currency') or member.get('Market Currency') or UNKNOWN_BUCKET})
     return (as_of, holdings) if holdings else (None, {})
+
+
+def _acwi_currencies_from_snapshot(sectors):
+    from asset_pipeline.fx import SUBUNIT
+    currencies = defaultdict(list)
+    for members in sectors.values():
+        for member in members:
+            currency = member.get('_snapshot_currency') or UNKNOWN_BUCKET
+            currency = SUBUNIT.get(currency, (currency, 1))[0]
+            currencies[currency].append(dict(member))
+    return currencies
+
+
+def _acwi_regions_from_snapshot(sectors):
+    regions = defaultdict(list)
+    for members in sectors.values():
+        for member in members:
+            regions[member.get('_snapshot_region') or UNKNOWN_BUCKET].append(dict(member))
+    return regions
 
 
 def _mark_acwi_sector_overlap(portfolio, benchmark, as_of):
@@ -799,6 +850,7 @@ def _mark_acwi_sector_overlap(portfolio, benchmark, as_of):
         for row in rows:
             isin = (row.get("isin") or "").strip().upper()
             row["in_both"] = isin in isins or key(row) in issuers
+            row["issuer_key"] = key(row) or None
 
 
 def _book_fetched_at(portefeuille: str | None) -> str | None:
@@ -2117,6 +2169,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "sector": sec,
             "region": region,
             "company_id": grow.get("company_id") if grow else None,
+            "company_link_reason": (grow.get("company_link_reason") or "No verified company link is available for this stock.") if grow and grow.get("company_id") is None else (None if grow else "No asset/company identity is available for this holding."),
             "sector_default": _sector(grow.get("sector_default")) if grow else None,
             "sector_overridden": bool(grow and grow.get("sector_overridden")),
             "currency": cur,
@@ -2921,14 +2974,25 @@ def compute_portfolio_analysis(portfolio_id: int,
     # history scan removes thousands of price rows from the modal's critical path.
     bw = _weigh(bench_items)
     benchmark_sectors = _benchmark_sector_holdings(bench_items, bench_labels, bench_total)
+    benchmark_regions = _benchmark_sector_holdings(bench_items, bench_labels, bench_total, axis='region')
+    benchmark_currencies = _benchmark_sector_holdings(bench_items, bench_labels, bench_total, axis='currency')
+    _mark_acwi_sector_overlap(dd_general['currency'], benchmark_currencies, None)
+    _mark_acwi_sector_overlap(dd_general['region'], benchmark_regions, None)
     benchmark_sector_as_of = None
     if include_axes and benchmark_label.upper() == "ACWI":
         benchmark_sector_as_of, snapshot_sectors = _acwi_sector_snapshot(bench_labels, bench_items, codes)
         if benchmark_sector_as_of:
             benchmark_sectors = snapshot_sectors
+            benchmark_regions = _acwi_regions_from_snapshot(snapshot_sectors)
+            benchmark_currencies = _acwi_currencies_from_snapshot(snapshot_sectors)
+            bw['currency'] = {currency: sum(h['weight_pct'] for h in holdings) for currency, holdings in benchmark_currencies.items()}
             _mark_acwi_sector_overlap(dd_sector["sector"], benchmark_sectors, benchmark_sector_as_of)
+            _mark_acwi_sector_overlap(dd_general['region'], benchmark_regions, benchmark_sector_as_of)
+            _mark_acwi_sector_overlap(dd_general['currency'], benchmark_currencies, benchmark_sector_as_of)
             bw["sector"] = {sector: sum(h["weight_pct"] for h in holdings)
                             for sector, holdings in benchmark_sectors.items()}
+            bw['region'] = {region: sum(h['weight_pct'] for h in holdings)
+                            for region, holdings in benchmark_regions.items()}
     _phase("axes")
 
     profile = _variant_bands(p.get("name"), p.get("omschrijving"))
@@ -2941,6 +3005,10 @@ def compute_portfolio_analysis(portfolio_id: int,
                      for holding in holdings]
             for sector, holdings in benchmark_sectors.items()
         }
+        benchmark_regions = {region: [{**holding, 'weight_pct': holding['weight_pct'] * equity_share}
+                                     for holding in holdings] for region, holdings in benchmark_regions.items()}
+
+        benchmark_currencies = {currency: [{**holding, 'weight_pct': holding['weight_pct'] * equity_share} for holding in holdings] for currency, holdings in benchmark_currencies.items()}
 
     #  The class return is re-derived from the enriched rows, and `_book_port_items`' OWN
     # `bucket_returns` IS DELIBERATELY DISCARDED. That one is `(Σ current + income) ÷ Σ start`,
@@ -2961,6 +3029,12 @@ def compute_portfolio_analysis(portfolio_id: int,
     enriched_holdings = ([] if charts_only else
                          _with_results(book["holdings_detail"] if book else [], realised_block,
                                        benchmark_label))
+    if benchmark_sector_as_of and enriched_holdings:
+        # The current-weight chart can include certificate constituents absent from
+        # the direct-only base axes. Carry the same snapshot membership onto them.
+        _mark_acwi_sector_overlap({"Equity": [h for h in enriched_holdings
+            if h.get("bucket") == "Equity" and not h.get("is_fund")]},
+            benchmark_sectors, benchmark_sector_as_of)
     #  The sold rows get the same three instrument columns as the held ones. They had blanks
     # because a closed-out position carries no ISIN — not because the figures are meaningless for
     # it. See `_sold_position_isins` for how the identity is recovered and what happens when it
@@ -3042,11 +3116,13 @@ def compute_portfolio_analysis(portfolio_id: int,
             # is a finding rather than missing data.
             "holdings": dd_axis.get(k, []),
             **({"benchmark_holdings": benchmark_sectors.get(k, [])} if axis == "sector" else {}),
+            **({'benchmark_holdings': benchmark_regions.get(k, [])} if axis == 'region' else {}),
+            **({'benchmark_holdings': benchmark_currencies.get(k, [])} if axis == 'currency' else {}),
         } for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
         axes.append({
             "axis": axis,
-            "benchmark_snapshot_as_of": benchmark_sector_as_of if axis == "sector" else None,
+            "benchmark_snapshot_as_of": benchmark_sector_as_of if axis in ('sector', 'region', 'currency') else None,
             "rows": rows,
             "basis": note,
             "positions": positions,
@@ -4493,14 +4569,25 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
     pw, bw = _weigh(port_items), _weigh(bench_items)
     dd = _axis_holdings(port_items, port_labels)
     benchmark_sectors = _benchmark_sector_holdings(bench_items, bench_labels, bench_total)
+    benchmark_regions = _benchmark_sector_holdings(bench_items, bench_labels, bench_total, axis='region')
+    benchmark_currencies = _benchmark_sector_holdings(bench_items, bench_labels, bench_total, axis='currency')
+    _mark_acwi_sector_overlap(dd['currency'], benchmark_currencies, None)
+    _mark_acwi_sector_overlap(dd['region'], benchmark_regions, None)
     benchmark_sector_as_of = None
     if benchmark_label.upper() == "ACWI":
         benchmark_sector_as_of, snapshot_sectors = _acwi_sector_snapshot(bench_labels, bench_items, codes)
         if benchmark_sector_as_of:
             benchmark_sectors = snapshot_sectors
+            benchmark_regions = _acwi_regions_from_snapshot(snapshot_sectors)
+            benchmark_currencies = _acwi_currencies_from_snapshot(snapshot_sectors)
+            bw['currency'] = {currency: sum(h['weight_pct'] for h in holdings) for currency, holdings in benchmark_currencies.items()}
             _mark_acwi_sector_overlap(dd["sector"], benchmark_sectors, benchmark_sector_as_of)
+            _mark_acwi_sector_overlap(dd['region'], benchmark_regions, benchmark_sector_as_of)
+            _mark_acwi_sector_overlap(dd['currency'], benchmark_currencies, benchmark_sector_as_of)
             bw["sector"] = {sector: sum(h["weight_pct"] for h in holdings)
                             for sector, holdings in benchmark_sectors.items()}
+            bw['region'] = {region: sum(h['weight_pct'] for h in holdings)
+                            for region, holdings in benchmark_regions.items()}
     axes = []
     for axis in ("sector", "region", "currency"):
         keys = set(pw[axis]) | set(bw[axis])
@@ -4508,12 +4595,14 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
                  "benchmark_pct": bw[axis].get(k, 0.0),
                  "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0),
                  "holdings": dd[axis].get(k, []),
-                 **({"benchmark_holdings": benchmark_sectors.get(k, [])} if axis == "sector" else {})} for k in keys]
+                 **({"benchmark_holdings": benchmark_sectors.get(k, [])} if axis == "sector" else {}),
+                 **({'benchmark_holdings': benchmark_regions.get(k, [])} if axis == 'region' else {}),
+            **({'benchmark_holdings': benchmark_currencies.get(k, [])} if axis == 'currency' else {})} for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
         #  One denominator on all three axes here, unlike a model portfolio: a basket has no
         # asset-class sleeve to divide by, so every leg is in every axis's total.
         axes.append({"axis": axis, "rows": rows,
-                     "benchmark_snapshot_as_of": benchmark_sector_as_of if axis == "sector" else None,
+                     "benchmark_snapshot_as_of": benchmark_sector_as_of if axis in ('sector', 'region', 'currency') else None,
                      "basis": "Share of the whole basket, by each holding's stated weight.",
                      "positions": len(port_items)})
 

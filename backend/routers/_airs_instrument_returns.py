@@ -336,7 +336,7 @@ def collect(account, instrument_id, ctx, full_history=False, earliest_date=None)
     return f"{instrument['name']}: {saved} missing observations checked."
 
 
-def collect_all(account, ctx, earliest_date):
+def collect_all(account, ctx, earliest_date, *, stop_on_flat=True):
     """Download each full report once and commit all instrument observations together."""
     from airs_scanner import AirsNoData, download_vermogensoverzicht_sync
     from airs_vermogen import _LOCK, _acquire_session
@@ -427,7 +427,7 @@ def collect_all(account, ctx, earliest_date):
                     previous = newer.get(instrument_id)
                     zeros[instrument_id] = zeros.get(instrument_id, 0) + 1 if price and previous and abs(previous / price - 1) <= 1e-12 else 0
                     newer[instrument_id] = price
-                    if zeros[instrument_id] >= 2:
+                    if stop_on_flat and zeros[instrument_id] >= 2:
                         active.discard(instrument_id)
                 target -= timedelta(weeks=1)
             opening = date(through.year, 1, 1) - timedelta(days=1)

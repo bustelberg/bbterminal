@@ -111,12 +111,12 @@ def risk_request(monkeypatch):
 
 
 def test_cold_http_request_returns_prepared_views_and_weekly_data(monkeypatch, risk_request):
-    from routers import _airs_instrument_returns
+    from services import weekly_returns as _airs_instrument_returns
     monkeypatch.setattr(B, 'read', lambda *_: None)
     prepare = Mock(return_value={'volatility': {'available': True}})
     monkeypatch.setattr(B, 'prepare', prepare)
     weekly = {'options': [{'id': 'A'}], 'instruments': {'A': {'periods': []}}}
-    monkeypatch.setattr(_airs_instrument_returns, 'bundle', lambda account: weekly if account == 'BOOK' else None)
+    monkeypatch.setattr(_airs_instrument_returns, 'read', lambda account: weekly if account == 'BOOK' else None)
     response = risk_request(account='BOOK')
     assert response == {'ready': True, 'views': {'volatility': {'available': True}, 'weekly-returns': weekly}}
     prepare.assert_called_once_with([], None)
@@ -141,10 +141,10 @@ def test_read_only_poll_does_not_prepare(monkeypatch, risk_request):
 def test_updating_risk_keeps_saved_weekly_history_available(monkeypatch, risk_request):
     import json
     from jobs import UserFacingJobError
-    from routers import _airs_instrument_returns
+    from services import weekly_returns as _airs_instrument_returns
     monkeypatch.setattr(B, 'read_or_prepare', Mock(side_effect=UserFacingJobError('Risk data is still updating.')))
     weekly = {'options': [{'id': 'A'}], 'instruments': {}}
-    monkeypatch.setattr(_airs_instrument_returns, 'bundle', lambda account: weekly)
+    monkeypatch.setattr(_airs_instrument_returns, 'read', lambda account: weekly)
     response = risk_request(account='BOOK')
     assert response.status_code == 202
     assert response.headers['retry-after'] == '10'
@@ -160,3 +160,16 @@ def test_waiting_for_quiet_sources_remains_cancellable(store):
     ctx = SimpleNamespace(progress=Mock(), check=Mock(side_effect=JobCancelled('stopped')))
     with pytest.raises(JobCancelled):
         B._settle(ctx)
+
+
+def test_missing_weekly_storage_does_not_block_other_risk_views(monkeypatch, risk_request):
+    from fastapi import HTTPException
+    from services import weekly_returns
+    monkeypatch.setattr(B, 'read_or_prepare', lambda *a: {'views': {'volatility': {'available': True}}})
+    def unavailable(account):
+        raise HTTPException(503, 'Apply weekly returns migration')
+    monkeypatch.setattr(weekly_returns, 'read', unavailable)
+    result = risk_request(account='BOOK')
+    assert result['views']['volatility']['available']
+    assert result['views']['weekly-returns']['ready'] is False
+    assert result['views']['weekly-returns']['detail'] == 'Apply weekly returns migration'

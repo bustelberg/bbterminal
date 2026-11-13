@@ -131,3 +131,27 @@ category counts; holding evidence stays on the admin-only result route.
 Use the instrument's single **Recheck** button after repair. In the default unique
 view it refreshes every represented portfolio and source. An old receipt containing
 only totals cannot establish the individual causes; retain the new dated result.
+
+
+## Returns tab: weekly instrument bundles
+
+Apply `supabase/migrations/20261113170000_weekly_returns_bundles.sql` before deploying the bundle reader. Run `airs_weekly_returns` once from the admin Schedule page to seed existing dashboard accounts. Its normal timer is Sunday at 04:00 Europe/Amsterdam. It resumes shared AIRS weekly history from 1 February 2025, using the existing AIRS session and daily refresh locks. Collection commits observations between weeks; cancellation releases the session and keeps committed observations.
+
+Daily `dashboard_post_airs` republishes each portfolio's complete saved-data bundle in `airs_weekly_returns_bundle` without scraping historical reports. The weekly collector populates missing history and then republishes the bundle. A single atomic upsert replaces each account's publication. A failed build retains the previous publication; inspect the scheduled job's per-account errors before retrying. Published series preserve unavailable prices as gaps.
+
+`GET /api/airs/accounts/{portefeuille}/weekly-returns/all` reads one saved portfolio bundle. The Risk bundle can include the same saved payload, so the Returns tab reuses it without another request. Both instrument selectors use the bundled `instruments` dictionary. Opening the tab and switching instruments do not scrape AIRS or calculate series. If there is no prepared bundle, the response explicitly says preparation is needed. Missing bundle storage does not block other Risk views. A manual history job republishes saved observations and the browser reloads one complete bundle after completion.
+
+
+## Notes missing for an ADR or alternate ISIN
+
+Notes resolve existing company records through exact ISINs, verified canonical alias chains, and the reviewed issuer links in `backend/services/company_notes_identity.py`. Exchange/ticker links also require the expected issuer name. These links apply to annotations and sector overrides only; they do not select another price series or change the holding's currency. Missing or ambiguous company records are never created or merged automatically.
+
+The Notes editor uses `/api/companies/by-isin/{isin}/investment-note`. A stock without a vendor company record can still store private ISIN-based notes after applying `supabase/migrations/20261113180000_instrument_investment_notes.sql`. Existing company notes remain readable; verified ADR aliases share the company note. When a company record is linked later, the newest saved user note remains available and subsequent saves use the company record. Every read and write is scoped to the signed-in user.
+
+For a read-only coverage audit across current account holdings and saved model compositions, run from `backend/`:
+
+```powershell
+uv run python scripts/audit_portfolio_notes.py --db-env-file ../scripts/.env.local --output ../notes-coverage-audit.json
+```
+
+The supplied file must contain `PROD_DB_URL`, `SUPABASE_DB_URL`, or `DATABASE_URL`. The audit enforces a read-only transaction and never reads private note contents. A failed connection is an incomplete audit, not evidence that there are no missing links. The 13 November 2026 audit found 215 distinct stocks: 193 existing company links, nine reviewed links, and 13 stocks requiring ISIN-based note storage; no remaining blocked identified stocks. A separate Brown & Brown model row has no ISIN and needs correction in AIRS. The report excludes fund/certificate wrappers and bonds.

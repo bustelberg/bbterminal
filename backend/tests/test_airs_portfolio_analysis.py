@@ -436,6 +436,19 @@ class TestOneCompanyOneRow:
 
 
 class TestTheAxesAreComparable:
+    def test_region_drilldown_members_and_weights_match_the_region_bars(self):
+        items = [(75, ('Technology', 'North America', 'USD')),
+                 (25, ('Industrials', 'Europe', 'EUR'))]
+        labels = [{'name': 'NVIDIA Corporation', 'isin': 'NVDA'}, {'name': 'European company', 'isin': 'EU'}]
+        grouped = pa._benchmark_sector_holdings(items, labels, 100, axis='region')
+        weights = pa._weigh(items)['region']
+        assert {region: sum(row['weight_pct'] for row in rows) for region, rows in grouped.items()} == weights
+        portfolio = {'North America': [{'name': 'Nvidia', 'isin': 'NVDA'}]}
+        pa._mark_acwi_sector_overlap(portfolio, grouped, None)
+        assert grouped['North America'][0]['in_both'] is True
+        assert grouped['North America'][0]['issuer_key'] == 'nvidia'
+        assert portfolio['North America'][0]['in_both'] is True
+
     def test_each_axis_is_normalised_to_100(self):
         items = [(50.0, ("Tech", "NA", "USD")), (25.0, ("Tech", "EU", "EUR")),
                  (25.0, ("Health", "NA", "USD"))]
@@ -1130,3 +1143,79 @@ def test_acwi_overlap_uses_snapshot_issuer_even_without_matching_isin():
     _mark_acwi_sector_overlap(portfolio, benchmark, "2026-11-02")
     assert [row["in_both"] for row in portfolio["Technology"]] == [True, True, False]
     assert benchmark["Unclassified"][0]["in_both"] is True
+    assert portfolio['Technology'][0]['issuer_key'] == benchmark['Technology'][0]['issuer_key'] == 'nvidia'
+    assert portfolio['Technology'][1]['issuer_key'] == benchmark['Unclassified'][0]['issuer_key'] == 'microsoft'
+    from routers.airs import BookHoldingDetail, CompositionHolding
+    assert CompositionHolding.model_validate(benchmark['Technology'][0]).model_dump()['issuer_key'] == 'nvidia'
+    detail = BookHoldingDetail.model_validate({**portfolio['Technology'][0], 'bucket': 'Equity'}).model_dump()
+    assert detail['in_both'] is True
+    assert detail['issuer_key'] == 'nvidia'
+
+
+def test_constellation_region_membership_comes_from_the_complete_file_without_local_prices(monkeypatch):
+    from index_universe.acwi import holdings, asset_membership
+    source, stamp = holdings.load_acwi_holdings()
+    constellation = [row for row in source if 'CONSTELLATION SOFTWARE' in row.get('Name', '').upper()]
+    assert constellation, 'fixture must contain the reported ACWI constituent'
+    monkeypatch.setattr(holdings, 'load_latest_acwi_holdings', lambda: (constellation, stamp))
+    monkeypatch.setattr(asset_membership, 'resolve', lambda _: ([], {}))
+    monkeypatch.setattr(pa, '_grid', lambda _: {})
+    monkeypatch.setattr(pa, '_leg', lambda _key, load: load())
+    as_of, sectors = pa._acwi_sector_snapshot([], [], {})
+    regions = pa._acwi_regions_from_snapshot(sectors)
+    assert 'North America' in regions
+    assert {row['_snapshot_issuer'] for row in regions['North America']} == {'constellation software'}
+    member = regions['North America'][0]
+    assert member['isin'] is None
+    assert member['_snapshot_issuer'] == 'constellation software'
+    portfolio = {'North America': [{'name': 'Constellation Software', 'isin': 'CA21037X1006',
+                                    'via_names': ['StarTopSelectie']}]}
+    pa._mark_acwi_sector_overlap(portfolio, regions, as_of)
+    assert portfolio['North America'][0]['in_both'] is True
+    assert member['in_both'] is True
+    assert sum(row['weight_pct'] for members in regions.values() for row in members) == pytest.approx(
+        sum(row['weight_pct'] for members in sectors.values() for row in members))
+
+
+def test_acwi_currency_members_preserve_source_members_without_prices():
+    from routers._airs_portfolio_analysis import _acwi_currencies_from_snapshot
+    snapshot = {'Technology': [
+        {'name': 'US company', 'weight_pct': 3, '_snapshot_currency': 'USD'},
+        {'name': 'UK company', 'weight_pct': 2, '_snapshot_currency': 'GBp'},
+        {'name': 'Unknown company', 'weight_pct': 1},
+    ]}
+    result = _acwi_currencies_from_snapshot(snapshot)
+    assert result['USD'][0]['name'] == 'US company'
+    assert result['GBP'][0]['weight_pct'] == 2
+    assert sum(row['weight_pct'] for rows in result.values() for row in rows) == 6
+    assert len(result) == 3
+
+
+@pytest.mark.parametrize('alias_available', [False, True])
+def test_tsmc_adr_notes_use_canonical_company_without_changing_prices(monkeypatch, alias_available):
+    from tests._fake_supabase import FakeSupabase
+    db = FakeSupabase({'company': [{'company_id': 42, 'isin': 'TW0002330008', 'out_of_scope_at': None}],
+                       'asset_isin_alias': [{'isin': 'US8740391003', 'canonical_isin': 'TW0002330008'}] if alias_available else []})
+    monkeypatch.setattr(pa, 'supabase', db)
+    row = {'isin': 'US8740391003', 'company_id': None, 'name': 'Taiwan Semiconductor ADR',
+           'analysis_id': 8542, 'yahoo_symbol': 'TSM', 'currency': 'USD'}
+    original = dict(row)
+    pa._fill_annotation_company_ids([row])
+    assert row == {**original, 'company_id': 42}
+    assert not db.writes
+
+
+def test_annotation_identity_requires_a_unique_active_company_and_preserves_existing_links(monkeypatch):
+    from tests._fake_supabase import FakeSupabase
+    db = FakeSupabase({'company': [
+        {'company_id': 42, 'isin': 'TW0002330008', 'out_of_scope_at': '2020-01-01'},
+        {'company_id': 1, 'isin': 'AMBIGUOUS'}, {'company_id': 2, 'isin': 'AMBIGUOUS'},
+        {'company_id': 3, 'isin': 'EXACT'},
+    ]})
+    monkeypatch.setattr(pa, 'supabase', db)
+    rows = [{'isin': 'US8740391003'}, {'isin': 'AMBIGUOUS'}, {'isin': 'EXACT'}, {'isin': 'EXACT', 'company_id': 99}]
+    pa._fill_annotation_company_ids(rows)
+    assert rows[0]['company_link_reason'].startswith('No active company record')
+    assert rows[1]['company_link_reason'].startswith('Multiple active company records')
+    assert rows[2] == {'isin': 'EXACT', 'company_id': 3}
+    assert rows[3] == {'isin': 'EXACT', 'company_id': 99}

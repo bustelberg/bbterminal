@@ -1,7 +1,17 @@
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 
 type Axis = NonNullable<ModelPortfolioAnalysis['axes']>[number];
-export type SectorChartRow = Axis['rows'][number];
+// Evidence added while constructing the client-side look-through rows.
+export type ClassificationEvidence = {
+  reason: string; providerLabel?: string; source?: string; sourceUrl?: string;
+  fundWeightPct?: number; portfolioWeightPct: number;
+};
+type CompositionHolding = NonNullable<Axis['rows'][number]['holdings']>[number] & {
+  classification_evidence?: ClassificationEvidence;
+};
+export type SectorChartRow = Omit<Axis['rows'][number], 'holdings' | 'benchmark_holdings'> & {
+  holdings?: CompositionHolding[]; benchmark_holdings?: CompositionHolding[];
+};
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 type EtfSector = EtfSectorAllocationResponse['sectors'][number];
 

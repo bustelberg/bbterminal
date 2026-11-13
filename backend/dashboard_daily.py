@@ -219,6 +219,7 @@ def prepare_month(account: str, today=None, *, month: str | None = None, complet
             # scan_one persists an explicitly empty export for AIRS's no-data answer.
             "readable": not sheet.rows or not realised_results(sheet).unreadable,
             "unclassified_names": sorted({str(r[COL_FONDS]) for r in uncertain if r.get(COL_FONDS)}),
+            "unclassified_activity": uncertain,
             "unclassified_unassigned": any(not r.get(COL_FONDS) for r in uncertain),
         }}
     else:
@@ -312,8 +313,8 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
     overview_states = prepared.overview_freshness(sorted(overview_keys), diagnostics=overview_diagnostics)
     models = {r["id"]: r for r in rows("airs_model_portfolio", "id,portfolio_type,positions_scanned_at,positions_error")}
     checks = {r["portefeuille"]: r for r in rows("airs_price_check", "portefeuille,checked_at")}
-    execution = {r["isin"]: r for r in rows("asset_execution", "isin,status,analysis_id,yahoo_symbol,currency")}
-    assets = {r["analysis_id"]: r for r in rows("asset_analysis", "analysis_id,price_to")}
+    execution = {r["isin"]: r for r in rows("asset_execution", "isin,name,status,reason,updated_at,analysis_id,yahoo_symbol,currency")}
+    assets = {r["analysis_id"]: r for r in rows("asset_analysis", "analysis_id,symbol,price_to")}
     fx_dates: dict[str, str] = {}
     from asset_pipeline.fx import SUBUNIT
     from airs_scanner import has_fixed_model
@@ -359,18 +360,51 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
         perf = str(latest_perf[0]["periode"])[:10] if latest_perf else None
         if not perf or perf < expected:
             issues.append(f"return dated {perf}; expected {expected}")
+        seen_isins = set()
+        price_sources = {}
+        from asset_pipeline.price_refresh import _NAV_FALLBACKS
         for holding in (r for r in held if str(r["as_of_date"])[:10] == as_of):
             isin = holding.get("isin")
-            if not isin:
+            if not isin or isin in seen_isins:
                 continue
+            seen_isins.add(isin)
             mapped = execution.get(isin) or {}
-            if not mapped.get("yahoo_symbol") or mapped.get("status") != "ok":
+            asset = assets.get(mapped.get('analysis_id')) or {}
+            fallback = _NAV_FALLBACKS.get(isin)
+            verified_nav = (fallback and asset.get('symbol') == f"{fallback['provider']}:{fallback['issue_id']}"
+                            and mapped.get('status') == 'ok')
+            if (not mapped.get("yahoo_symbol") or mapped.get("status") != "ok") and not verified_nav:
+                from asset_pipeline.isin_util import is_valid_isin
+                identity_issue = '' if is_valid_isin(isin) else '; invalid ISIN format/checksum: verify the identifier in AIRS before resolving a listing'
                 unsupported.append(isin)
-                issues.append(f"{isin}: no verified Yahoo price mapping")
+                nav = ''
+                if fallback:
+                    nav = (f"; approved NAV source {fallback['provider']} issue {fallback['issue_id']}; "
+                           f"expected analysis symbol {fallback['provider']}:{fallback['issue_id']}, "
+                           f"stored {asset.get('symbol') or 'absent'}")
+                issues.append(f"{isin}: no verified Yahoo price mapping; holding={mapped.get('name') or holding.get('holding_name') or 'unknown'}; "
+                              f"execution_status={mapped.get('status') or 'absent'}, "
+                              f"symbol={mapped.get('yahoo_symbol') or 'absent'}, analysis_id={mapped.get('analysis_id')}; "
+                              f"resolution_reason={mapped.get('reason') or 'not recorded'}; "
+                              f"mapping_updated_at={mapped.get('updated_at') or 'not recorded'}{identity_issue}{nav}; "
+                              + ('next: run asset_price_refresh and inspect nav_fallback results for this ISIN' if fallback else
+                                 'next: inspect the asset execution resolution receipt, correct the exact ISIN/listing or add a reviewed price source, then rerun asset_ingest_queue and dashboard_freshness; do not substitute an unverified ticker'))
                 continue
-            close = str((assets.get(mapped.get("analysis_id")) or {}).get("price_to") or "")[:10]
+            close = str(asset.get("price_to") or "")[:10]
             price_dates[isin] = close or None
-            if close < expected:
+            if verified_nav:
+                # Monthly NAVs cannot meet a daily equity-market close. Require the
+                # latest completed month's mark, without claiming it is a daily quote.
+                nav_expected = (latest_completed_market_date(datetime.fromisoformat(expected).date().replace(day=1))
+                                if fallback.get('cadence') == 'monthly' else expected)
+                price_sources[isin] = {'provider': fallback['provider'], 'issue_id': fallback['issue_id'],
+                    'cadence': fallback.get('cadence', 'daily'), 'expected_date': nav_expected,
+                    'price_date': close or None}
+                if close < nav_expected:
+                    issues.append(f"{isin}: {fallback['provider']} NAV dated {close or 'absent'}; expected {nav_expected} "
+                                  f"({fallback.get('cadence', 'daily')}); issue {fallback['issue_id']}; "
+                                  'next: retry asset_price_refresh and inspect nav_fallback failures; saved data remains available')
+            elif close < expected:
                 issues.append(_price_freshness_issue(isin, mapped, close, expected,
                                                     sources.get('asset_price_refresh') or {}, day))
             currency = mapped.get("currency")
@@ -408,7 +442,7 @@ def freshness(today=None, *, dashboard_only: bool = False) -> dict:
         if unavailable:
             issues.append(f"{unavailable} monthly position returns unavailable")
         accounts.append({"portefeuille": name, "holdings_as_of": as_of, "return_as_of": perf,
-                         "price_dates": price_dates, "unmapped_isins": sorted(set(unsupported)),
+                         "price_dates": price_dates, "price_sources": price_sources, "unmapped_isins": sorted(set(unsupported)),
                          "monthly_reconciliation": (month_payload.get("reconciliation") or {}).get("status"),
                          "status": "incomplete" if issues or unsupported else "ok", "issues": issues})
     incomplete = sum(r["status"] != "ok" for r in accounts)

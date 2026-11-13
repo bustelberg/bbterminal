@@ -1268,6 +1268,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/etf/{isin}/currency-allocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Etf Currency Allocation */
+        get: operations["etf_currency_allocation_api_airs_etf__isin__currency_allocation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/etf/{isin}/region-allocation": {
         parameters: {
             query?: never;
@@ -4669,6 +4686,24 @@ export interface paths {
         put?: never;
         /** Create Company */
         post: operations["create_company_api_companies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/by-isin/{isin}/investment-note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Stock Investment Note */
+        get: operations["get_stock_investment_note_api_companies_by_isin__isin__investment_note_get"];
+        /** Set Stock Investment Note */
+        put: operations["set_stock_investment_note_api_companies_by_isin__isin__investment_note_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11391,6 +11426,8 @@ export interface components {
             capital_unknown?: boolean;
             /** Company Id */
             company_id?: number | null;
+            /** Company Link Reason */
+            company_link_reason?: string | null;
             /** Contribution Pct */
             contribution_pct?: number | null;
             /** Currency */
@@ -11401,12 +11438,19 @@ export interface components {
             fund_result_eur?: number | null;
             /** Fx Result Eur */
             fx_result_eur?: number | null;
+            /**
+             * In Both
+             * @default false
+             */
+            in_both?: boolean;
             /** Income Eur */
             income_eur?: number | null;
             /** Is Fund */
             is_fund?: boolean | null;
             /** Isin */
             isin?: string | null;
+            /** Issuer Key */
+            issuer_key?: string | null;
             /** Mom 12 1 From */
             mom_12_1_from?: number | null;
             /** Mom 12 1 Pct */
@@ -11755,6 +11799,8 @@ export interface components {
             in_both?: boolean;
             /** Isin */
             isin?: string | null;
+            /** Issuer Key */
+            issuer_key?: string | null;
             /** Name */
             name?: string | null;
             /**
@@ -12344,6 +12390,27 @@ export interface components {
             /** Total Return Pct */
             total_return_pct: number;
         };
+        /** EtfCurrencyAllocationResponse */
+        EtfCurrencyAllocationResponse: {
+            /** As Of */
+            as_of?: string | null;
+            /**
+             * Basis
+             * @default holdings
+             * @enum {string}
+             */
+            basis?: "holdings" | "published_currency_allocation";
+            /** Holdings */
+            holdings: components["schemas"]["FundCurrencyHolding"][];
+            /** Isin */
+            isin: string;
+            /** Name */
+            name: string;
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+        };
         /**
          * EtfOverlayHolding
          * @description One diversifier ETF held alongside the momentum sleeve in a blended
@@ -12638,6 +12705,19 @@ export interface components {
         ForcePriceChecksRequest: {
             /** Accounts */
             accounts: string[];
+        };
+        /** FundCurrencyHolding */
+        FundCurrencyHolding: {
+            /** Currency */
+            currency: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason?: string | null;
+            /** Symbol */
+            symbol?: string | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /**
          * FundamentalCoverageRequest
@@ -18236,6 +18316,37 @@ export interface operations {
             };
         };
     };
+    etf_currency_allocation_api_airs_etf__isin__currency_allocation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfCurrencyAllocationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     etf_region_allocation_api_airs_etf__isin__region_allocation_get: {
         parameters: {
             query?: never;
@@ -22458,6 +22569,72 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CreateCompanyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_investment_note_api_companies_by_isin__isin__investment_note_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_stock_investment_note_api_companies_by_isin__isin__investment_note_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentNoteRequest"];
             };
         };
         responses: {

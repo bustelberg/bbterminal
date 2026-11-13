@@ -220,6 +220,7 @@ __marimo__/
 
 ## my additions
 
+.tmp/
 .env.local
 .env
 backend/.venv/

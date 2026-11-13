@@ -484,6 +484,20 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
     return resp.data[0]
 
 
+@router.get("/api/companies/by-isin/{isin}/investment-note")
+async def get_stock_investment_note(isin: str, request: Request):
+    from services.investment_notes import read
+    actor = _investment_note_actor(request)
+    return await asyncio.to_thread(read, supabase, isin, actor)
+
+
+@router.put("/api/companies/by-isin/{isin}/investment-note")
+async def set_stock_investment_note(isin: str, req: InvestmentNoteRequest, request: Request):
+    from services.investment_notes import save
+    actor = _investment_note_actor(request)
+    return await asyncio.to_thread(save, supabase, isin, actor, req.thesis, req.pillars)
+
+
 @router.get("/api/companies/{company_id}/investment-note")
 async def get_company_investment_note(company_id: int, request: Request):
     """The signed-in user's private research note for one company."""

@@ -16,6 +16,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _FILES = tuple(sorted({
     *(_ROOT / 'routers').glob('_airs*.py'),
     *(_ROOT / 'index_universe' / 'acwi').glob('*.py'),
+    _ROOT / 'services' / 'company_notes_identity.py',
     _ROOT / 'routers' / '_active_share.py', _ROOT / 'routers' / '_asset_benchmark.py',
     *(_ROOT / 'routers').glob('_portfolio_*.py'),
     _ROOT / 'routers' / '_risk_read.py', _ROOT / 'routers' / '_tracking_error.py',
@@ -171,13 +172,13 @@ def overview(payload: dict) -> dict:
 
 def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
             holdings: bool = True, should_stop=None, on_step=None,
-            max_portfolios: int = 2, max_seconds: float = 20, risk: bool = False) -> dict:
+            max_portfolios: int | None = 2, max_seconds: float = 20, risk: bool = False) -> dict:
     from common.read_cache import read_cache
     from routers import _airs_portfolio_analysis as analysis
     from routers._active_share import _load_benchmark_weights
     from routers._airs_account_links import list_account_links
 
-    result = {'holdings': 0, 'benchmarks': 0, 'already_current': 0, 'changed_during_run': 0, 'errors': {}}
+    result = {'holdings': 0, 'benchmarks': 0, 'already_current': 0, 'changed_during_run': 0, 'changed_keys': [], 'errors': {}}
     if risk:
         result['risk_views'] = 0
     deadline = time.monotonic() + max_seconds
@@ -205,6 +206,7 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
         oldest = {pid: min(published.get(holdings_key(pid, 'ACWI', look), '') for look in (False, True))
                   for pid in portfolio_ids}
         work.sort(key=lambda item: (0, '') if item[2] is None else (1, oldest[item[2]]))
+    attempted_keys = []
     for index, (scope, key, pid, look) in enumerate(work):
         if should_stop and should_stop():
             result['cancelled'] = True
@@ -214,10 +216,12 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
             break
         if on_step:
             on_step(index, len(work), f'Preparing {key}')
+        attempted_keys.append(key)
         try:
             version = source_version(scope)
             if version is None:
                 result['unavailable'] = True
+                attempted_keys.pop()
                 break
             code = code_version()
             current = (supabase.table('analyse_prepared_snapshot').select('cache_key').eq('cache_key', key)
@@ -229,8 +233,9 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                     _, risk_ready = read(scope, f'risk-views:{key}')
                     if risk_ready is not None:
                         continue
-                    if pid not in selected_portfolios and len(selected_portfolios) >= max_portfolios:
+                    if pid not in selected_portfolios and max_portfolios is not None and len(selected_portfolios) >= max_portfolios:
                         result['batch_exhausted'] = True
+                        attempted_keys.pop()
                         break
                     selected_portfolios.add(pid)
                     from routers._risk_read import prepare_views
@@ -239,10 +244,12 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                         result['risk_views'] += prepare_views(saved, look)
                         if not save(scope, f'risk-views:{key}', {'prepared': True}, version, code):
                             result['changed_during_run'] += 1
+                            result['changed_keys'].append({'cache_key': key, 'source_version_at_start': version, 'source_version_now': source_version(scope)})
                 continue
             if pid is not None:
-                if pid not in selected_portfolios and len(selected_portfolios) >= max_portfolios:
+                if pid not in selected_portfolios and max_portfolios is not None and len(selected_portfolios) >= max_portfolios:
                     result['batch_exhausted'] = True
+                    attempted_keys.pop()
                     break
                 selected_portfolios.add(pid)
             if pid is None:
@@ -267,18 +274,22 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                     result['risk_views'] += prepare_views(payload, look)
                     if not save(scope, f'risk-views:{key}', {'prepared': True}, version, code):
                         result['changed_during_run'] += 1
+                        result['changed_keys'].append({'cache_key': key, 'source_version_at_start': version, 'source_version_now': source_version(scope)})
             else:
                 result['changed_during_run'] += 1
+                result['changed_keys'].append({'cache_key': key, 'source_version_at_start': version, 'source_version_now': source_version(scope)})
         except Exception as exc:
             result['errors'][key] = f'{type(exc).__name__}: {exc}'
             log.exception('[prepared-analyse] could not prepare %s', key)
+    result['pending_keys'] = [key for _, key, _, _ in work if key not in attempted_keys]
     if on_step:
-        on_step(len(work), len(work), 'Prepared Analyse views complete')
+        incomplete = result['pending_keys'] or result['errors'] or result['changed_during_run'] or result.get('unavailable')
+        on_step(len(attempted_keys), len(work), 'Prepared Analyse views incomplete; see pending_keys and errors' if incomplete else 'Prepared Analyse views complete')
     return result
 
 
 def run_controlled(*, busy, should_stop=None, on_step=None,
-                   max_portfolios: int = 2, max_seconds: float = 20) -> dict:
+                   max_portfolios: int | None = 2, max_seconds: float = 20) -> dict:
     """One bounded serial batch, with a cross-process lock and source-refresh priority."""
     from common.pg import _db_url
     import psycopg

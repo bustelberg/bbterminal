@@ -1,5 +1,6 @@
 """Exact issuer identities. Listing repairs must not use merger aliases as price identities."""
 import re
+import unicodedata
 
 _SUFFIX = re.compile(
     r'[\s,.]+(inc|inc\.|corp|corporation|co|company|plc|ltd|limited|nv|n\.v\.|sa|s\.a\.|ag|se|ab|'
@@ -26,12 +27,17 @@ _SUCCESSORS = {
 
 
 def issuer_key(name: str | None) -> str:
-    text = re.sub(r'\s+', ' ', (name or '').strip().rstrip('_').strip().lower().replace('&', ' and ').replace('-', ' '))
+    text = re.sub(r'\s+', ' ', unicodedata.normalize('NFC', name or '').strip().rstrip('_').strip().lower().replace('&', ' and ').replace('-', ' '))
     for _ in range(8):
         cleaned = _CLASS.sub('', _SUFFIX.sub('', text)).strip(' ,. ')
         if not cleaned or cleaned == text:
             break
         text = cleaned
+    # Reviewed spelling variants of this one issuer. AIRS exports may use a
+    # backtick and a space; the iShares file uses LOREAL SA. Keep this exact,
+    # rather than stripping punctuation/accents from every company's identity.
+    if re.fullmatch(r"l[\s'`´’‘ʼ]*or[eé]al", text):
+        return 'loreal'
     return _ALIASES.get(text, text)
 
 

@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { useLang } from '../../../lib/i18n';
 import { colorForSector } from '../../../lib/sectorColors';
-import type { EtfSectorAllocationResponse, EtfRegionAllocationResponse } from '../../../lib/types/api';
+import type { EtfSectorAllocationResponse, EtfRegionAllocationResponse, EtfCurrencyAllocationResponse } from '../../../lib/types/api';
 import PanelDialog from './PanelDialog';
 import LoadingDots from './LoadingDots';
 import {
@@ -24,7 +24,10 @@ export default function EtfSectorAllocationModal({
   const [sectorError, setError] = useState<string | null>(null);
   const [regionData, setRegionData] = useState<EtfRegionAllocationResponse | null>(null);
   const [regionError, setRegionError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'sector' | 'region'>('sector');
+  const [currencyData, setCurrencyData] = useState<EtfCurrencyAllocationResponse | null>(null);
+  const [currencyError, setCurrencyError] = useState<string | null>(null);
+  const tabs = ['sector', 'region', 'currency'] as const;
+  const [tab, setTab] = useState<typeof tabs[number]>('sector');
 
   useEffect(() => {
     if (initialData || !isin) return undefined;
@@ -64,12 +67,40 @@ export default function EtfSectorAllocationModal({
     return () => controller.abort();
   }, [tab, isin, regional]);
 
+  const currencies = currencyData?.isin === isin?.trim().toUpperCase() ? currencyData : null;
+  useEffect(() => {
+    if (tab !== 'currency' || !isin || currencies) return;
+    const controller = new AbortController();
+    setCurrencyError(null);
+    void (async () => {
+      try {
+        const response = await apiFetch(`${API_URL}/api/airs/etf/${encodeURIComponent(isin)}/currency-allocation`, { signal: controller.signal });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+        if (!controller.signal.aborted) setCurrencyData(body as EtfCurrencyAllocationResponse);
+      } catch (reason) {
+        if (!controller.signal.aborted) setCurrencyError(reason instanceof Error ? reason.message : String(reason));
+      }
+    })();
+    return () => controller.abort();
+  }, [tab, isin, currencies]);
+  const currencyGroups = new Map<string, { sector: string; weight_pct: number }[]>();
+  for (const holding of currencies?.holdings ?? []) {
+    const group = currencyGroups.get(holding.currency) ?? [];
+    group.push({ sector: `${holding.name}${holding.symbol ? ` · ${holding.symbol}` : ''}`, weight_pct: holding.weight_pct });
+    currencyGroups.set(holding.currency, group);
+  }
+  const currencyTable = currencies ? { ...currencies, sectors: [...currencyGroups].map(([currency, holdings]) => ({
+    sector: currency, weight_pct: holdings.reduce((sum, row) => sum + row.weight_pct, 0),
+    provider_sectors: holdings.map(row => row.sector), provider_weights: holdings,
+  })) } : null;
+
   // The same allocation table renders either taxonomy; source labels and weights stay intact.
-  const data = tab === 'sector' ? sectorData : regional ? { ...regional, sectors: regional.regions.map(row => ({
+  const data = tab === 'currency' ? currencyTable : tab === 'sector' ? sectorData : regional ? { ...regional, sectors: regional.regions.map(row => ({
     sector: row.region, weight_pct: row.weight_pct, provider_sectors: row.provider_weights.map(item => item.country),
     provider_weights: row.provider_weights.map(item => ({ sector: item.country, weight_pct: item.weight_pct })),
   })) } : null;
-  const error = tab === 'sector' ? sectorError : regionError;
+  const error = tab === 'currency' ? currencyError : tab === 'sector' ? sectorError : regionError;
 
   const date = data?.as_of
     ? new Intl.DateTimeFormat(lang === 'nl' ? 'nl-NL' : 'en-GB', {
@@ -91,7 +122,15 @@ export default function EtfSectorAllocationModal({
       total: 'Total',
       holdingWeight: (weight: string) => `This fund is ${weight}% of the current portfolio.`,
       loading: 'Loading sector weights', failed: 'Sector allocation could not be loaded.' };
-  const labels = tab === 'sector' ? sectorLabels : { ...sectorLabels,
+  const labels = tab === 'currency' ? { ...sectorLabels,
+    title: lang === 'nl' ? 'Valutaverdeling' : 'Currency allocation',
+    providerSector: currencies?.basis === 'published_currency_allocation'
+      ? (lang === 'nl' ? 'Gepubliceerde verdeling' : 'Published allocation')
+      : (lang === 'nl' ? 'Onderliggende positie' : 'Underlying holding'),
+    ourSector: lang === 'nl' ? 'Noteringsvaluta' : 'Quote currency',
+    loading: lang === 'nl' ? 'Valuta laden' : 'Loading holding currencies',
+    failed: lang === 'nl' ? 'Valutaverdeling kon niet worden geladen.' : 'Currency allocation could not be loaded.',
+  } : tab === 'sector' ? sectorLabels : { ...sectorLabels,
     title: lang === 'nl' ? 'Regioverdeling' : 'Region allocation',
     providerSector: lang === 'nl' ? 'Oorspronkelijk land' : 'Original country',
     ourSector: lang === 'nl' ? 'Onze regio' : 'Our region',
@@ -134,20 +173,26 @@ export default function EtfSectorAllocationModal({
 
         <div role="tablist" aria-label={lang === 'nl' ? 'Fondsverdeling' : 'Fund allocation'}
           className="mt-4 inline-flex w-fit shrink-0 rounded-lg border border-neutral-800/40 text-xs">
-          {(['sector', 'region'] as const).map((key) => <button key={key} type="button" role="tab"
+          {tabs.map((key) => <button key={key} type="button" role="tab"
             id={`etf-allocation-tab-${key}`} aria-selected={tab === key} aria-controls={`etf-allocation-panel-${key}`}
             tabIndex={tab === key ? 0 : -1} onClick={() => setTab(key)}
             onKeyDown={(event) => {
-              const next = event.key === 'Home' ? 'sector' : event.key === 'End' ? 'region'
-                : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? key === 'sector' ? 'region' : 'sector' : null;
+              const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[2]
+                : event.key === 'ArrowLeft' ? tabs[(tabs.indexOf(key) + 2) % 3]
+                : event.key === 'ArrowRight' ? tabs[(tabs.indexOf(key) + 1) % 3] : null;
               if (next) { event.preventDefault(); setTab(next); document.getElementById(`etf-allocation-tab-${next}`)?.focus(); }
             }} className={`px-3 py-1.5 font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${tab === key ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}>
-            {key === 'sector' ? 'Sector' : lang === 'nl' ? 'Regio' : 'Region'}
+            {key === 'sector' ? 'Sector' : key === 'currency' ? (lang === 'nl' ? 'Valuta' : 'Currency') : lang === 'nl' ? 'Regio' : 'Region'}
           </button>)}
         </div>
 
-        {(['sector', 'region'] as const).map(key => <div key={key} role="tabpanel" id={`etf-allocation-panel-${key}`} aria-labelledby={`etf-allocation-tab-${key}`}
+        {tabs.map(key => <div key={key} role="tabpanel" id={`etf-allocation-panel-${key}`} aria-labelledby={`etf-allocation-tab-${key}`}
           hidden={tab !== key} className="min-h-0 flex-1 overflow-auto py-4">{tab === key && <>
+          {tab === 'currency' && <p className="mb-3 text-xs text-fg-muted">{currencies?.basis === 'published_currency_allocation'
+            ? (lang === 'nl' ? 'Gepubliceerde valutaverdeling van het fonds. Overige en onbekende valuta worden als Overig getoond. De bron vermeldt geen verdelingsdatum.'
+              : 'Published fund currency allocation. Other and unknown currencies are shown as Other. The source does not provide an allocation date.')
+            : (lang === 'nl' ? 'Noteringsvaluta per gepubliceerde positie, zonder valuta-afdekking. Niet-gepubliceerde posities en onbekende valuta worden als Overig getoond. Yahoo vermeldt geen datum voor deze posities.'
+              : 'Quote currencies of published holdings, before hedging. Unreported holdings and unknown currencies are shown as Other. Yahoo does not provide a holdings date.')}</p>}
           {!data && !error && (
             <div className="flex h-full items-center justify-center text-sm text-fg-muted">
               {labels.loading}<LoadingDots />
@@ -196,10 +241,10 @@ export default function EtfSectorAllocationModal({
                   </span>
                   <span className="text-center text-base text-fg-faint" aria-label="maps to">→</span>
                   <span className="flex min-w-0 items-center gap-2 font-medium text-fg-strong"
-                    title={row.sector}>
+                    title={row.sector === 'Unclassified' ? (lang === 'nl' ? 'Overig' : 'Other') : row.sector}>
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full"
                       style={{ background: colorForSector(row.sector) }} aria-hidden />
-                    <span className="truncate">{row.sector}</span>
+                    <span className="truncate">{row.sector === 'Unclassified' ? (lang === 'nl' ? 'Overig' : 'Other') : row.sector}</span>
                   </span>
                   <span className="relative h-3 overflow-hidden rounded-sm bg-overlay/[0.06]" aria-hidden>
                     <span className="absolute inset-y-0 left-0 rounded-sm"

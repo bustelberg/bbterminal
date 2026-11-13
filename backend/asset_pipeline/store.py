@@ -36,6 +36,15 @@ def _remove_utc_date_artifacts(analysis_id: int, window: dict) -> None:
             'target_date', obsolete[offset:offset + 100]).execute()
 
 
+def _remove_incomplete_dates(analysis_id: int, window: dict, rows: list[dict], now: float) -> None:
+    today = yahoo.session_date(now, window.get('meta'))
+    # A confirmed completed session may be today in Sydney while still today in UTC.
+    # Preserve that close; purge forming/future dates only, scoped to this instrument.
+    cutoff = ((datetime.fromisoformat(today) + timedelta(days=1)).date().isoformat()
+              if any(row['target_date'] == today for row in rows) else today)
+    supabase.table('asset_price').delete().eq('analysis_id', analysis_id).gte('target_date', cutoff).execute()
+
+
 def stored_columns() -> list[str]:
     """The db columns currently persisted per bar (drives the 'what we store'
     messaging everywhere)."""
@@ -241,10 +250,11 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
     q = ((w.get("indicators") or {}).get("quote") or [{}])[0]
     closes = q.get("close") or []
     series = {ykey: (q.get(ykey) or []) for ykey, _col in STORED_FIELDS}
+    now = time.time()
     rows = []
     for i in range(len(ts)):
         c = closes[i] if i < len(closes) else None
-        if c is None or not yahoo.is_closed_bar(ts[i]):  # close gates a real, closed bar
+        if c is None or not yahoo.is_completed_daily_bar(ts[i], w.get('meta'), now=now):
             continue
         row: dict = {
             "analysis_id": analysis_id,
@@ -268,10 +278,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
         ).execute()
         stored += len(rows[i:i + _CHUNK])
     _remove_utc_date_artifacts(analysis_id, w)
-    # Drop any previously-stored current/future (partial) bar so a re-run that
-    # now excludes today doesn't leave a stale partial close behind.
-    today = datetime.now(timezone.utc).date().isoformat()
-    supabase.table("asset_price").delete().eq("analysis_id", analysis_id).gte("target_date", today).execute()
+    _remove_incomplete_dates(analysis_id, w, rows, now)
 
     # Denormalized coverage stats onto asset_analysis — the asset_grid view READS
     # these instead of running 6 correlated subqueries per row over the 14M-row
@@ -338,10 +345,11 @@ def extend_series(analysis_id: int, symbol: str, since: str, *, window: dict | N
     q = ((w.get("indicators") or {}).get("quote") or [{}])[0]
     closes = q.get("close") or []
     series = {ykey: (q.get(ykey) or []) for ykey, _col in STORED_FIELDS}
+    now = time.time()
     rows = []
     for i in range(len(ts)):
         c = closes[i] if i < len(closes) else None
-        if c is None or not yahoo.is_closed_bar(ts[i]):
+        if c is None or not yahoo.is_completed_daily_bar(ts[i], w.get('meta'), now=now):
             continue
         row: dict = {
             "analysis_id": analysis_id,
@@ -368,9 +376,7 @@ def extend_series(analysis_id: int, symbol: str, since: str, *, window: dict | N
         stored += len(rows[i:i + _CHUNK])
 
     _remove_utc_date_artifacts(analysis_id, w)
-    today = datetime.now(timezone.utc).date().isoformat()
-    supabase.table("asset_price").delete().eq("analysis_id", analysis_id).gte(
-        "target_date", today).execute()
+    _remove_incomplete_dates(analysis_id, w, rows, now)
 
     # Stats over the WHOLE stored series, from the DB. Anything else corrupts the grid.
     buf = _run_copy(

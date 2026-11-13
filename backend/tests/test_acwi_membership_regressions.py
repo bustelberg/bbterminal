@@ -116,3 +116,25 @@ def test_name_fallback_refuses_wrong_country_and_share_class(monkeypatch):
     monkeypatch.setattr(M, '_executions', lambda: [{'isin': 'GB0000000001', 'yahoo_symbol': 'OTHER',
         'name': 'Berkshire Hathaway Class B', 'analysis_id': 1}])
     assert M.resolve()[0] == []
+
+
+@pytest.mark.parametrize('name', ["L` Oreal", "L'Oreal", "L’ Oréal", "L'Oréal SA", "L'Ore\u0301al", 'LOREAL SA'])
+def test_loreal_membership_and_weight_do_not_depend_on_local_asset_mapping(raw_benchmark, name):
+    expected = raw_benchmark['bench']['loreal']['weight_pct']
+    result = A.compute_active_share([{'isin': 'FR0000120321', 'name': name, 'weight_pct': 100}],
+                                    'ACWI', held_only=True)
+    row = result['rows'][0]
+    assert row['in_benchmark'] is True
+    assert row['benchmark_pct'] == pytest.approx(expected)
+    assert row['benchmark_pct'] > 0
+    from routers._airs_portfolio_analysis import _mark_acwi_sector_overlap
+    portfolio = {'Consumer Defensive': [{'name': name, 'isin': 'FR0000120321'}]}
+    benchmark = {'Consumer Defensive': [{'name': 'LOREAL SA', 'isin': None, 'weight_pct': expected}]}
+    _mark_acwi_sector_overlap(portfolio, benchmark, '2026-11-06')
+    assert portfolio['Consumer Defensive'][0]['in_both'] is True
+    assert portfolio['Consumer Defensive'][0]['issuer_key'] == 'loreal'
+
+
+@pytest.mark.parametrize('name', ['Loreal Technology', 'L Oreal Holdings Partners', 'Royal', 'L Oral'])
+def test_loreal_alias_does_not_invent_other_issuer_matches(name):
+    assert issuer_key(name) != 'loreal'

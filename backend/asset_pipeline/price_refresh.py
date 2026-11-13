@@ -411,6 +411,7 @@ def backfill_nav_fallbacks(isins: set[str]) -> dict:
     """Persist reviewed non-Yahoo fund NAVs into the ordinary shared price store."""
     wanted = sorted(set(isins) & set(_NAV_FALLBACKS))
     stored = failed = 0
+    results = []
     for isin in wanted:
         source = _NAV_FALLBACKS[isin]
         symbol = f"{source['provider']}:{source['issue_id']}"
@@ -446,8 +447,12 @@ def backfill_nav_fallbacks(isins: set[str]) -> dict:
                 "updated_at": datetime.now().astimezone().isoformat(),
             }).eq("analysis_id", analysis_id).execute()
             stored += 1
+            results.append({'isin': isin, 'provider': source['provider'], 'issue_id': source['issue_id'],
+                            'analysis_id': analysis_id, 'status': 'ok', 'latest_close': marks[-1][0]})
         except Exception as exc:  # noqa: BLE001 — one third-party source cannot break all repairs
             failed += 1
+            results.append({'isin': isin, 'provider': source['provider'], 'issue_id': source['issue_id'],
+                            'status': 'error', 'error': f'{type(exc).__name__}: {exc}'})
             log.warning("[price_refresh] NAV fallback %s failed: %s", isin, exc)
     # This function is also called by the scheduled refresher, outside the explicit risk-repair
     # path below. Make a newly published NAV visible to the next risk request immediately rather
@@ -460,7 +465,7 @@ def backfill_nav_fallbacks(isins: set[str]) -> dict:
             invalidate()
         except Exception as exc:  # noqa: BLE001 — a completed NAV refresh remains valid
             log.warning("[price_refresh] could not invalidate risk caches after NAV fallback: %s", exc)
-    return {"eligible": len(wanted), "stored": stored, "failed": failed}
+    return {"eligible": len(wanted), "stored": stored, "failed": failed, 'results': results}
 
 
 def repair_price_histories(isins: set[str], *, years: int = 5, full_history: bool = False,
@@ -568,8 +573,19 @@ def _unavailable_close(symbol: str, stored: str, expected: str) -> dict:
         )
     closes = (((raw.get('indicators') or {}).get('quote') or [{}])[0]).get('close') or []
     days = [yahoo.session_date(stamp, raw.get('meta')) for i, stamp in enumerate(raw.get('timestamp') or [])
-            if i < len(closes) and closes[i] is not None and yahoo.is_closed_bar(stamp)]
+            if i < len(closes) and closes[i] is not None and yahoo.is_completed_daily_bar(stamp, raw.get('meta'))]
     available = max(days, default=None)
+    meta = raw.get('meta') or {}
+    if meta.get('symbol') and meta['symbol'].upper() != symbol.upper():
+        raise RuntimeError(f'Yahoo availability response identifies {meta["symbol"]}, requested {symbol}; '
+                           f'stored={stored}, expected={expected}. Verify the listing before retrying; saved prices are retained.')
+    if available is None:
+        raise RuntimeError(f'Yahoo returned no usable completed closes for {symbol} in the 14-day availability window; '
+                           f'stored={stored}, expected={expected}, timestamps={len(raw.get("timestamp") or [])}, '
+                           f'closes={len(closes)}, quoteType={meta.get("instrumentType")}, '
+                           f'exchange={meta.get("exchangeName")}, timezone={meta.get("exchangeTimezoneName")}. '
+                           'The latest provider close is unknown. Next: inspect this Yahoo listing for missing/delisted '
+                           'history or invalid bars and retry asset_price_refresh; saved prices are retained.')
     if available and available > stored:
         raise NewerCloseAvailable(symbol, stored, available, raw)
     return {'status': 'unavailable', 'vendor_latest_close': available,

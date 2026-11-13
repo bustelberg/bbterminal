@@ -29,9 +29,10 @@ import {
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
-import type { BookValueSeries, EtfSectorAllocationResponse, EtfRegionAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
+import type { BookValueSeries, EtfSectorAllocationResponse, EtfRegionAllocationResponse, EtfCurrencyAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import { addEtfRegionWeights } from './etfRegionLookThrough';
 import { currentExposureRows } from './currentExposureRows';
+import { sectorHoldingsCompanies } from './sectorHoldingsRows';
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
@@ -121,7 +122,7 @@ const SERIES = {
 const pct = formatPct;
 
 type Axis = NonNullable<ModelPortfolioAnalysis['axes']>[number];
-type Row = Axis['rows'][number];
+type Row = import('./etfSectorLookThrough').SectorChartRow;
 type ScorecardBlock = {
   bucket: string; weight_pct: number; portfolio_return_pct: number | null;
   benchmark_return_pct: number | null; benchmark_ticker: string | null;
@@ -718,7 +719,7 @@ function Chip({ label, value, valueClass, hint, prov }: {
   );
 }
 
-function Chart({ axis, rows, unpricedPct, excluded, benchmark,
+export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   portfolioAsOf, benchmarkCapsFrom, benchmarkCapsTo, benchmarkCapsUnstamped = 0, stale = false,
   benchmarkSnapshotAsOf, benchmarkTotalTarget = 100, etfControl }: {
   axis: string;
@@ -742,7 +743,6 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   benchmarkTotalTarget?: number;
   etfControl?: {
     enabled: boolean;
-    onChange: (enabled: boolean) => void;
     count: number;
     loading: boolean;
     unavailable: number;
@@ -754,6 +754,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   const selectedSector = stale ? undefined : rows.find(row => row.bucket === selectedBucket);
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
   const axisNote = axis === 'sector' ? copy.axes.sectorNote : axis === 'region' ? copy.axes.regionNote : copy.axes.currencyNote;
+  const clickable = axis === 'sector' || axis === 'region' || axis === 'currency';
   const benchmarkDate = benchmarkSnapshotAsOf ?? benchmarkCapsTo ?? benchmarkCapsFrom;
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
@@ -768,8 +769,10 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   //  Filtered to buckets with weight on AT LEAST ONE side, never "where the portfolio holds
   // something": a bucket the book does not own but the benchmark does is an unowned region/sector,
   // which is a finding, not an empty row. See `composition.ts`.
-  const sorted = visibleBuckets([...rows].sort((a, b) =>
-    (b.portfolio_pct ?? 0) - (a.portfolio_pct ?? 0) || (b.benchmark_pct ?? 0) - (a.benchmark_pct ?? 0)));
+  const sorted = [...rows].filter(row => visibleBuckets([row]).length > 0
+    || (row.bucket === 'Unclassified' && [...(row.holdings ?? []), ...(row.benchmark_holdings ?? [])]
+      .some(holding => (holding.weight_pct ?? 0) > 0)))
+    .sort((a, b) => (b.portfolio_pct ?? 0) - (a.portfolio_pct ?? 0) || (b.benchmark_pct ?? 0) - (a.benchmark_pct ?? 0));
   /**
    * The column totals, so the reader can check them.
    *
@@ -805,8 +808,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   return (
     <>
     <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
-      {/* Sector rows open a current-holdings drill-down. The other axes stay read-only: Attribution
-          remains the return drill-down, so the two surfaces do not answer the same question. */}
+      {/* Sector and Region open current-holdings comparisons. Attribution remains the return drill-down. */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="flex items-baseline gap-2">
           <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
@@ -824,13 +826,8 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           )}
           </TipCard>} />
         </div>
-        {(axis === 'sector' || axis === 'region') && etfControl && etfControl.count > 0 && (
-          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted"
-            title={axis === 'region' ? copy.axes.addRegionEtfsTitle : copy.axes.addEtfsTitle}>
-            <input type="checkbox" checked={etfControl.enabled}
-              onChange={(event) => etfControl.onChange(event.target.checked)}
-              className="h-3.5 w-3.5 cursor-pointer accent-accent-500" />
-            <span>{copy.axes.addEtfs}</span>
+        {(axis === 'sector' || axis === 'region' || axis === 'currency') && etfControl && etfControl.count > 0 && (
+          <div className="flex items-center gap-1.5 text-[11px] text-fg-muted">
             {etfControl.enabled && etfControl.loading && (
               <span className="text-fg-faint">{copy.axes.loadingEtfs}</span>
             )}
@@ -839,7 +836,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
                 {copy.axes.unavailableEtfs(etfControl.unavailable)}
               </span>
             )}
-          </label>
+          </div>
         )}
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{axisNote}</p>
@@ -915,11 +912,11 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           const tilt = r.diff_pct ?? (p - b);
           return (
             <button key={r.bucket} type="button"
-              onClick={() => axis === 'sector' && !stale && setSelectedSector(r.bucket)}
-              aria-label={axis === 'sector' ? `Show holdings in ${r.bucket}` : undefined}
-              title={copy.allocation.chartRowTitle(r.bucket, p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
-              className={`flex w-full items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left ${axis === 'sector' ? 'cursor-pointer hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500' : 'cursor-default'}`}>
-              <span className="w-[6.5rem] shrink-0 truncate text-[12px] text-fg-muted">{r.bucket}</span>
+              onClick={() => clickable && !stale && setSelectedSector(r.bucket)}
+              aria-label={clickable ? `Show holdings in ${copy.bucket(r.bucket)}` : undefined}
+              title={copy.allocation.chartRowTitle(copy.bucket(r.bucket), p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
+              className={`flex w-full items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left ${clickable ? 'cursor-pointer hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500' : 'cursor-default'}`}>
+              <span className="w-[6.5rem] shrink-0 truncate text-[12px] text-fg-muted">{copy.bucket(r.bucket)}</span>
               {/* Fixed 0–100% scale — a bar's length IS its share of the sleeve, not its rank
                   against the biggest bucket. */}
               <span className="relative h-[18px] flex-1 rounded bg-inset">
@@ -946,8 +943,8 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
               </span>
               {/* Colour-coded to the series they belong to (portfolio blue / benchmark amber), so
                   the value ties to its bar without reading the legend. */}
-              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
-              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
+              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{r.bucket === 'Unclassified' && p < .01 && r.holdings?.some(holding => (holding.weight_pct ?? 0) > 0) ? '<0.01%' : pct(p)}</span>
+              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{r.bucket === 'Unclassified' && b < .01 && r.benchmark_holdings?.some(holding => (holding.weight_pct ?? 0) > 0) ? '<0.01%' : pct(b)}</span>
             </button>
           );
         })}
@@ -969,24 +966,9 @@ function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, ben
 }) {
   const copy = useAnalyseCopy();
   const holdings = row.holdings ?? [];
-  const benchmarkHoldings = row.benchmark_holdings ?? [];
   const directWeight = holdings.reduce((sum, holding) => sum + (holding.weight_pct ?? 0), 0);
   const lookedThroughWeight = Math.max(0, (row.portfolio_pct ?? 0) - directWeight);
-  const companies = new Map<string, {
-    name: string; via: Set<string>; portfolio?: number; benchmark?: number; inBoth?: boolean;
-  }>();
-  for (const [side, entries] of [['portfolio', holdings], ['benchmark', benchmarkHoldings]] as const) {
-    entries.forEach((holding, index) => {
-      const isin = holding.isin?.trim().toUpperCase();
-      const key = isin || `${side}-${index}`;
-      const company = companies.get(key) ?? { name: holding.name || '—', via: new Set<string>(), inBoth: false };
-      company.inBoth ||= holding.in_both;
-      for (const name of holding.via_names ?? []) company.via.add(name);
-      company[side] = (company[side] ?? 0) + (holding.weight_pct ?? 0);
-      companies.set(key, company);
-    });
-  }
-  const entries = [...companies.entries()];
+  const entries = sectorHoldingsCompanies(row);
   const overlaps = (company: (typeof entries)[number][1]) =>
     company.inBoth || (company.portfolio != null && company.benchmark != null);
   const labels = copy.axes.sectorHoldings;
@@ -1003,7 +985,7 @@ function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, ben
     <PanelDialog onClose={onClose} labelledBy="sector-holdings-title" closeOnFrameClick>
       <div className="m-auto flex h-full min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-800 bg-card shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-5 py-4">
-          <h2 id="sector-holdings-title" className="text-base font-semibold text-fg">{row.bucket}</h2>
+          <h2 id="sector-holdings-title" className="text-base font-semibold text-fg">{copy.bucket(row.bucket)}</h2>
           <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-overlay/5 hover:text-fg">
             {labels.close}
           </button>
@@ -1055,10 +1037,30 @@ function SectorHoldingsDialog({ row, benchmark, snapshotAsOf, portfolioAsOf, ben
                                 {side === 'portfolio' && company.via.size > 0 && (
                                   <span className="block truncate text-[11px] text-fg-faint">{[...company.via].join(' · ')}</span>
                                 )}
+                                {row.bucket === 'Unclassified' && (
+                                  <details className="mt-1 text-[11px] font-normal text-fg-muted">
+                                    <summary className="cursor-pointer text-accent-300">{copy.lang === 'nl' ? 'Waarom Overig?' : 'Why Other?'}</summary>
+                                    <div className="space-y-2 py-1">
+                                      {company.evidence[side].length ? company.evidence[side].map((evidence, index) => (
+                                        <div key={index} className="space-y-0.5 break-words">
+                                          <p>{evidence.reason}</p>
+                                          {evidence.providerLabel && <p>{copy.lang === 'nl' ? 'Broncategorie' : 'Source category'}: {evidence.providerLabel}</p>}
+                                          {evidence.fundWeightPct != null && <p>{evidence.fundWeightPct.toFixed(4)}% {copy.lang === 'nl' ? 'van het fonds' : 'of the fund'}</p>}
+                                          <p>{evidence.portfolioWeightPct.toFixed(4)}% {copy.lang === 'nl' ? 'van de portefeuille' : 'of the portfolio'}</p>
+                                          {evidence.source && (evidence.sourceUrl
+                                            ? <a href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="text-accent-300 hover:underline">{evidence.source} ↗</a>
+                                            : <p>{evidence.source}</p>)}
+                                        </div>
+                                      )) : <p>{copy.lang === 'nl'
+                                        ? 'Voor deze positie ontbreekt de classificatie in de beschikbare brongegevens. Er is geen nadere uitsplitsing beschikbaar.'
+                                        : 'This holding has no classification in the available source data. No further breakdown is provided.'}</p>}
+                                    </div>
+                                  </details>
+                                )}
                               </th>
                               <td className="py-1 pl-1 text-right font-mono tabular-nums">
                                 <span className="inline-flex items-center gap-1">
-                                  {pct(company[side] ?? 0)}
+                                  {row.bucket === 'Unclassified' && (company[side] ?? 0) > 0 && (company[side] ?? 0) < .01 ? '<0.01%' : pct(company[side] ?? 0)}
                                   <InfoTip content={weightDateLabel} />
                                 </span>
                               </td>
@@ -1533,7 +1535,7 @@ function SectorAllocationButton({ onOpen, title, className = '' }: {
 }
 
 /** A user's own investment notes for one company. */
-function CompanyNotesModal({ holding, onClose }: {
+export function CompanyNotesModal({ holding, onClose }: {
   holding: BookHolding;
   onClose: () => void;
 }) {
@@ -1546,10 +1548,10 @@ function CompanyNotesModal({ holding, onClose }: {
   useEffect(() => {
     let active = true;
     void (async () => {
-      if (holding.company_id == null) return;
+      if (!holding.isin) return;
       setLoading(true); setStatus(null);
       try {
-        const response = await apiFetch(`${API_URL}/api/companies/${holding.company_id}/investment-note`);
+        const response = await apiFetch(`${API_URL}/api/companies/by-isin/${encodeURIComponent(holding.isin!)}/investment-note`);
         const note = await response.json().catch(() => null) as {
           thesis?: string; pillars?: string[];
         } | null;
@@ -1564,13 +1566,13 @@ function CompanyNotesModal({ holding, onClose }: {
       }
     })();
     return () => { active = false; };
-  }, [holding.company_id]);
+  }, [holding.isin]);
 
   const save = async () => {
-    if (holding.company_id == null) return;
+    if (!holding.isin) return;
     setSaving(true); setStatus(null);
     try {
-      const response = await apiFetch(`${API_URL}/api/companies/${holding.company_id}/investment-note`, {
+      const response = await apiFetch(`${API_URL}/api/companies/by-isin/${encodeURIComponent(holding.isin!)}/investment-note`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thesis, pillars }),
       });
@@ -2726,11 +2728,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     title={syntheticAirsName(h) ? `AIRS: ${syntheticAirsName(h)}` : h.name ?? undefined}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{h.name ?? '—'}</span>
-                      {onSummary && h.company_id != null && h.isin && !h.is_fund && !isSynthetic(h) ? (
-                        <button type="button" onClick={(event) => {
-                          event.stopPropagation();
-                          onSummary(h);
-                        }} className={`${CHIP_SHAPE} ${CHIP_IDLE} ml-auto shrink-0`}>
+                      {onSummary && (h.company_id != null || !['Cash', 'Bonds'].includes(h.bucket)) && !h.is_fund && !isSynthetic(h) ? (
+                        <button type="button" disabled={!h.isin}
+                          title={!h.isin ? 'Notes require an ISIN for this stock.' : undefined}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSummary(h);
+                          }} className={`${CHIP_SHAPE} ${CHIP_IDLE} ml-auto shrink-0 disabled:cursor-help disabled:opacity-50`}>
                           Notes
                         </button>
                       ) : null}
@@ -3598,7 +3602,6 @@ export default function PortfolioAnalysisModal({
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
   const [includeEtfsInSector, setIncludeEtfsInSector] = useState(true);
   const includeEtfsInRegion = includeEtfsInSector;
-  const setIncludeEtfsInRegion = setIncludeEtfsInSector;
   const equityFunds = (data?.book_holdings ?? []).filter(holding => holding.bucket === 'Equity'
     && holding.is_fund && (holding.weight_now_pct ?? 0) > 0);
   const eligibleSectorEtfs = useMemo(() => {
@@ -3613,7 +3616,10 @@ export default function PortfolioAnalysisModal({
   const eligibleRegionEtfs = useMemo(() => eligibleSectorEtfs.filter(holding => !assetFilter || holding.bucket === assetFilter), [eligibleSectorEtfs, assetFilter]);
   const eligibleRegionEtfKey = eligibleRegionEtfs.map(holding => holding.isin).join('|');
   const [etfRegionResult, setEtfRegionResult] = useState<{
-    key: string; allocations: Record<string, EtfRegionAllocationResponse>; unavailable: number;
+    key: string; allocations: Record<string, EtfRegionAllocationResponse>; unavailable: number; errors: Record<string, string>;
+  } | null>(null);
+  const [etfCurrencyResult, setEtfCurrencyResult] = useState<{
+    key: string; allocations: Record<string, EtfCurrencyAllocationResponse>; unavailable: number; errors: Record<string, string>;
   } | null>(null);
   const eligibleCertificateSectorCount = useMemo(
     () => certificateSectorLookThroughCount(data?.book_holdings ?? []),
@@ -3622,7 +3628,7 @@ export default function PortfolioAnalysisModal({
   const [etfSectorResult, setEtfSectorResult] = useState<{
     key: string;
     allocations: Record<string, EtfSectorAllocationResponse>;
-    unavailable: number;
+    unavailable: number; errors: Record<string, string>;
   } | null>(null);
 
   useEffect(() => {
@@ -3835,17 +3841,18 @@ export default function PortfolioAnalysisModal({
           if (!controller.signal.aborted) {
             traceError('analyse', `ETF sector allocation unavailable for ${isin}`, reason);
           }
-          return [isin, null] as const;
+          return [isin, null, reason instanceof Error ? reason.message : String(reason)] as const;
         }
       }));
       if (controller.signal.aborted) return;
       const allocations: Record<string, EtfSectorAllocationResponse> = {};
+      const errors: Record<string, string> = {};
       let unavailable = 0;
-      for (const [isin, allocation] of settled) {
+      for (const [isin, allocation, error] of settled) {
         if (allocation) allocations[isin] = allocation;
-        else unavailable += 1;
+        else { unavailable += 1; errors[isin] = error ?? 'Source returned no allocation.'; }
       }
-      setEtfSectorResult({ key: eligibleSectorEtfKey, allocations, unavailable });
+      setEtfSectorResult({ key: eligibleSectorEtfKey, allocations, unavailable, errors });
     })();
     return () => controller.abort();
   }, [assetFilter, eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
@@ -3859,21 +3866,48 @@ export default function PortfolioAnalysisModal({
         try {
           const response = await apiFetch(`${API_URL}/api/airs/etf/${encodeURIComponent(isin)}/region-allocation`, { signal: controller.signal });
           const body = await response.json().catch(() => null);
-          if (!response.ok) return [isin, null] as const;
+          if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
           return [isin, body as EtfRegionAllocationResponse] as const;
-        } catch { return [isin, null] as const; }
+        } catch (reason) { return [isin, null, reason instanceof Error ? reason.message : String(reason)] as const; }
       }));
       if (controller.signal.aborted) return;
       const allocations: Record<string, EtfRegionAllocationResponse> = {};
+      const errors: Record<string, string> = {};
       let unavailable = 0;
-      for (const [isin, allocation] of settled) {
+      for (const [isin, allocation, error] of settled) {
         if (allocation) allocations[isin] = allocation;
-        else unavailable++;
+        else { unavailable++; errors[isin] = error ?? 'Source returned no allocation.'; }
       }
-      setEtfRegionResult({ key: eligibleRegionEtfKey, allocations, unavailable });
+      setEtfRegionResult({ key: eligibleRegionEtfKey, allocations, unavailable, errors });
     })();
     return () => controller.abort();
   }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfRegionResult?.key]);
+
+  useEffect(() => {
+    if (assetFilter !== EQUITY_BUCKET || !includeEtfsInRegion || !eligibleRegionEtfKey || etfCurrencyResult?.key === eligibleRegionEtfKey) return;
+    const controller = new AbortController();
+    void (async () => {
+      const settled = await Promise.all(eligibleRegionEtfs.map(async holding => {
+        const isin = holding.isin!.trim().toUpperCase();
+        try {
+          const response = await apiFetch(`${API_URL}/api/airs/etf/${encodeURIComponent(isin)}/currency-allocation`, { signal: controller.signal });
+          const body = await response.json().catch(() => null);
+          if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+          return [isin, body as EtfCurrencyAllocationResponse] as const;
+        } catch (reason) { return [isin, null, reason instanceof Error ? reason.message : String(reason)] as const; }
+      }));
+      if (controller.signal.aborted) return;
+      const allocations: Record<string, EtfCurrencyAllocationResponse> = {};
+      const errors: Record<string, string> = {};
+      let unavailable = 0;
+      for (const [isin, allocation, error] of settled) {
+        if (allocation) allocations[isin] = allocation;
+        else { unavailable++; errors[isin] = error ?? 'Source returned no allocation.'; }
+      }
+      setEtfCurrencyResult({ key: eligibleRegionEtfKey, allocations, unavailable, errors });
+    })();
+    return () => controller.abort();
+  }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfCurrencyResult?.key]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -4233,11 +4267,22 @@ export default function PortfolioAnalysisModal({
                     warning sat above every chart on every portfolio and was not wanted. The
                     same fact is on the Attribution panel, where the false finding actually
                     bites, and the sold names are itemised under Holdings. */}
+                {(equityFunds.length + eligibleCertificateSectorCount) > 0 && (
+                  <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-fg-muted"
+                    title={[copy.axes.addEtfsTitle, copy.axes.addRegionEtfsTitle, copy.axes.addCurrencyEtfsTitle].join(' ')}>
+                    <input type="checkbox" checked={includeEtfsInSector}
+                      onChange={event => setIncludeEtfsInSector(event.target.checked)}
+                      className="h-3.5 w-3.5 cursor-pointer accent-accent-500" />
+                    <span>{copy.axes.addEtfs}</span>
+                  </label>
+                )}
                 <div className="grid gap-4 lg:grid-cols-3">
                   {(data.axes ?? []).map((a) => {
                     const loadedEtfAllocations = etfSectorResult?.key === eligibleSectorEtfKey
                       ? etfSectorResult.allocations : {};
                     const loadedRegionAllocations = etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {};
+                    const loadedCurrencyAllocations = etfCurrencyResult?.key === eligibleRegionEtfKey ? etfCurrencyResult.allocations : {};
+                    const missingCurrencyFunds = equityFunds.filter(holding => !loadedCurrencyAllocations[holding.isin?.trim().toUpperCase() ?? '']);
                     const missingSectorFunds = equityFunds.filter(holding => !loadedEtfAllocations[holding.isin?.trim().toUpperCase() ?? '']);
                     const missingRegionFunds = equityFunds.filter(holding => !loadedRegionAllocations[holding.isin?.trim().toUpperCase() ?? '']);
                     const sectorRows = a.axis === 'sector' && includeEtfsInSector && !lookThrough
@@ -4251,9 +4296,12 @@ export default function PortfolioAnalysisModal({
                       ? addEtfRegionWeights(fundRows, (data.book_holdings ?? []).filter(holding => !assetFilter || holding.bucket === assetFilter),
                         etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {}) : fundRows;
                     const rows = data.weight_basis === 'book' && data.book_holdings?.length
-                      && (a.axis === 'sector' || a.axis === 'region')
+                      && (a.axis === 'sector' || a.axis === 'region' || a.axis === 'currency')
                       ? currentExposureRows(a.rows, data.book_holdings, a.axis, includeEtfsInSector, lookThrough,
-                        loadedEtfAllocations, etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.allocations : {})
+                        loadedEtfAllocations, loadedRegionAllocations, loadedCurrencyAllocations,
+                        a.axis === 'sector' ? (etfSectorResult?.key === eligibleSectorEtfKey ? etfSectorResult.errors : {})
+                          : a.axis === 'region' ? (etfRegionResult?.key === eligibleRegionEtfKey ? etfRegionResult.errors : {})
+                          : (etfCurrencyResult?.key === eligibleRegionEtfKey ? etfCurrencyResult.errors : {}))
                       : fallbackRows;
                     return (
                     <Chart key={a.axis} axis={a.axis} rows={rows}
@@ -4269,14 +4317,19 @@ export default function PortfolioAnalysisModal({
                       etfControl={a.axis === 'sector'
                         && (equityFunds.length + eligibleCertificateSectorCount) ? {
                         enabled: includeEtfsInSector,
-                        onChange: setIncludeEtfsInSector,
                         count: equityFunds.length + eligibleCertificateSectorCount,
                         loading: includeEtfsInSector && eligibleSectorEtfs.length > 0
                           && etfSectorResult?.key !== eligibleSectorEtfKey,
                         unavailable: missingSectorFunds.length,
                         unavailableNames: missingSectorFunds.map(holding => `${holding.name ?? holding.isin} (${holding.isin ?? 'No ISIN'})`),
+                      } : a.axis === 'currency' && (equityFunds.length + eligibleCertificateSectorCount) ? {
+                        enabled: includeEtfsInSector,
+                        count: equityFunds.length + eligibleCertificateSectorCount,
+                        loading: includeEtfsInSector && eligibleRegionEtfs.length > 0 && etfCurrencyResult?.key !== eligibleRegionEtfKey,
+                        unavailable: missingCurrencyFunds.length,
+                        unavailableNames: missingCurrencyFunds.map(holding => `${holding.name ?? holding.isin} (${holding.isin ?? 'No ISIN'})`),
                       } : a.axis === 'region' && (equityFunds.length + eligibleCertificateSectorCount) ? {
-                        enabled: includeEtfsInRegion, onChange: setIncludeEtfsInRegion,
+                        enabled: includeEtfsInRegion,
                         count: equityFunds.length + eligibleCertificateSectorCount,
                         loading: includeEtfsInRegion && eligibleRegionEtfs.length > 0 && etfRegionResult?.key !== eligibleRegionEtfKey,
                         unavailable: missingRegionFunds.length,

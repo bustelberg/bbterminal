@@ -92,6 +92,7 @@ def section_data(sections: dict, key: str) -> dict | None:
 
 def position_performance(sections: dict, start: str, end: str) -> list[dict]:
     opening, closing, transactions = (section_data(sections, key) for key in ("opening", "closing", "transactions"))
+    opening, closing, transactions, aliases = _align_names_by_isin(opening, closing, transactions)
     # Both boundaries are required even for newly bought/sold rows: otherwise
     # absent holdings could simply be a failed report, not an entry or exit.
     opening_rows = (opening or {}).get("rows") or []
@@ -105,6 +106,8 @@ def position_performance(sections: dict, start: str, end: str) -> list[dict]:
         activity = [t for t in (transactions or {}).get("activity", []) if t["name"] == name]
         row = {"name": name, "isin": next((r.get("isin") for r in before + after if r.get("isin")), None),
                "return_pct": None, "start_date": None, "end_date": None, "status": "unavailable"}
+        if name in aliases:
+            row['source_names'] = aliases[name]
         result.append(row)
         if not opening or not closing or not transactions or not transactions.get("readable"):
             row["reason"] = "reports_missing"
@@ -193,6 +196,8 @@ def position_performance(sections: dict, start: str, end: str) -> list[dict]:
         row['return_diagnostics'] = {
             'opening': boundary_evidence(opening), 'closing': boundary_evidence(closing),
             'activity': [dict(trade) for trade in (transactions or {}).get('activity', []) if trade['name'] == row['name']],
+            'unclassified_activity': _unclassified_evidence(transactions or {}, row, start, end),
+            'source_names': row.get('source_names', [row['name']]),
             'unclassified_names': (transactions or {}).get('unclassified_names', []),
             'unclassified_unassigned': (transactions or {}).get('unclassified_unassigned', False),
             'sections': {key: {'status': section.get('status'), 'message': section.get('message'),
@@ -200,3 +205,44 @@ def position_performance(sections: dict, start: str, end: str) -> list[dict]:
                          for key, section in sections.items()},
         }
     return sorted(result, key=lambda r: (r["return_pct"] is None, -(r["return_pct"] or 0), r["name"]))
+
+
+def _align_names_by_isin(opening, closing, transactions):
+    """Join renamed holdings by an exact security identity, never by name similarity."""
+    names_by_isin, isins_by_name = {}, {}
+    for valuation in (opening, closing):
+        for record in (valuation or {}).get('rows', []):
+            isin = str(record.get('isin') or '').strip().upper()
+            if isin and record.get('name'):
+                names_by_isin.setdefault(isin, set()).add(record['name'])
+                isins_by_name.setdefault(record['name'], set()).add(isin)
+    rename, aliases = {}, {}
+    for isin, names in names_by_isin.items():
+        if len(names) < 2 or any(len(isins_by_name[name]) != 1 for name in names):
+            continue
+        preferred = next((r['name'] for r in (closing or {}).get('rows', [])
+                          if str(r.get('isin') or '').strip().upper() == isin), sorted(names)[0])
+        rename.update({name: preferred for name in names})
+        aliases[preferred] = sorted(names)
+    def align(records):
+        return [{**record, 'name': rename.get(record['name'], record['name']),
+                 **({'source_name': record['name']} if record['name'] in rename else {})} for record in records]
+    opening = {**opening, 'rows': align(opening.get('rows', []))} if opening else opening
+    closing = {**closing, 'rows': align(closing.get('rows', []))} if closing else closing
+    if transactions:
+        transactions = {**transactions, 'activity': align(transactions.get('activity', [])),
+                        'unclassified_names': [rename.get(name, name) for name in transactions.get('unclassified_names', [])]}
+    return opening, closing, transactions, aliases
+
+
+def _unclassified_evidence(transactions, position, start, end):
+    from airs_transacties import COL_DATE, COL_FONDS, TT, TT_BUY, TT_SELL
+    names = set(position.get('source_names') or [position['name']])
+    rows = transactions.get('unclassified_activity')
+    if rows is None:
+        # Older saved reports already retain the raw sheet, so expose the cause
+        # without requiring another AIRS download just to improve the receipt.
+        rows = [row for row in transactions.get('rows', [])
+                if row.get(TT) not in (TT_BUY, TT_SELL) or not row.get(COL_DATE)]
+    return [dict(row) for row in rows if (not row.get(COL_FONDS) or row.get(COL_FONDS) in names)
+            and (not row.get(COL_DATE) or start <= str(row[COL_DATE])[:10] <= end)]

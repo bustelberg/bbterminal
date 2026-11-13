@@ -5570,6 +5570,17 @@
             ],
             "title": "Company Id"
           },
+          "company_link_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Link Reason"
+          },
           "contribution_pct": {
             "anyOf": [
               {
@@ -5625,6 +5636,11 @@
             ],
             "title": "Fx Result Eur"
           },
+          "in_both": {
+            "default": false,
+            "title": "In Both",
+            "type": "boolean"
+          },
           "income_eur": {
             "anyOf": [
               {
@@ -5657,6 +5673,17 @@
               }
             ],
             "title": "Isin"
+          },
+          "issuer_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Key"
           },
           "mom_12_1_from": {
             "anyOf": [
@@ -6654,6 +6681,17 @@
               }
             ],
             "title": "Isin"
+          },
+          "issuer_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Key"
           },
           "name": {
             "anyOf": [
@@ -8216,6 +8254,62 @@
         "title": "EtfComparisonResult",
         "type": "object"
       },
+      "EtfCurrencyAllocationResponse": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "basis": {
+            "default": "holdings",
+            "enum": [
+              "holdings",
+              "published_currency_allocation"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/FundCurrencyHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "source",
+          "source_url",
+          "holdings"
+        ],
+        "title": "EtfCurrencyAllocationResponse",
+        "type": "object"
+      },
       "EtfOverlayHolding": {
         "description": "One diversifier ETF held alongside the momentum sleeve in a blended\nscheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is\nits target portfolio weight; the strategy (momentum) sleeve takes\n`100 - sum(weight_pct)`. `band_pct` is the symmetric drift band used only\nas a 'rebalance due' alert on /schedule \u2014 rebalances ride the momentum\ngrid (the blend resets to target on each grid rebalance), never off-grid.",
         "properties": {
@@ -9033,6 +9127,51 @@
           "accounts"
         ],
         "title": "ForcePriceChecksRequest",
+        "type": "object"
+      },
+      "FundCurrencyHolding": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "currency",
+          "weight_pct"
+        ],
+        "title": "FundCurrencyHolding",
         "type": "object"
       },
       "FundamentalCoverageRequest": {
@@ -22523,6 +22662,48 @@
         ]
       }
     },
+    "/api/airs/etf/{isin}/currency-allocation": {
+      "get": {
+        "operationId": "etf_currency_allocation_api_airs_etf__isin__currency_allocation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtfCurrencyAllocationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Etf Currency Allocation",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/etf/{isin}/region-allocation": {
       "get": {
         "operationId": "etf_region_allocation_api_airs_etf__isin__region_allocation_get",
@@ -29687,6 +29868,94 @@
           }
         },
         "summary": "Create Company",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/by-isin/{isin}/investment-note": {
+      "get": {
+        "operationId": "get_stock_investment_note_api_companies_by_isin__isin__investment_note_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Stock Investment Note",
+        "tags": [
+          "companies"
+        ]
+      },
+      "put": {
+        "operationId": "set_stock_investment_note_api_companies_by_isin__isin__investment_note_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestmentNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Stock Investment Note",
         "tags": [
           "companies"
         ]

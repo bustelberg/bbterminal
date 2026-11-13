@@ -20,6 +20,18 @@ class _Session:
         return SimpleNamespace(status_code=200, text=json.dumps(self.payload))
 
 
+def test_fund_holdings_keep_whole_fund_weights_and_require_verified_vehicle(monkeypatch):
+    payload = _payload(legal_type=None, quote_type='MUTUALFUND')
+    holdings = [{'symbol': 'ABC', 'name': 'Stock', 'holdingPercent': {'raw': .03}}]
+    payload['quoteSummary']['result'][0]['topHoldings']['holdings'] = holdings
+    monkeypatch.setattr(yahoo, '_HAS_CURL', True)
+    monkeypatch.setattr(yahoo, '_throttle', _ImmediateThrottle())
+    monkeypatch.setattr(yahoo, '_track_request', lambda *args: None)
+    monkeypatch.setattr(yahoo, '_quote_session', lambda: (_Session(payload), 'c'))
+    assert yahoo.fund_holdings('FUND', vehicle='mutual_fund') == holdings
+    assert yahoo.fund_holdings('FUND', vehicle='etf') == []
+
+
 def _payload(*, legal_type: str | None, quote_type: str | None = None) -> dict:
     return {
         "quoteSummary": {"result": [{

@@ -4,12 +4,48 @@ from __future__ import annotations
 import threading
 import logging
 import pytest
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
 
 import scheduler as S
 from scheduler_runtime import admission
 from scheduler_jobs import market as market_jobs
+
+
+def test_boot_scan_runs_recorded_watchdog_inside_its_existing_maintenance_slot(monkeypatch):
+    slots = threading.BoundedSemaphore(1)
+    done = threading.Event()
+    calls = []
+    monkeypatch.delenv('DISABLE_BOOT_HEAL', raising=False)
+    monkeypatch.setattr(S, 'scan_for_missed_ticks', lambda: {'total': 0})
+    monkeypatch.setattr(admission, '_maintenance_slots', slots)
+    monkeypatch.setattr(admission, '_scheduled_futures', {})
+    monkeypatch.setattr(admission, '_scheduled_futures_lock', threading.Lock())
+    def recorded(job_id):
+        acquired = slots.acquire(blocking=False)
+        if acquired:
+            slots.release()
+        calls.append((job_id, acquired, admission.active_jobs()))
+        done.set()
+    monkeypatch.setattr(S, '_run_body', recorded)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        monkeypatch.setattr(admission, '_maintenance_executor', executor)
+        assert S._submit_scheduled_work('job_gap_scan', S._boot_gap_pass)
+        assert done.wait(5), 'startup watchdog was dropped instead of running'
+    assert calls == [('job_watchdog', False, {'job_gap_scan'})]
+    assert admission.active_jobs() == set()
+    assert slots.acquire(blocking=False)
+    slots.release()
+
+
+def test_boot_watchdog_failure_is_logged_without_breaking_startup(monkeypatch, caplog):
+    monkeypatch.delenv('DISABLE_BOOT_HEAL', raising=False)
+    monkeypatch.setattr(S, 'scan_for_missed_ticks', lambda: {'total': 0})
+    def fail(_job_id):
+        raise RuntimeError('watchdog read failed')
+    monkeypatch.setattr(S, '_run_body', fail)
+    S._boot_gap_pass()
+    assert 'startup job_watchdog failed: RuntimeError: watchdog read failed' in caplog.text
 
 
 def test_automatic_price_checks_refresh_and_persist_without_a_browser(monkeypatch):

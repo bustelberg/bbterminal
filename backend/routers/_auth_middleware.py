@@ -4,8 +4,8 @@ EVERY `/api/*` request must carry a valid Supabase JWT, with one exception
 tier (public health/cron endpoints). Authorization is role-based:
 
   * admin  → any endpoint.
-  * user   → only the API behind the non-admin-visible pages (/schedule and
-             the Management Dashboard), plus the mutations those pages need:
+  * user   → only the API behind the non-admin-visible pages, including
+             the Management Dashboard, plus the mutations those pages need:
              the earnings refresh, and every refresh on the Management
              Dashboard.
               THE `/api/earnings` NAMESPACE IS STILL USER-READABLE THOUGH THE
@@ -80,9 +80,7 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # Reads any AUTHENTICATED user may make — the API behind the non-admin pages.
 # `/api/companies` stays readable because the user-visible Earnings dashboard
 # depends on it (the /companies PAGE itself is blocked for users in proxy.ts).
-# `/api/scheduled-strategies` is readable so the read-only /schedule page works;
-# the list endpoint filters to `user_visible` strategies for non-admins, and
-# every mutation under it stays admin-only (not in the write tier below).
+# `/schedule` and its scheduled-strategy resources are admin-only.
 # `/api/fx/` + `/api/benchmarks` are read-only reference data the read-only
 # /schedule strategy-detail card needs (EUR/FX conversion + the ETF overlay's
 # benchmark identity) — low-sensitivity reads, mutations stay admin-only.
@@ -100,7 +98,6 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/companies",
     "/api/earnings",
     "/api/usage",
-    "/api/scheduled-strategies",
     "/api/fx/",
     "/api/benchmarks",
     "/api/airs/",
@@ -122,6 +119,7 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
 # PREFIX it also swallowed `/api/airs/model-portfolios/scan/job`, which is the Dashboard's.
 _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
     "/api/airs/scan",
+    "/api/scheduled-strategies",
 )
 
 #  The same deny, by pattern, because the id sits in the middle of the path. A prefix here can
@@ -131,6 +129,7 @@ _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
 # reports are management-dashboard reads, available to every authenticated user. Editing
 # shared mappings and destructive operations remain protected by the write tier.
 _ADMIN_ONLY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/airs/accounts/[^/]+/weight-search(?:/.*)?$"),
     #  Exact, not a prefix — `/api/airs/model-portfolios/scan/job` is the same work as a
     # cancellable background job and every authenticated user may start it (see
     # `_USER_REFRESH_PATTERNS`). Only the request-held SSE form is admin-only.
@@ -152,7 +151,6 @@ _USER_WRITE_PATHS: frozenset[str] = frozenset({
     "/api/asset-pipeline/external-store",
 })
 
-_USER_ACTUAL_FILLS = re.compile(r"^/api/scheduled-strategies/\d+/actual-fills$")
 
 # The one editorial override every authenticated user may make. The sector pencil is present in
 # the user-visible Analyse modal, and sector corrections feed its allocation and attribution
@@ -160,7 +158,7 @@ _USER_ACTUAL_FILLS = re.compile(r"^/api/scheduled-strategies/\d+/actual-fills$")
 # edits, creates and deletes, which remain admin-only. Numeric id + anchored suffix mirror the
 # FastAPI route exactly, so neither a neighbouring mutation nor a future child route inherits it.
 _COMPANY_SECTOR_OVERRIDE = re.compile(r"^/api/companies/\d+/sector-override$")
-_COMPANY_INVESTMENT_NOTE = re.compile(r"^/api/companies/\d+/investment-note$")
+_COMPANY_INVESTMENT_NOTE = re.compile(r"^/api/companies/(?:\d+|by-isin/[A-Za-z0-9]{12})/investment-note$")
 _COMPANY_EGM_ASSUMPTION = re.compile(r"^/api/earnings/companies/\d+/egm-assumption$")
 
 
@@ -515,7 +513,6 @@ async def enforce_api_auth(
         allowed = (
             _starts_with_any(path, _USER_WRITE_PREFIXES)
             or path in _USER_WRITE_PATHS
-            or _USER_ACTUAL_FILLS.match(path) is not None
             or (request.method == "PUT" and _is_company_sector_override(path))
             or (request.method == "PUT" and _is_company_investment_note(path))
             or (request.method == "PUT" and _is_company_egm_assumption(path))

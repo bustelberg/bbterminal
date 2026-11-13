@@ -100,11 +100,34 @@ def test_current_holdings_uses_the_newest_archived_snapshot(monkeypatch):
     import deps
 
     newest = [{"Name": "Newest snapshot"}]
+    monkeypatch.setattr(holdings, 'load_acwi_holdings', lambda: ([{'Name': 'Older bundle'}], '15-Apr-2026'))
     monkeypatch.setattr(deps, "supabase", FakeSupabase({"acwi_holdings_snapshot": [
         {"as_of": "2026-10-29", "holdings": []},
         {"as_of": "2026-11-03", "holdings": newest},
     ]}))
     assert holdings.load_latest_acwi_holdings() == (newest, "2026-11-03")
+
+
+def test_newer_bundled_snapshot_is_not_hidden_by_an_older_production_archive(monkeypatch):
+    import deps
+    newest = [{'Name': 'NVIDIA CORP'}]
+    monkeypatch.setattr(holdings, 'load_acwi_holdings', lambda: (newest, '06-Nov-2026'))
+    monkeypatch.setattr(deps, 'supabase', FakeSupabase({'acwi_holdings_snapshot': [
+        {'as_of': '2026-11-05', 'holdings': [{'Name': 'Older production snapshot'}]},
+    ]}))
+    assert holdings.load_latest_acwi_holdings() == (newest, '06-Nov-2026')
+
+
+def test_missing_bundle_does_not_break_a_valid_archived_snapshot(monkeypatch):
+    import deps
+    def missing():
+        raise FileNotFoundError('No bundled export')
+    monkeypatch.setattr(holdings, 'load_acwi_holdings', missing)
+    archived = [{'Name': 'Archived member'}]
+    monkeypatch.setattr(deps, 'supabase', FakeSupabase({'acwi_holdings_snapshot': [
+        {'as_of': '2026-11-05', 'holdings': archived},
+    ]}))
+    assert holdings.load_latest_acwi_holdings() == (archived, '2026-11-05')
 
 
 def test_weekly_schedule_imports_before_company_coverage(monkeypatch):

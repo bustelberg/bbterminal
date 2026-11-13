@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import logging
 import time
+from datetime import date
 
 import pandas as pd
 
@@ -65,14 +66,15 @@ def build_frame(result: dict | None, *, symbol: str | None = None) -> pd.DataFra
         return a[i] if i < len(a) else None
 
     rows: list[dict] = []
+    now = time.time()
     for i in range(len(ts)):
         close_v = g(c, i)
-        if close_v is None or not yahoo.is_closed_bar(ts[i]):  # skip null + today's partial
+        if close_v is None or not yahoo.is_completed_daily_bar(ts[i], result.get('meta'), now=now):
             continue
         t = int(ts[i])
         adj_v = g(adj, i)
         rows.append({
-            "date": yahoo.utc_dt(t).date(),
+            "date": date.fromisoformat(yahoo.session_date(t, result.get('meta'))),
             "open": g(o, i), "high": g(h, i), "low": g(low_, i), "close": close_v,
             "adj_close": adj_v if adj_v is not None else close_v,
             "volume": g(v, i),

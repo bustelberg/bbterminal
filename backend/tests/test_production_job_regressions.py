@@ -275,3 +275,22 @@ def test_unavailable_close_retains_provider_response_evidence(monkeypatch, statu
     assert evidence in message
     assert 'BMW3.DE' in message and 'stored=2026-11-09' in message and 'expected=2026-11-10' in message
     assert 'Next: retry' in message
+
+
+@pytest.mark.parametrize('payload', [
+    {'meta': {'symbol': 'EQR'}},
+    {'timestamp': [1], 'indicators': {'quote': [{'close': [None]}]}},
+])
+def test_empty_price_window_is_unknown_not_proof_of_no_newer_close(monkeypatch, payload):
+    monkeypatch.setattr(yahoo, 'chart_window', lambda *a, **k: payload)
+    with pytest.raises(RuntimeError, match='latest provider close is unknown') as caught:
+        price_refresh._unavailable_close('EQR', '2026-08-21', '2026-11-12')
+    assert 'stored=2026-08-21' in str(caught.value)
+    assert 'expected=2026-11-12' in str(caught.value)
+    assert '14-day' in str(caught.value)
+
+
+def test_price_availability_rejects_substituted_listing(monkeypatch):
+    monkeypatch.setattr(yahoo, 'chart_window', lambda *a, **k: {'meta': {'symbol': 'OTHER'}})
+    with pytest.raises(RuntimeError, match='identifies OTHER, requested EQR'):
+        price_refresh._unavailable_close('EQR', '2026-08-21', '2026-11-12')

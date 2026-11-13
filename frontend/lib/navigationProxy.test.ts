@@ -43,6 +43,18 @@ describe('navigation auth handoff', () => {
     const response = await proxy(new NextRequest('http://localhost/users'));
     expect(response.headers.get('location')).toBe('http://localhost/forbidden?from=%2Fusers');
   });
+  it.each(['/schedule', '/schedule/42'])('blocks non-admin navigation and prefetch of %s', async path => {
+    auth.user = { email: 'reader@example.com', app_metadata: { role: 'user' } };
+    const response = await proxy(new NextRequest(`http://localhost${path}`, { headers: { RSC: '1', 'next-router-prefetch': '1' } }));
+    expect(response.headers.get('location')).toBe(`http://localhost/forbidden?from=${encodeURIComponent(path)}`);
+  });
+  it('allows admins to open schedule and respects their regular-user preview', async () => {
+    auth.user = { email: 'admin@example.com', app_metadata: { role: 'admin' } };
+    const allowed = await proxy(new NextRequest('http://localhost/schedule'));
+    expect(allowed.headers.get('location')).toBeNull();
+    const preview = await proxy(new NextRequest('http://localhost/schedule', { headers: { cookie: 'view_as=user' } }));
+    expect(preview.headers.get('location')).toBe('http://localhost/forbidden?from=%2Fschedule');
+  });
   it('does not forward identity past an unsatisfied MFA gate', async () => {
     auth.enforce = true;
     auth.user = { email: 'reader@example.com', app_metadata: { role: 'admin' } };

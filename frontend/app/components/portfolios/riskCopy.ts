@@ -636,7 +636,7 @@ const en: RiskCopy = {
 
 const nl: RiskCopy = {
   views: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie', vol: 'Volatiliteit',
-    dd: 'Drawdown', conc: 'Concentratie', returns: 'Returns', weights: 'Weights' },
+    dd: 'Drawdown', conc: 'Concentratie', returns: 'Returns', weights: 'Wegingen' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },

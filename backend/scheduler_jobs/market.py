@@ -99,7 +99,13 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False, ru
             )
 
         if raise_on_failure and (backfill.get("failed") or nav_fallback.get("failed") or not proxies_refreshed):
-            raise RuntimeError("Missing price-series, NAV or benchmark-proxy refresh failed")
+            nav_errors = '; '.join(f"{row['isin']} / {row['provider']} issue {row['issue_id']}: {row['error']}"
+                                  for row in nav_fallback.get('results', []) if row.get('error'))
+            require_complete(f"Price source preparation incomplete: missing-series failures={backfill.get('failed', 0)}, "
+                             f"NAV failures={nav_fallback.get('failed', 0)}, benchmark proxies={proxies_refreshed}. "
+                             f"{nav_errors} Completed prices are saved; retry asset_price_refresh after resolving the source error.",
+                             {'backfill': backfill, 'nav_fallback': nav_fallback,
+                              'analyse_benchmark_proxies_refreshed': proxies_refreshed})
 
         if not stale:
             _log.info(
@@ -118,6 +124,7 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False, ru
             rec.done(detail, considered=considered, latest=str(latest), stale=0,
                      price_backfilled=backfill["backfilled"],
                      nav_fallback_refreshed=nav_fallback["stored"],
+                     nav_fallback=nav_fallback,
                      analyse_benchmark_proxies_refreshed=proxies_refreshed)
             return
 
@@ -161,6 +168,7 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False, ru
                  remaining_stale=remaining, results=r.get("results", []),
                  price_backfilled=backfill["backfilled"],
                  nav_fallback_refreshed=nav_fallback["stored"],
+                 nav_fallback=nav_fallback,
                  analyse_benchmark_proxies_refreshed=proxies_refreshed)
       except Exception as e:  # noqa: BLE001
         #  Caught here, so the record must be set by hand. `record_run` marks a run failed off the

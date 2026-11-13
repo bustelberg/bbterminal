@@ -187,3 +187,5 @@ export type AirsAccountModelLink = components['schemas']['AirsAccountModelLink']
 export type EtfComparisonResult = components['schemas']['EtfComparisonResult'];
 export type AirsAccountModelLinks = components['schemas']['AirsAccountModelLinks'];
 export type AirsModelChoice = components['schemas']['AirsModelChoice'];
+
+export type EtfCurrencyAllocationResponse = components['schemas']['EtfCurrencyAllocationResponse'];

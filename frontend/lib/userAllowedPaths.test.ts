@@ -9,7 +9,7 @@ import { isUserAllowedPath, USER_ALLOWED_PATHS } from './userAllowedPaths'
 describe('isUserAllowedPath', () => {
   it('allows exactly the user-facing pages', () => {
     expect(isUserAllowedPath('/')).toBe(true)
-    expect(isUserAllowedPath('/schedule')).toBe(true)
+    expect(isUserAllowedPath('/schedule')).toBe(false)
     expect(isUserAllowedPath('/management-dashboard')).toBe(true)
     expect(isUserAllowedPath('/research-dashboard')).toBe(true)
     expect(isUserAllowedPath('/log-dashboard')).toBe(true)
@@ -26,7 +26,7 @@ describe('isUserAllowedPath', () => {
     //  And the removal half is pinned by the cases below. Taking a page away leaves any API path
     // it alone needed open — a permission nobody can see, because it grants no reachable screen.
     expect([...USER_ALLOWED_PATHS].sort()).toEqual([
-      '/', '/account', '/debet-calculation', '/etf-comparison', '/forbidden', '/log-dashboard', '/management-dashboard', '/market', '/mfa', '/momentum', '/research-dashboard', '/schedule',
+      '/', '/account', '/debet-calculation', '/etf-comparison', '/forbidden', '/log-dashboard', '/management-dashboard', '/market', '/mfa', '/momentum', '/research-dashboard',
     ])
   })
 
@@ -72,7 +72,7 @@ describe('isUserAllowedPath', () => {
   })
 
   it('allows subroutes of an allowed page', () => {
-    expect(isUserAllowedPath('/schedule/42')).toBe(true)
+    expect(isUserAllowedPath('/schedule/42')).toBe(false)
     expect(isUserAllowedPath('/management-dashboard/x')).toBe(true)
   })
 

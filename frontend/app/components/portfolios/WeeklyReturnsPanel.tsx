@@ -209,7 +209,7 @@ export function ReturnChart({ data: source, nl, scale, linked }: { data: WeeklyR
   </svg>;
 }
 
-type WeeklyReturnsBundle = Pick<WeeklyReturns, 'portefeuille' | 'start_date' | 'through' | 'options'> & {
+type WeeklyReturnsBundle = { ready?: boolean; detail?: string; prepared_at?: string } & Pick<WeeklyReturns, 'portefeuille' | 'start_date' | 'through' | 'options'> & {
   instruments: Record<string, Pick<WeeklyReturns, 'selected' | 'periods' | 'missing_observations'> & Partial<Pick<WeeklyReturns, 'start_date' | 'ytd_return'>>>;
 };
 
@@ -224,16 +224,14 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   const selectedId = selection && selection.account === portefeuille ? selection.id : null;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
-  const [liveData, setLiveData] = useState<WeeklyReturns | null>(null);
   const options = bundle?.options ?? [];
   const chosen = options.find((item) => item.id === selectedId);
   const data = useMemo(() => {
-    if (liveData?.portefeuille === portefeuille && liveData.selected?.id === selectedId) return liveData;
     const series = selectedId && bundle?.instruments[selectedId];
     if (!bundle || !series) return undefined;
     return { portefeuille: bundle.portefeuille, start_date: bundle.start_date,
       through: bundle.through, options: bundle.options, ...series };
-  }, [bundle, selectedId, liveData, portefeuille]);
+  }, [bundle, selectedId]);
   useEffect(() => { onData(data ?? null); }, [data, onData]);
   const ytd = useMemo(() => data?.ytd_return !== undefined ? data.ytd_return
     : data?.start_date.slice(0, 4) === data?.through.slice(0, 4) ? periodReturn(data) : null, [data]);
@@ -254,34 +252,11 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     const instrument = chosen;
     choose(instrument);
     setBusy(true); setNotice(null);
-    let pending = false;
-    let reading: Promise<void> | null = null;
-    // Read committed observations as progress arrives. Coalesce overlapping updates
-    // and keep reads ordered so an older response cannot replace a newer series.
-    function refreshSeries(): Promise<void> {
-      pending = true;
-      if (reading) return reading;
-      reading = (async () => {
-        while (pending) {
-          pending = false;
-          const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns?instrument_id=${encodeURIComponent(instrument.id)}`, { cache: 'no-store', noReadCache: true });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          setLiveData(await response.json() as WeeklyReturns);
-        }
-      })().finally(() => { reading = null; });
-      return reading;
-    }
     try {
       const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?instrument_id=${encodeURIComponent(instrument.id)}`,
-        `${instrument.name} · AIRS`, undefined, (progress) => {
-          if (progress.done && progress.done > 0) void refreshSeries().catch(() => {
-            // A transient read failure must not interrupt collection; retry on
-            // the next progress event and once more when the job finishes.
-          });
-        });
+        `${instrument.name} · AIRS`);
       const job = await done;
-      invalidateReadCache('selected AIRS instrument history saved');
-      await refreshSeries();
+      invalidateReadCache('AIRS instrument history saved');
       riskBundle?.reload?.();
       if (job.status !== 'done') setNotice({ id: instrument.id, text: nl ? 'Niet alles kon worden geladen. Zie Details.' : 'Some history could not be loaded. See Details.' });
     } catch (error) { setNotice({ id: instrument.id, text: error instanceof Error ? error.message : String(error) }); }
@@ -332,6 +307,32 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
 }
 
 export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: string | null }) {
+  const inherited = useContext(RiskBundleContext);
+  const provided = inherited?.views['weekly-returns'] as WeeklyReturnsBundle | undefined;
+  const [saved, setSaved] = useState<{ account: string; data?: WeeklyReturnsBundle; error: string | null } | null>(null);
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const initial = provided?.portefeuille === portefeuille ? provided : undefined;
+  const hasInitial = Boolean(initial);
+  useEffect(() => {
+    if (!portefeuille || (hasInitial && reloadSeq === 0)) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/all`,
+          { signal: controller.signal, cache: 'no-store', noReadCache: true });
+        const body = await response.json();
+        if (!response.ok || body.ready === false) throw new Error(body.detail ?? `HTTP ${response.status}`);
+        if (!controller.signal.aborted) setSaved({ account: portefeuille, data: body, error: null });
+      } catch (error) {
+        if (!controller.signal.aborted) setSaved({ account: portefeuille, error: error instanceof Error ? error.message : String(error) });
+      }
+    })();
+    return () => controller.abort();
+  }, [portefeuille, hasInitial, reloadSeq]);
+  const current = saved?.account === portefeuille ? saved : null;
+  const bundle = current?.data ?? initial;
+  const bundleState = { views: bundle ? { 'weekly-returns': bundle } : {},
+    error: current?.error ?? (initial?.ready === false ? initial.detail ?? 'Weekly returns are not prepared yet.' : null), reload: () => setReloadSeq(value => value + 1) };
   const [lang] = useLang();
   const [first, setFirst] = useState<WeeklyReturns | null>(null);
   const [second, setSecond] = useState<WeeklyReturns | null>(null);
@@ -347,7 +348,7 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   const scale = Math.max(1, ...[first, second].flatMap((data) =>
     weeklyBars(data?.selected?.weeks ?? []).map((value) => Math.abs(value ?? 0)))) * 1.1;
   if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
-  return <div className="flex w-full min-w-0 flex-col gap-2">
+  return <RiskBundleContext.Provider value={bundleState}><div className="flex w-full min-w-0 flex-col gap-2">
     <div className="flex h-6 shrink-0 items-center justify-between gap-2 text-xs text-fg-muted">
       <span>{window ? `${day(weekStart(window[0]), lang === 'nl')} – ${day(window[1], lang === 'nl')}` : (lang === 'nl' ? 'Sleep om weken te vergelijken' : 'Drag to compare weeks')}</span>
       {window && <button type="button" className="text-accent-300 hover:underline" onClick={() => onWindow(null)}>{lang === 'nl' ? 'Selectie wissen' : 'Clear selection'}</button>}
@@ -367,5 +368,5 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
       </div>
       <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onSecond} linked={linked} />
     </div>
-  </div>;
+  </div></RiskBundleContext.Provider>;
 }
