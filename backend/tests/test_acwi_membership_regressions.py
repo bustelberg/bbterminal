@@ -9,7 +9,8 @@ from index_universe.acwi.identity import issuer_key, membership_key
 from routers import _active_share as A, _asset_benchmark as B, _benchmark_index as P
 
 MEMBERS = ['Shell PLC EUR', 'Diploma', 'RELX', 'Goodman Group', 'Everpure, Inc.',
-           'CapitaLand Integr Comm Tr', 'Equity Resident', 'Avalonbay Comm. Inc']
+           'CapitaLand Integr Comm Tr', 'Equity Resident', 'Avalonbay Comm. Inc',
+           'Berkshire Hathaway - B', 'Alphabet - C', 'MSCI Inc. A', 'Investor AB - B']
 ABSENT = ['Topicus.com', 'Medpace Holdings', 'Kinsale Capital', 'Gaztransport et Technigaz',
           'Revvity, Inc.', 'Vontobel Holding AG', 'PBF Energy', 'Oscar Health Inc.',
           'HF Sinclair Corporation', 'Moderna', 'Teleflex', 'Grail', 'Roko AB', 'EastGroup Properties',
@@ -110,6 +111,9 @@ def test_name_fallback_refuses_wrong_country_and_share_class(monkeypatch):
     monkeypatch.setattr(M, '_executions', lambda: [{'isin': 'US0000000001', 'yahoo_symbol': 'OTHER',
         'name': 'Berkshire Hathaway Class A', 'analysis_id': 1}])
     assert M.resolve()[0] == []
+    monkeypatch.setattr(M, '_executions', lambda: [{'isin': 'US0000000001', 'yahoo_symbol': 'BRK-A',
+        'name': 'Berkshire Hathaway - A', 'analysis_id': 1}])
+    assert M.resolve()[0] == []  # Shorthand must not disguise the wrong share class.
     monkeypatch.setattr(M, '_executions', lambda: [{'isin': 'US0000000001', 'yahoo_symbol': 'BRK-A',
         'name': 'Berkshire Hathaway Class A', 'analysis_id': 1}])
     assert M.resolve()[0] == []  # The older same-base-ticker fallback must also reject Class A.

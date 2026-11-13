@@ -2507,6 +2507,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/valuation/portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valuation Portfolios */
+        get: operations["valuation_portfolios_api_airs_valuation_portfolios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/{portfolio_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valuation Bundle */
+        get: operations["valuation_bundle_api_airs_valuation_portfolios__portfolio_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/{portfolio_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Valuation */
+        post: operations["refresh_valuation_api_airs_valuation_portfolios__portfolio_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/vermogen/price-checks/job": {
         parameters: {
             query?: never;
@@ -4190,6 +4241,40 @@ export interface paths {
         get: operations["etf_comparison_api_benchmarks_etf_comparison_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/factsheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Factsheet */
+        get: operations["factsheet_api_benchmarks_factsheet_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/factsheet/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Factsheet */
+        post: operations["refresh_factsheet_api_benchmarks_factsheet_refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12624,6 +12709,65 @@ export interface components {
             /** Symbol */
             symbol: string;
         };
+        /** FactsheetResponse */
+        FactsheetResponse: {
+            /** Calculation Date */
+            calculation_date?: string | null;
+            /** Currency */
+            currency: string;
+            /** Method */
+            method?: string | null;
+            /**
+             * Period Years
+             * @default 15
+             */
+            period_years?: number;
+            /** Prepared At */
+            prepared_at?: string | null;
+            /** Ready */
+            ready: boolean;
+            /** Rows */
+            rows: components["schemas"]["FactsheetRow"][];
+            /**
+             * Stale
+             * @default false
+             */
+            stale?: boolean;
+        };
+        /** FactsheetRow */
+        FactsheetRow: {
+            available_history?: components["schemas"]["FactsheetStatistics"] | null;
+            /** Currency */
+            currency: string;
+            /** End */
+            end: string;
+            /** Name */
+            name: string;
+            period?: components["schemas"]["FactsheetStatistics"] | null;
+            /** Reason */
+            reason?: string | null;
+            /** Requested Start */
+            requested_start: string;
+            /** Ticker */
+            ticker: string;
+        };
+        /** FactsheetStatistics */
+        FactsheetStatistics: {
+            /** Cagr Pct */
+            cagr_pct: number;
+            /** End */
+            end: string;
+            /** Observations */
+            observations: number;
+            /** Start */
+            start: string;
+            /** Total Return Pct */
+            total_return_pct: number;
+            /** Volatility Pct */
+            volatility_pct: number;
+            /** Years */
+            years: number;
+        };
         /** FeeConfigIn */
         FeeConfigIn: {
             /** Bustelberg Mgmt Bps */
@@ -16437,6 +16581,91 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** ValuationBundle */
+        ValuationBundle: {
+            /** Calculation Date */
+            calculation_date?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            };
+            /** Method */
+            method: {
+                [key: string]: unknown;
+            };
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Prepared At */
+            prepared_at?: string | null;
+            /** Ready */
+            ready: boolean;
+            /** Rows */
+            rows: components["schemas"]["ValuationRow"][];
+            /**
+             * Stale
+             * @default false
+             */
+            stale?: boolean;
+        };
+        /** ValuationPortfolio */
+        ValuationPortfolio: {
+            /** Account */
+            account?: string | null;
+            /** Composition Date */
+            composition_date?: string | null;
+            /** Id */
+            id: number | null;
+            /** Management Group */
+            management_group?: string | null;
+            /** Name */
+            name: string;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+        };
+        /** ValuationRow */
+        ValuationRow: {
+            /** Currency */
+            currency?: string | null;
+            /** Current Pe */
+            current_pe?: number | null;
+            /** Discount Pct */
+            discount_pct?: number | null;
+            /** Eps Date */
+            eps_date?: string | null;
+            /** Eps Metric Code */
+            eps_metric_code?: string | null;
+            /** Eps Ttm */
+            eps_ttm?: number | null;
+            /** Estimated Value */
+            estimated_value?: number | null;
+            /** History From */
+            history_from?: string | null;
+            /** History To */
+            history_to?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Median Pe */
+            median_pe?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Price */
+            price?: number | null;
+            /** Price Date */
+            price_date?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Status */
+            status: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
         /** VariantSpec */
         VariantSpec: {
             /** Daily Timing */
@@ -19860,6 +20089,90 @@ export interface operations {
             };
         };
     };
+    valuation_portfolios_api_airs_valuation_portfolios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationPortfolio"][];
+                };
+            };
+        };
+    };
+    valuation_bundle_api_airs_valuation_portfolios__portfolio_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_valuation_api_airs_valuation_portfolios__portfolio_id__refresh_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     force_account_price_checks_job_api_airs_vermogen_price_checks_job_post: {
         parameters: {
             query?: never;
@@ -22037,6 +22350,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EtfComparisonResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    factsheet_api_benchmarks_factsheet_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactsheetResponse"];
+                };
+            };
+        };
+    };
+    refresh_factsheet_api_benchmarks_factsheet_refresh_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactsheetResponse"];
                 };
             };
             /** @description Validation Error */

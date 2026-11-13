@@ -4,10 +4,14 @@ import unicodedata
 
 _SUFFIX = re.compile(
     r'[\s,.]+(inc|inc\.|corp|corporation|co|company|plc|ltd|limited|nv|n\.v\.|sa|s\.a\.|ag|se|ab|'
-    r'as|a/s|oyj|spa|s\.p\.a\.|holding|holdings|group|the|reit|units|trust|usd|eur|hkd|inr|jpy|cad|gbp)\.?$', re.I)
+    r'as|a/s|oyj|spa|s\.p\.a\.|holding|holdings|group|the|reit|units|trust|usd|eur|hkd|inr|jpy|cad|gbp|\(publ\))\.?$', re.I)
 _CLASS = re.compile(
-    r'[\s,.]+(class\s+[a-c]|cl\s+[a-c]|series\s+[a-c]|[ab]\s+shares|shares\s+[ab]|'
+    r'[\s,.]+(class[\s.]+[a-c]|cl[\s.]*[a-c]|series[\s.]+[a-c]|[a-c]\s+shares|shares\s+[a-c]|'
     r'sponsored\s+adr|unsponsored\s+adr|adr|ads|reg\s*s|registered)\.?$', re.I)
+# Only explicit class notation: never discard an arbitrary final letter/word.
+# Keep this evidence available to listing resolution, which must distinguish A/B/C.
+_SHORT_CLASS = re.compile(
+    r'(?:\s+[-–—]\s*|\b(?:inc\.?|corp\.?|corporation|ab)\s+)([a-c])\.?$', re.I)
 _ALIASES = {
     'linde eu': 'linde',
     'capitaland integr comm tr': 'capitaland integrated commercial',
@@ -27,7 +31,11 @@ _SUCCESSORS = {
 
 
 def issuer_key(name: str | None) -> str:
-    text = re.sub(r'\s+', ' ', unicodedata.normalize('NFC', name or '').strip().rstrip('_').strip().lower().replace('&', ' and ').replace('-', ' '))
+    text = unicodedata.normalize('NFC', name or '').strip().rstrip('_').strip()
+    shorthand = _SHORT_CLASS.search(text)
+    if shorthand:
+        text = text[:shorthand.start(1)].rstrip(' -–—')
+    text = re.sub(r'\s+', ' ', text.lower().replace('&', ' and ').replace('-', ' '))
     for _ in range(8):
         cleaned = _CLASS.sub('', _SUFFIX.sub('', text)).strip(' ,. ')
         if not cleaned or cleaned == text:
@@ -48,5 +56,9 @@ def membership_key(name: str | None, as_of: str | None) -> str:
 
 
 def share_class(name: str | None) -> str | None:
-    match = re.search(r'\b(?:class|cl|series)\s+([a-z])\b|\b([ab])\s+shares\b', name or '', re.I)
+    text = (name or '').strip().rstrip('_').strip()
+    match = _SHORT_CLASS.search(text)
+    if match:
+        return match.group(1).lower()
+    match = re.search(r'\b(?:class|cl|series)[\s.]*([a-z])\b|\b([a-c])\s+shares\b|\bshares\s+([a-c])\b', text, re.I)
     return next((group.lower() for group in match.groups() if group), None) if match else None

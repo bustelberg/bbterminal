@@ -142,6 +142,13 @@ Daily `dashboard_post_airs` republishes each portfolio's complete saved-data bun
 `GET /api/airs/accounts/{portefeuille}/weekly-returns/all` reads one saved portfolio bundle. The Risk bundle can include the same saved payload, so the Returns tab reuses it without another request. Both instrument selectors use the bundled `instruments` dictionary. Opening the tab and switching instruments do not scrape AIRS or calculate series. If there is no prepared bundle, the response explicitly says preparation is needed. Missing bundle storage does not block other Risk views. A manual history job republishes saved observations and the browser reloads one complete bundle after completion.
 
 
+## Daily valuation unavailable
+
+For the Management Dashboard's daily valuation tables, missing earnings/history,
+rollout migration and `portfolio_valuation_daily` receipts, see
+[Portfolio valuation](portfolio-valuation.md). Annotation aliases described below
+do not supply a valuation price or an ADR earnings conversion.
+
 ## Notes missing for an ADR or alternate ISIN
 
 Notes resolve existing company records through exact ISINs, verified canonical alias chains, and the reviewed issuer links in `backend/services/company_notes_identity.py`. Exchange/ticker links also require the expected issuer name. These links apply to annotations and sector overrides only; they do not select another price series or change the holding's currency. Missing or ambiguous company records are never created or merged automatically.

@@ -12,6 +12,46 @@ vi.mock('./refreshProgress', async (importOriginal) => ({
   refreshRequest: (url: string, init: Parameters<typeof apiFetch>[1]) => apiFetch(url, init),
 }));
 vi.mock('../../lib/i18n', () => ({ useLang: () => ['en'] }));
+vi.mock('../../lib/stores/jobs', () => ({
+  ExpectedJobFailure: class extends Error {},
+  startLocalJob: (_title: string, _kind: string, run: (signal: AbortSignal, report: () => void) => Promise<unknown>) => {
+    void run(new AbortController().signal, () => {}).catch(() => {}); return 'job';
+  },
+}));
+
+it('balances Fixed cash from a fresh preview, serializes additions and updates the saved comparison', async () => {
+  vi.mocked(apiFetch).mockReset();
+  const link = { leonteq_name: 'Bonds', airs_portfolio_id: 7, airs_name: 'Bonds FX' };
+  const cache: ConnectionHoldingsCache = new Map([
+    ['leonteq:Bonds', { rows: [{ isin: 'FR001400Z2L7', name: 'France', weight: '1.62%' }] }],
+    ['airs:security-v2:7', { datum: '2026-08-12', rows: [{ isin: null, name: 'Liquiditeiten', weight: '10%' }] }],
+  ]);
+  const rulesCache = new Map<string, HoldingRule[]>([[JSON.stringify(['Bonds', 7]), []]]);
+  const composition = { portfolio_id: 7, portfolio: 'Bonds FX', datum: '2026-08-12', dates: [],
+    rows: [{ id: 1, Fonds: 'Liquiditeiten', Percentage: 8.38, ISINCode: null }] };
+  let finish!: (response: Response) => void;
+  vi.mocked(apiFetch).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ composition })));
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  const click = async (text: string) => act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === text)!.click());
+  try {
+    await act(async () => root.render(<ConnectionHoldingsView link={link} cache={cache} rulesCache={rulesCache} onBack={() => {}} />));
+    expect(apiFetch).not.toHaveBeenCalled();
+    await click('Read latest total');
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="Add France to AIRS Fixed"]')!.disabled).toBe(true);
+    await act(async () => finish(new Response(JSON.stringify({ composition, total: 101.62, displayed_total: 101.62,
+      row_id: 1, cash_name: 'Liquiditeiten', current: 10, target: 8.38, datum: composition.datum, balanced: false }))));
+    expect(host.textContent).toContain('10.00% → 8.38%');
+    await click('Execute');
+    const [url, request] = vi.mocked(apiFetch).mock.calls[1];
+    expect(url).toContain('/model-portfolios/7/cash-balance');
+    expect(request?.method).toBe('POST');
+    expect(JSON.parse(String(request?.body))).toMatchObject({ total: 101.62, current: 10, target: 8.38 });
+    expect(cache.get('airs:security-v2:7')?.rows[0].weight).toBe('8.38%');
+    expect(host.textContent).toContain('Cash saved and verified');
+  } finally { await act(async () => root.unmount()); host.remove(); vi.mocked(apiFetch).mockReset(); }
+});
 
 it.each(['success', 'failure'] as const)('queues multiple additions sequentially and preserves verified work: %s', async outcome => {
   const link = { leonteq_name: 'Bonds', airs_portfolio_id: 7, airs_name: 'Bonds FX' };

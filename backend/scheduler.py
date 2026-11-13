@@ -1110,6 +1110,16 @@ def _body_airs_weekly_returns(ctx=None):
     return run(ctx, report=_reporter(ctx))
 
 
+def _body_portfolio_valuation(ctx=None):
+    from scheduler_jobs.valuation import run
+    return run(ctx, report=_reporter(ctx))
+
+
+def _body_benchmark_factsheet(ctx=None):
+    from scheduler_jobs.factsheet import run
+    return run(ctx)
+
+
 def _register_bodies() -> None:
     """Fill `JOB_BODIES` once every body is defined.
 
@@ -1118,6 +1128,8 @@ def _register_bodies() -> None:
     references to functions that do not exist yet.
     """
     JOB_BODIES.update({
+        "benchmark_factsheet_daily": _body_benchmark_factsheet,
+        "portfolio_valuation_daily": _body_portfolio_valuation,
         "airs_weekly_returns": _body_airs_weekly_returns,
         "dashboard_market": _body_dashboard_market,
         "dashboard_post_airs": _body_dashboard_post_airs,
@@ -1513,6 +1525,8 @@ def register_scheduler(app) -> None:
         # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
         _register("airs_weekly_returns", _fire_airs_weekly_returns)
+        _register("portfolio_valuation_daily", lambda: _spawn_body("portfolio_valuation_daily"))
+        _register("benchmark_factsheet_daily", lambda: _spawn_body("benchmark_factsheet_daily"))
         _register("acwi_weekly_coverage", _fire_acwi_weekly_coverage)
         _register("acwi_monthly_fundamentals", lambda: _spawn_body("acwi_monthly_fundamentals"))
         # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week

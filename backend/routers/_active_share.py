@@ -474,7 +474,7 @@ def _benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict:
         saved['issuer_by_asset'] = {int(key): value for key, value in saved['issuer_by_asset'].items()}
         return saved
 
-    cache_key = ("risk-workbook-identity-v12", benchmark.upper(), benchmark_start, date.today().isoformat(),
+    cache_key = ("risk-workbook-identity-v13", benchmark.upper(), benchmark_start, date.today().isoformat(),
                  revision, prepared.code_version() if revision is not None else None)
     with _benchmark_lock:
         return deepcopy(leg(cache_key, lambda: _load_benchmark_weights(benchmark, benchmark_start)))

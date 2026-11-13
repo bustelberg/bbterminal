@@ -269,6 +269,8 @@ class TestManagementDashboardRefreshesAreOpen:
         ("POST", "/api/airs/portfolios/BUS_WTS_StMerken_Dyn/refresh/job"),
         # Analyse modal → the fundamentals fill, over a paired model or a bare basket of ISINs.
         ("POST", "/api/airs/model-portfolios/7/fundamentals/ingest/job"),
+        ("POST", "/api/airs/valuation/portfolios/7/refresh"),
+        ("POST", "/api/benchmarks/factsheet/refresh"),
         ("POST", "/api/airs/basket/fundamentals/ingest/job"),
         # Analyse modal input tables → one `no_data` holding's financials.
         ("POST", "/api/earnings/fundamental-coverage/ingest"),

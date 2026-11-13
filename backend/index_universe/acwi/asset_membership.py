@@ -74,6 +74,13 @@ _REVIEWED_INTERLISTINGS = {
 # Everpure's NYSE ticker changed on 2026-04-17; its Class A security/ISIN did not.
 # https://www.everpuredata.com/company/newsroom/press-releases/everpure-to-change-ticker-symbol.html
 _REVIEWED_RENAMES = {('NYSE', 'P', 'everpure'): 'US74624M1027'}
+# The Canadian Shopify listing is Class A even when Yahoo calls it only Shopify Inc.
+# Keep this at the security boundary: a bare issuer name is not class evidence.
+_REVIEWED_SHARE_CLASSES = {'CA82509L1076': 'a'}
+
+
+def _execution_share_class(row):
+    return share_class(row.get('name')) or _REVIEWED_SHARE_CLASSES.get(row.get('isin'))
 
 
 def _universe_id(label: str) -> int | None:
@@ -183,7 +190,7 @@ def _interlisted(cands: list[dict], location: str, name: str,
             if normalize_country(codes.get((c.get("isin") or "  ")[:2].upper())) == want]
     wanted_class = share_class(name)
     if wanted_class:
-        same = [candidate for candidate in same if share_class(candidate.get('name')) == wanted_class]
+        same = [candidate for candidate in same if _execution_share_class(candidate) == wanted_class]
     if len(same) > 1:
         same = [c for c in same if same_company(name, c.get("name") or "")]
     return same[0] if len(same) == 1 else None
@@ -250,7 +257,7 @@ def resolve(snapshot: tuple[list[dict], str] | None = None) -> tuple[list[dict],
             # Different listing tickers (SHEL.L / SHELL.AS, REL.L / REN.AS): exact issuer
             # spelling plus country and class, never fuzzy name or a merger successor.
             candidates = [row for row in by_name.get(issuer_key(h.get('Name')), [])
-                          if share_class(row.get('name')) == share_class(h.get('Name'))]
+                          if _execution_share_class(row) == share_class(h.get('Name'))]
             hit = _interlisted(candidates, h.get('Location') or '', h.get('Name') or '', codes)
             if hit is not None:
                 aid, held_sym = hit['analysis_id'], (hit.get('yahoo_symbol') or '').strip().upper()

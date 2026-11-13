@@ -8898,6 +8898,182 @@
         "title": "ExternalAssetSearchRow",
         "type": "object"
       },
+      "FactsheetResponse": {
+        "properties": {
+          "calculation_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Date"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "period_years": {
+            "default": 15,
+            "title": "Period Years",
+            "type": "integer"
+          },
+          "prepared_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepared At"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FactsheetRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "currency",
+          "rows"
+        ],
+        "title": "FactsheetResponse",
+        "type": "object"
+      },
+      "FactsheetRow": {
+        "properties": {
+          "available_history": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactsheetStatistics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactsheetStatistics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "requested_start": {
+            "title": "Requested Start",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "name",
+          "currency",
+          "requested_start",
+          "end"
+        ],
+        "title": "FactsheetRow",
+        "type": "object"
+      },
+      "FactsheetStatistics": {
+        "properties": {
+          "cagr_pct": {
+            "title": "Cagr Pct",
+            "type": "number"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "observations": {
+            "title": "Observations",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "total_return_pct": {
+            "title": "Total Return Pct",
+            "type": "number"
+          },
+          "volatility_pct": {
+            "title": "Volatility Pct",
+            "type": "number"
+          },
+          "years": {
+            "title": "Years",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "years",
+          "observations",
+          "total_return_pct",
+          "cagr_pct",
+          "volatility_pct"
+        ],
+        "title": "FactsheetStatistics",
+        "type": "object"
+      },
       "FeeConfigIn": {
         "properties": {
           "bustelberg_mgmt_bps": {
@@ -19454,6 +19630,332 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "ValuationBundle": {
+        "properties": {
+          "calculation_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Date"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "method": {
+            "additionalProperties": true,
+            "title": "Method",
+            "type": "object"
+          },
+          "portfolio_id": {
+            "title": "Portfolio Id",
+            "type": "integer"
+          },
+          "prepared_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepared At"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ValuationRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "portfolio_id",
+          "ready",
+          "method",
+          "rows"
+        ],
+        "title": "ValuationBundle",
+        "type": "object"
+      },
+      "ValuationPortfolio": {
+        "properties": {
+          "account": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account"
+          },
+          "composition_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composition Date"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "management_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Management Group"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ValuationPortfolio",
+        "type": "object"
+      },
+      "ValuationRow": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "current_pe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Pe"
+          },
+          "discount_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Pct"
+          },
+          "eps_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Date"
+          },
+          "eps_metric_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Metric Code"
+          },
+          "eps_ttm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Ttm"
+          },
+          "estimated_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Value"
+          },
+          "history_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History From"
+          },
+          "history_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History To"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "median_pe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Pe"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "price_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Date"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "weight_pct",
+          "status"
+        ],
+        "title": "ValuationRow",
+        "type": "object"
+      },
       "VariantSpec": {
         "properties": {
           "daily_timing": {
@@ -25421,6 +25923,130 @@
         ]
       }
     },
+    "/api/airs/valuation/portfolios": {
+      "get": {
+        "operationId": "valuation_portfolios_api_airs_valuation_portfolios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValuationPortfolio"
+                  },
+                  "title": "Response Valuation Portfolios Api Airs Valuation Portfolios Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Valuation Portfolios",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/{portfolio_id}": {
+      "get": {
+        "operationId": "valuation_bundle_api_airs_valuation_portfolios__portfolio_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuationBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Valuation Bundle",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/{portfolio_id}/refresh": {
+      "post": {
+        "operationId": "refresh_valuation_api_airs_valuation_portfolios__portfolio_id__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuationBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Valuation",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
     "/api/airs/vermogen/price-checks/job": {
       "post": {
         "operationId": "force_account_price_checks_job_api_airs_vermogen_price_checks_job_post",
@@ -29049,6 +29675,72 @@
         },
         "summary": "Etf Comparison",
         "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/factsheet": {
+      "get": {
+        "operationId": "factsheet_api_benchmarks_factsheet_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactsheetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Factsheet",
+        "tags": [
+          "benchmarks",
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/factsheet/refresh": {
+      "post": {
+        "operationId": "refresh_factsheet_api_benchmarks_factsheet_refresh_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactsheetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Factsheet",
+        "tags": [
+          "benchmarks",
           "benchmarks"
         ]
       }

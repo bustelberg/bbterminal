@@ -84,6 +84,10 @@ class TestTheShopifyCase:
         hit = _interlisted(cands, "Canada", "SHOPIFY SUBORDINATE VOTING INC CLA", CODES)
         assert hit is not None and hit["analysis_id"] == 3029
 
+    def test_reviewed_class_a_security_does_not_match_class_b(self):
+        assert _interlisted([ex('CA82509L1076', 'SHOP', 'Shopify Inc.', 3029)],
+                            'Canada', 'SHOPIFY INC CLASS B', CODES) is None
+
     def test_and_the_name_need_not_agree_for_it(self):
         """ THE COUNTRY IS THE TEST; THE NAME IS ONLY A TIE-BREAKER. Requiring both would cost
         seven correct members on the live file: GSK is stored as `GSK plc` against the file's

@@ -19,6 +19,25 @@ vi.mock('./RebalancePanel', () => ({ default: ({ active }: { active: boolean }) 
 vi.mock('./ReturnsPanel', () => ({ default: () => <div>Returns content</div> }));
 vi.mock('./BenchmarkPerformancePanel', () => ({ default: () => <div>Monthly performance chart</div> }));
 
+it('resets the shared scroll position when moving from a long view to Connections and back', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<Page />));
+    const content = host.querySelector<HTMLElement>('[role="region"][aria-label="Portfolio content"]')!;
+    content.scrollTop = 3000;
+    await act(async () => host.querySelector<HTMLButtonElement>('#section-tab-connections')!.click());
+    expect(content.scrollTop).toBe(0);
+    expect(host.querySelector<HTMLElement>('#source-panel-connections')!.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('#source-panel-portfolios')!.hidden).toBe(true);
+    content.scrollTop = 1200;
+    await act(async () => host.querySelector<HTMLButtonElement>('#section-tab-portfolios')!.click());
+    expect(content.scrollTop).toBe(0);
+    expect(host.querySelector<HTMLElement>('#source-panel-portfolios')!.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('#source-panel-connections')!.hidden).toBe(true);
+  } finally { await act(async () => root.unmount()); host.remove(); vi.clearAllMocks(); }
+});
+
 it('nests Rebalance and Returns under Insights and remembers the selected insight', async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement('div'); document.body.appendChild(host);

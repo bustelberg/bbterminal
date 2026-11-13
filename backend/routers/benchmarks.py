@@ -29,8 +29,10 @@ from deps import supabase
 from routers import _blend_cache
 from routers._etf_comparison import EtfComparisonResult
 from ingest.constants import DATA_CUTOFF
+from routers._benchmark_factsheet import router as factsheet_router
 
 router = APIRouter(tags=["benchmarks"])
+router.include_router(factsheet_router)
 
 
 @router.get('/api/benchmarks/index/{label}/chart-snapshot')

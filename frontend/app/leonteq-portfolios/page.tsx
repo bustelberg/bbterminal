@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useLang } from '../../lib/i18n';
 import LeonteqPanel from './LeonteqPanel';
 import AirsModelsPanel from './AirsModelsPanel';
@@ -29,6 +29,11 @@ export default function LeonteqPortfoliosPage() {
   const [returnsOpened, setReturnsOpened] = useState(false);
   const [pricesOpened, setPricesOpened] = useState(false);
   const [performanceOpened, setPerformanceOpened] = useState(false);
+  const content = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // A shorter tab must not inherit the previous view's scroll offset.
+    if (content.current) content.current.scrollTop = 0;
+  }, [tab]);
   function select(next: Tab) {
     if (next === 'insights') {
       select(insight);
@@ -57,7 +62,7 @@ export default function LeonteqPortfoliosPage() {
     if (next === 'performance') setPerformanceOpened(true);
     setTab(next);
   }
-  return <main className="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-7xl flex-col gap-6 overflow-hidden p-4 md:p-8">
+  return <main className="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-7xl flex-col gap-6 overflow-clip p-4 md:p-8">
     <header className="shrink-0">
       <h1 className="text-2xl font-semibold">Portfolios</h1>
     </header>
@@ -79,7 +84,10 @@ export default function LeonteqPortfoliosPage() {
       </button>)}
     </div>
     </div>
-    <div className="min-h-0 min-w-0 flex-1 overflow-hidden [&>[role=tabpanel]]:h-full [&>[role=tabpanel]]:min-w-0 [&>[role=tabpanel]]:overflow-auto [&>[role=tabpanel]]:[overflow-anchor:none] [&>[role=tabpanel]]:[scrollbar-gutter:stable]">
+    {/* One scroll owner. Panels keep their natural content height; hidden panes
+        stay mounted without reserving a viewport of empty scrollable space. */}
+    <div ref={content} role="region" aria-label={nl ? 'Portefeuille-inhoud' : 'Portfolio content'} tabIndex={0}
+      className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable]">
     <div role="tabpanel" id="source-panel-portfolios" aria-labelledby="section-tab-portfolios" hidden={section !== 'portfolios'}>
     <div className="mb-4">
     <div role="tablist" aria-label={nl ? 'Portefeuillebron' : 'Portfolio source'}

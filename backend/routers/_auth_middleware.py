@@ -248,6 +248,7 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
 # overrides, and renaming a book. Those CHANGE what the page says; a refresh only makes it current.
 # That is the line, and it is the one the frontend's remaining `isAdmin` guards draw too.
 _USER_REFRESH_PATHS: frozenset[str] = frozenset({
+    '/api/benchmarks/factsheet/refresh',
     # Overview → "Refresh all from AIRS", both halves (accounts, then model portfolios).
     "/api/airs/vermogen/refresh/job",
     "/api/airs/vermogen/price-checks/job",
@@ -277,6 +278,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
 _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/airs/valuation/portfolios/\d+/refresh$"),
     # Analyse → fetch exactly one month's AIRS reports, with progress/cancel.
     re.compile(r"^/api/airs/accounts/[^/]+/monthly-report/job$"),
     re.compile(r"^/api/airs/accounts/[^/]+/monthly-benchmark/job$"),

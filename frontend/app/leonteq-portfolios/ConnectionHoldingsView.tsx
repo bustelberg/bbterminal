@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { useLang } from '../../lib/i18n';
@@ -9,11 +9,14 @@ import type { AirsComposition } from './AirsCompositionView';
 import { holdingKey, isCash, matchHoldings, soldRuleKey, type Holding, type HoldingRule } from './matchHoldings';
 import SearchablePortfolioPicker from './SearchablePortfolioPicker';
 import { refreshRequest } from './refreshProgress';
+import CashBalancePanel from './CashBalancePanel';
 
 export type PortfolioConnection = { leonteq_name: string; airs_portfolio_id: number; airs_name: string | null };
 type Side = 'leonteq' | 'airs';
 type Snapshot = {
   rows: Holding[];
+  composition?: AirsComposition;
+  leonteqComposition?: CompositionResult;
   datum?: string | null; timestamp?: string; cached?: boolean; warning?: boolean; noFixed?: boolean;
 };
 const sides: Side[] = ['leonteq', 'airs'];
@@ -52,14 +55,14 @@ export async function readConnectionHoldings(link: PortfolioConnection, side: Si
     if (!response.ok) throw new Error('failed');
     const data = await response.json() as CompositionResult;
     if (!data.success || !data.groups) throw new Error('failed');
-    return { rows: data.groups.flatMap((group) => group.positions.map((position) => ({
+    return { leonteqComposition: data, rows: data.groups.flatMap((group) => group.positions.map((position) => ({
       isin: position.isin, name: position.name, weight: position.weight,
     }))), timestamp: data.retrieved_at, cached: data.cached, warning: Boolean(data.refresh_error) };
   }
   const response = await fetcher(`${API_URL}/api/leonteq/airs/model-portfolios/${link.airs_portfolio_id}/composition${refresh ? '?refresh=true' : savedOnly ? '?saved_only=true' : ''}`, { cache: 'no-store', noReadCache: true });
   if (!response.ok) throw new Error('failed');
   const data = await response.json() as AirsComposition;
-  return { rows: data.rows.map((position) => ({ isin: position.ISINCode, name: position.Fonds,
+  return { composition: data, rows: data.rows.map((position) => ({ isin: position.ISINCode, name: position.Fonds,
     weight: position.Percentage == null ? null : `${position.Percentage}%`,
   })), datum: data.datum, timestamp: data.cached_at ?? data.retrieved_at,
     cached: Boolean(data.cached_at), noFixed: data.no_fixed_model };
@@ -91,6 +94,8 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
   const [rightChoice, setRightChoice] = useState('');
   const savingRule = useRef(false);
   const adding = useRef(false);
+  const cashWorking = useRef(false);
+  const [cashBusy, setCashBusy] = useState(false);
   const addQueue = useRef<{ row: Holding; datum: string }[]>([]);
   const pendingAdds = useRef(new Set<string>());
   const [queuedKeys, setQueuedKeys] = useState(new Set<string>());
@@ -113,7 +118,7 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
   }, [link.leonteq_name, link.airs_portfolio_id, rulesCache, rulesKey]);
 
   async function saveRule(left: string, right: string | null) {
-    if (savingRule.current || adding.current) return;
+    if (savingRule.current || adding.current || cashWorking.current) return;
     savingRule.current = true; setRulesSaving(true); setRulesError(false);
     try {
       const response = await apiFetch(rulesUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -146,7 +151,7 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
   }, [link, cache]);
 
   function refresh() {
-    if (adding.current) return;
+    if (adding.current || cashWorking.current) return;
     const request = ++version.current;
     setLoading({ leonteq: true, airs: true }); setErrors({});
     setRulesLoading(true); setRulesError(false);
@@ -173,7 +178,24 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
 
   const comparison = rules && data.leonteq && data.airs && !data.airs.noFixed
     ? matchHoldings(data.leonteq.rows, data.airs.rows, rules) : null;
-  const controlsBusy = rulesLoading || rulesSaving || loading.leonteq || loading.airs || addingKey !== null;
+  const controlsBusy = rulesLoading || rulesSaving || loading.leonteq || loading.airs || addingKey !== null || cashBusy;
+  const cashComposition = useMemo<AirsComposition | null>(() => {
+    const snapshot = data.airs;
+    if (!snapshot || snapshot.noFixed) return null;
+    return snapshot.composition ?? {
+      portfolio_id: link.airs_portfolio_id, portfolio: link.airs_name ?? '', datum: snapshot.datum ?? null, dates: [],
+      rows: snapshot.rows.map(row => ({ Fonds: row.name, ISINCode: row.isin, Percentage: row.weight == null ? null : Number(row.weight.replace('%', '').replace(',', '.')),
+        valuta: null, Beleggingscategorie: null, Beleggingssector: null, regio: null, afmCategorie: null })),
+    };
+  }, [data.airs, link.airs_portfolio_id, link.airs_name]);
+  function cashSaved(composition: AirsComposition) {
+    const snapshot: Snapshot = { composition, datum: composition.datum, timestamp: composition.retrieved_at ?? composition.cached_at,
+      rows: composition.rows.map(row => ({ isin: row.ISINCode, name: row.Fonds,
+        weight: row.Percentage == null ? null : `${row.Percentage}%` })) };
+    cache.set(keyFor(link, 'airs'), snapshot);
+    setData(current => ({ ...current, airs: snapshot }));
+    setAddStatus(null);
+  }
   function addBlocked(row: Holding): string | null {
     if (kind !== 'fixed') return 'AIRS Fixed only';
     if (addNeedsRefresh) return nl ? 'Vernieuw eerst beide composities.' : 'Refresh both compositions before retrying.';
@@ -186,7 +208,7 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
   }
   async function addHolding(queuedRow: Holding) {
     const key = holdingKey(queuedRow);
-    if (rulesLoading || rulesSaving || loading.leonteq || loading.airs || pendingAdds.current.has(key)
+    if (cashWorking.current || rulesLoading || rulesSaving || loading.leonteq || loading.airs || pendingAdds.current.has(key)
       || addBlocked(queuedRow) || !comparison?.leonteqOnly.includes(queuedRow)) return;
     pendingAdds.current.add(key);
     addQueue.current.push({ row: queuedRow, datum: data.airs!.datum! });
@@ -209,7 +231,7 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
         if (body?.datum !== datum || matches.length !== 1 || !matches[0].id || Number(matches[0].Percentage) !== Number(percentage)) {
           throw new Error('AIRS save is unverified.');
         }
-        const snapshot: Snapshot = { datum: body.datum, timestamp: body.retrieved_at ?? body.cached_at,
+        const snapshot: Snapshot = { composition: body, datum: body.datum, timestamp: body.retrieved_at ?? body.cached_at,
           rows: body.rows.map(item => ({ isin: item.ISINCode, name: item.Fonds,
             weight: item.Percentage == null ? null : `${item.Percentage}%` })) };
         cache.set(keyFor(link, 'airs'), snapshot);
@@ -245,7 +267,7 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
         <tbody className="divide-y divide-neutral-800/30">{rows.map((row, index) => <tr key={`${row.isin ?? row.name}-${index}`}>
           {(side === 'leonteq' ? [row.isin, row.name, formatWeight(row.weight)] : [row.name, formatWeight(row.weight), row.isin]).map((value, column) => <td key={column} className={`px-3 py-3 ${(side === 'leonteq' ? column === 2 : column === 1) ? 'text-right tabular-nums' : ''}`}>{value ?? '—'}</td>)}
           {side === 'leonteq' && kind === 'fixed' && <td className="px-3 py-3"><button type="button"
-            disabled={rulesLoading || rulesSaving || loading.leonteq || loading.airs || queuedKeys.has(holdingKey(row)) || !!addBlocked(row)} title={addBlocked(row) ?? (nl ? 'Voegt deze positie met het Leonteq-gewicht toe aan AIRS Fixed.' : 'Adds this holding to AIRS Fixed at the Leonteq weight.')}
+            disabled={cashBusy || rulesLoading || rulesSaving || loading.leonteq || loading.airs || queuedKeys.has(holdingKey(row)) || !!addBlocked(row)} title={addBlocked(row) ?? (nl ? 'Voegt deze positie met het Leonteq-gewicht toe aan AIRS Fixed.' : 'Adds this holding to AIRS Fixed at the Leonteq weight.')}
             aria-label={`Add ${row.name} to AIRS Fixed`} onClick={() => void addHolding(row)}
             className="whitespace-nowrap text-accent-300 hover:underline disabled:opacity-50">{addingKey === holdingKey(row) ? (nl ? 'Toevoegen…' : 'Adding…') : queuedKeys.has(holdingKey(row)) ? (nl ? 'In wachtrij…' : 'Queued…') : (nl ? 'Toevoegen' : 'Add to AIRS Fixed')}</button></td>}
           {side === 'airs' && <td className="px-3 py-3">{holdingKey(row).startsWith('isin:') && !data.leonteq?.rows.some((source) => holdingKey(source) === holdingKey(row)) && <button type="button" disabled={controlsBusy} onClick={() => void saveRule(soldRuleKey(holdingKey(row)), holdingKey(row))} className="whitespace-nowrap text-accent-300 hover:underline disabled:opacity-50" aria-label={`Mark ${row.name} sold in Leonteq`}>{nl ? 'Verkocht in Leonteq' : 'Sold in Leonteq'}</button>}</td>}
@@ -257,7 +279,7 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
   }
 
   return <section className="space-y-4 [&_thead_th]:text-center [&_thead_th]:align-middle" aria-labelledby="linked-holdings-heading">
-    <button type="button" disabled={rulesSaving || addingKey !== null} onClick={onBack} className="text-sm text-accent-300 hover:underline disabled:opacity-50">← {nl ? 'Alle koppelingen' : 'All connections'}</button>
+    <button type="button" disabled={rulesSaving || addingKey !== null || cashBusy} onClick={onBack} className="text-sm text-accent-300 hover:underline disabled:opacity-50">← {nl ? 'Alle koppelingen' : 'All connections'}</button>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 id="linked-holdings-heading" className="text-lg font-semibold">{nl ? 'Portefeuilleposities' : 'Portfolio holdings'}</h2>
       <button type="button" disabled={controlsBusy} onClick={refresh} className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-sm disabled:opacity-50">{nl ? 'Beide vernieuwen' : 'Refresh both'}</button>
@@ -294,6 +316,10 @@ export default function ConnectionHoldingsView({ link, kind = 'fixed', cache, ru
         </section>;
       })}
     </div>
+    {kind === 'fixed' && cashComposition && <CashBalancePanel portfolioId={link.airs_portfolio_id}
+      composition={cashComposition} leonteq={data.leonteq?.leonteqComposition} dummy={false}
+      disabled={controlsBusy || addNeedsRefresh || !!errors.airs}
+      onBusyChange={busy => { cashWorking.current = busy; setCashBusy(busy); }} onComposition={cashSaved} />}
     {comparison && <>
       <section className="space-y-3" aria-labelledby="matched-holdings-heading">
         <h3 id="matched-holdings-heading" className="font-semibold">{nl ? 'Gekoppelde posities' : 'Connected holdings'} <span className="text-sm font-normal text-fg-muted">({comparison.matched.length})</span></h3>

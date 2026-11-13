@@ -23,7 +23,8 @@ import { CompactHelpProvider } from '../../lib/compactHelp';
  * row can answer. Benchmarks are not portfolios at all — they are indices rebuilt from our own
  * constituents, the yardstick the other two are measured against rather than another thing we hold.
  */
-type TabKey = 'bustelberg' | 'toppenberg' | 'imagine_fund' | 'topselecties' | 'test_topselecties';
+type CollectionKey = 'bustelberg' | 'toppenberg' | 'imagine_fund' | 'topselecties' | 'test_topselecties';
+type TabKey = CollectionKey;
 
 /**
  *  The order lives here, the words live in `managementCopy`. A tab's label and its hover are

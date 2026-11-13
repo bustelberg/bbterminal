@@ -50,8 +50,10 @@ from airs_scanner import (
 from airs_portfolio_exclusions import is_excluded_portfolio
 from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
+from routers._portfolio_valuation import router as valuation_router
 
 router = APIRouter(tags=["airs"])
+router.include_router(valuation_router)
 _log = logging.getLogger(__name__)
 
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"

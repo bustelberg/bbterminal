@@ -33,6 +33,8 @@ const navItems: NavEntry[] = [
   { href: '/' },
   // The AIRS books, their models and the analysis built on them.
   { href: '/management-dashboard' },
+  { href: '/valuation' },
+  { href: '/factsheet' },
   { href: '/airs-check' },
   { href: '/leonteq-portfolios' },
   { href: '/market' },
@@ -126,7 +128,7 @@ export default function Sidebar({ initialUser }: Props) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [viewAsUser, setViewAsUser] = useState(false);
-  // Which collapsible nav sections are expanded. Universe Overview starts open.
+  // Which collapsible nav sections are expanded. Universe starts open.
   //  Keyed by href, not by label. The label is now translated, so a language flip would change
   // the key and silently collapse (or re-open) whatever the reader had set. An href does not move.
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(['/universe']));
