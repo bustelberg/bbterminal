@@ -9,10 +9,11 @@ from deps import supabase
 
 TABLE = 'benchmark_factsheet'
 PERIOD_YEARS = 15
-KEY = f'eur-total-return-{PERIOD_YEARS}y-acwi-agg-v3'
+KEY = f'eur-total-return-{PERIOD_YEARS}y-acwi-agg-qai-v4'
 ASSETS = (
     ('ACWI', 'iShares MSCI ACWI ETF', 'USD'),
     ('AGG', 'iShares Core U.S. Aggregate Bond ETF', 'USD'),
+    ('QAI', 'NYLIM Hedge Multi-Strategy Tracker ETF · Liquid alternatives proxy', 'USD'),
 )
 _lock = RLock()
 
@@ -80,10 +81,10 @@ def statistics(prices, start, end):
 
 
 def calculate(series):
-    # Same closing date and same opening date wherever both funds have full history.
+    # Same closing date and same opening date wherever all funds have full history.
     common = set.intersection(*(set(series[ticker]) for ticker, _, _ in ASSETS))
     if not common:
-        raise ValueError('ACWI and AGG have no shared completed trading date.')
+        raise ValueError('ACWI, AGG and QAI have no shared completed trading date.')
     end = max(common)
     anchor = years_before(date.fromisoformat(end)).isoformat()
     shared_open = max((day for day in common if day <= anchor), default=None)

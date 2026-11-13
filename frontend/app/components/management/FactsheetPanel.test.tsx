@@ -16,6 +16,7 @@ const saved = { ready: true, stale: false, currency: 'EUR', prepared_at: '2026-1
   { ticker: 'AGG', name: 'iShares Core U.S. Aggregate Bond ETF', requested_start: '2011-11-12', end: stats.end,
     period: null, reason: 'Fifteen years of fund history are not available.',
     available_history: { ...stats, start: '2017-11-22', years: 8.98, total_return_pct: 14, cagr_pct: 1.5, volatility_pct: 5 } },
+  { ticker: 'QAI', name: 'NYLIM Hedge Multi-Strategy Tracker ETF · Liquid alternatives proxy', requested_start: '2011-11-12', end: stats.end, period: stats },
 ] };
 
 it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async () => {
@@ -27,13 +28,17 @@ it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async (
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
     await act(async () => root.render(<FactsheetPanel />));
-    expect(host.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
     const bond = host.querySelectorAll('tbody tr')[1];
     expect(bond.textContent).toContain('iShares Core U.S. Aggregate Bond ETF');
     expect(bond.textContent).toContain('15 years');
     expect(bond.textContent).not.toContain('Available history');
     expect(bond.querySelector('a')?.getAttribute('href')).toBe('https://finance.yahoo.com/quote/AGG/');
     expect(host.textContent).toContain('USD/EUR currency movements');
+    const alternatives = host.querySelectorAll('tbody tr')[2];
+    expect(alternatives.textContent).toContain('Liquid alternatives proxy');
+    expect(alternatives.textContent).toContain('15 years');
+    expect(alternatives.querySelector('a')?.getAttribute('href')).toBe('https://finance.yahoo.com/quote/QAI/');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -44,7 +49,7 @@ it('separates true fifteen-year statistics from the bond funds shorter available
   try {
     await act(async () => root.render(<FactsheetPanel />));
     const rows = host.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     expect(rows[0].textContent).toContain('4.73%');
     expect(rows[0].textContent).toContain('15.00%');
     expect(rows[1].textContent).toContain('Fifteen years of fund history are not available');

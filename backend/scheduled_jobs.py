@@ -238,13 +238,13 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         note='Reads saved Yahoo closes and reported quarterly EPS. No provider requests. Missing inputs remain explicitly unavailable; failed publications retain prior results.',
     ),
     JobSpec(
-        id='benchmark_factsheet_daily', label='Daily ACWI and bond factsheet',
-        fills='Fifteen-year EUR total returns, CAGR and daily annualized volatility for ACWI and AGG',
+        id='benchmark_factsheet_daily', label='Daily benchmark factsheet',
+        fills='Fifteen-year EUR total returns, CAGR and daily annualized volatility for ACWI, AGG and QAI',
         cadence='Daily, 23:45 UTC',
         trigger={'hour': 23, 'minute': 45, 'timezone': 'UTC'},
         options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
         max_age_hours=30,
-        note='Two adjusted USD ETF histories converted to EUR, including currency movements. Short histories are labelled separately; no synthetic backfill.',
+        note='Three adjusted USD ETF histories converted to EUR, including currency movements. QAI is a liquid-alternatives proxy. Short histories are labelled separately; no synthetic backfill.',
     ),
     JobSpec(
         id='acwi_weekly_coverage',

@@ -50,7 +50,7 @@ export default function FactsheetPanel() {
       <button type="button" disabled={loading} onClick={() => { setError(''); setLoading(true); setRevision(current => current + 1); }} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
     </div>
     <div className="overflow-x-auto rounded-xl border border-neutral-800/40"><table className="w-full text-sm">
-      <caption className="sr-only">ACWI / AGG Factsheet</caption>
+      <caption className="sr-only">ACWI / AGG / QAI Factsheet</caption>
       <thead className="bg-elevated text-xs text-fg-muted"><tr>
         <th className="px-3 py-2 text-left">Benchmark</th>
         <th className="px-3 py-2 text-left">{nl ? 'Periode' : 'Period'}</th>

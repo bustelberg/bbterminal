@@ -7,7 +7,7 @@ def run(ctx=None):
     if cancel_requested(ctx):
         raise Cancelled('Factsheet preparation cancelled before provider work')
     result = prepare(force=True)
-    return 'ACWI and AGG EUR factsheet saved', {
+    return 'ACWI, AGG and QAI EUR factsheet saved', {
         'prepared_at': result['prepared_at'],
         'period_years': result['period_years'],
         'rows': [{key: row.get(key) for key in ('ticker', 'period', 'available_history', 'reason')}

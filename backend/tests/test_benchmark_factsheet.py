@@ -34,7 +34,7 @@ def test_short_history_is_not_presented_as_fifteen_years():
     end = date(2026, 11, 12)
     stock = series(date(2011, 10, 1), end)
     bonds = series(date(2017, 11, 22), end)
-    rows = F.calculate({'ACWI': stock, 'AGG': bonds})
+    rows = F.calculate({'ACWI': stock, 'AGG': bonds, 'QAI': stock})
     assert rows[0]['period']['start'] == '2011-11-11'  # Anniversary is a Saturday.
     assert rows[0]['period']['end'] == '2026-11-12'
     assert rows[1]['period'] is None
@@ -43,11 +43,12 @@ def test_short_history_is_not_presented_as_fifteen_years():
     assert rows[1]['available_history']['years'] < 15
 
 
-def test_both_series_use_shared_end_and_shared_open_when_full_history_exists():
+def test_all_benchmarks_use_qais_earlier_shared_end_and_the_same_open():
     stock = series(date(2011, 10, 1), date(2026, 11, 12))
     bonds = series(date(2011, 10, 1), date(2026, 11, 13))
-    rows = F.calculate({'ACWI': stock, 'AGG': bonds})
-    assert {row['period']['end'] for row in rows} == {'2026-11-12'}
+    qai = series(date(2011, 10, 1), date(2026, 11, 11))
+    rows = F.calculate({'ACWI': stock, 'AGG': bonds, 'QAI': qai})
+    assert {row['period']['end'] for row in rows} == {'2026-11-11'}
     assert {row['period']['start'] for row in rows} == {'2011-11-11'}
 
 
@@ -129,7 +130,8 @@ def test_read_is_database_only_and_new_store_has_no_placeholder_metrics(monkeypa
 def test_http_schema_does_not_return_thousands_of_source_prices():
     from routers._benchmark_factsheet import FactsheetResponse
     rows = F.calculate({'ACWI': series(date(2011, 10, 1), date(2026, 11, 12)),
-                        'AGG': series(date(2017, 11, 22), date(2026, 11, 12))})
+                        'AGG': series(date(2017, 11, 22), date(2026, 11, 12)),
+                        'QAI': series(date(2011, 10, 1), date(2026, 11, 12))})
     response = FactsheetResponse.model_validate({'ready': True, 'currency': 'EUR', 'rows': rows})
     assert 'source_prices_eur' not in response.model_dump()['rows'][0]
 
@@ -138,7 +140,8 @@ def test_first_preparation_publishes_auditable_eur_metrics_after_both_sources_su
     import asset_pipeline.yahoo as Y
     import common.fx_load as FX
     source = {'ACWI': series(date(2011, 10, 1), date(2026, 11, 12)),
-              'AGG': series(date(2011, 10, 1), date(2026, 11, 12))}
+              'AGG': series(date(2011, 10, 1), date(2026, 11, 12)),
+              'QAI': series(date(2011, 10, 1), date(2026, 11, 12), growth=1.00015)}
     requested_starts = []
     def chart(ticker, *_args):
         requested_starts.append(datetime.fromtimestamp(_args[0], timezone.utc).date())
@@ -162,6 +165,7 @@ def test_first_preparation_publishes_auditable_eur_metrics_after_both_sources_su
     result = F.prepare(today=date(2026, 11, 13))
     assert result['ready'] is True
     assert result['period_years'] == 15
+    assert len(requested_starts) == 3
     assert all(day.year == 2011 for day in requested_starts)
     assert len(saved) == 1
     assert result['rows'][0]['currency'] == 'EUR'
@@ -173,13 +177,20 @@ def test_first_preparation_publishes_auditable_eur_metrics_after_both_sources_su
     assert result['rows'][1]['available_history'] is None
     assert result['rows'][1]['period']['years'] > 14.99
     assert result['rows'][1]['period']['observations'] > 3000
-    assert saved[0]['key'] != 'eur-total-return-10y-acwi-agg-v2'  # Do not reuse ten-year results.
+    assert result['rows'][2]['ticker'] == 'QAI'
+    assert result['rows'][2]['currency'] == 'EUR'
+    assert result['rows'][2]['source_prices_eur']['2011-10-03'] == 50
+    assert result['rows'][2]['period']['start'] == result['rows'][0]['period']['start']
+    assert result['rows'][2]['period']['end'] == result['rows'][0]['period']['end']
+    assert result['rows'][2]['period']['cagr_pct'] != result['rows'][0]['period']['cagr_pct']
+    assert saved[0]['key'] != 'eur-total-return-15y-acwi-agg-v3'
 
 
 def test_daily_receipt_retains_fifteen_year_statistics_without_raw_prices(monkeypatch):
     from scheduler_jobs.factsheet import run
     rows = F.calculate({'ACWI': series(date(2011, 10, 1), date(2026, 11, 12)),
-                        'AGG': series(date(2011, 10, 1), date(2026, 11, 12))})
+                        'AGG': series(date(2011, 10, 1), date(2026, 11, 12)),
+                        'QAI': series(date(2011, 10, 1), date(2026, 11, 12))})
     def prepare(*, force):
         assert force is True
         return {'period_years': 15, 'prepared_at': '2026-11-13T23:45:00Z', 'rows': rows}
