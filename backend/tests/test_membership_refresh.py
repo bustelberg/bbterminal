@@ -9,7 +9,8 @@ class Context:
     cancelled = False
     def __init__(self): self.events = []
     def check(self):
-        if self.cancelled: raise JobCancelled()
+        if self.cancelled:
+            raise JobCancelled()
     def progress(self, done, total, message): self.events.append((done, total, message))
 
 

@@ -1,10 +1,13 @@
 """One selected-portfolio payload and one streamed, forced source refresh."""
-from datetime import date
+from datetime import date, datetime, timezone
+from threading import Lock
 
 from fastapi import HTTPException
 
 from deps import supabase
 from services import portfolio_valuation as V, valuation_workbook as W
+
+_preparation_lock = Lock()
 
 
 def selection(portfolio_id):
@@ -18,13 +21,40 @@ def _leonteq_identity(selected, *, refresh=False):
     from leonteq import management, portfolio_cache
     entry = next((item for item in management.entries()
                   if management.key(item['display_name']) == management.key(selected['name'])), None)
-    catalogue = portfolio_cache.portfolios(refresh=True) if refresh else portfolio_cache.saved_portfolios()
-    if refresh and (not catalogue.get('success') or catalogue.get('refresh_error') or not catalogue.get('snapshot_saved')):
-        raise HTTPException(502, 'Leonteq catalogue refresh failed. No AIRS fallback was used.')
+    # Identity is stable configuration, not a price or holdings snapshot. Do not
+    # require a second browser login before refreshing a known composition.
+    catalogue = portfolio_cache.saved_portfolios()
     matched = management.resolve(entry, catalogue.get('portfolios') or []) if entry else None
+    if refresh and not matched:
+        catalogue = portfolio_cache.portfolios(refresh=True)
+        if not catalogue.get('success') or catalogue.get('refresh_error') or not catalogue.get('snapshot_saved'):
+            raise HTTPException(502, _leonteq_failure('catalogue', catalogue))
+        matched = management.resolve(entry, catalogue.get('portfolios') or []) if entry else None
     if not matched:
         raise HTTPException(503, 'Selected Topselectie is unavailable in Leonteq. No AIRS fallback was used.')
     return matched['name']
+
+
+def _leonteq_failure(resource, result):
+    # Only expose known status codes; browser exception text can contain secrets.
+    reasons = {
+        'missing_credentials': 'Leonteq credentials are not configured on the server',
+        'busy': 'another Leonteq operation is running; retry after it finishes',
+        'login_rejected': 'Leonteq rejected the configured login',
+        'verification_required': 'Leonteq requires login verification',
+        'timeout': 'the Leonteq request timed out',
+        'browser_unavailable': 'the server browser runtime is unavailable',
+        'browser_error': 'the server browser could not complete the Leonteq request',
+        'session_failed': 'the Leonteq session could not be established',
+        'portfolios_failed': 'Leonteq did not return its portfolio catalogue',
+        'portfolio_not_found': 'the selected portfolio was not found in Leonteq',
+        'composition_failed': 'Leonteq did not return a complete composition',
+    }
+    status = result.get('refresh_error') or result.get('status')
+    reason = reasons.get(status, 'Leonteq did not return a successful response')
+    if result.get('success') and not result.get('refresh_error') and not result.get('snapshot_saved'):
+        reason = 'the refreshed snapshot could not be saved'
+    return f'Leonteq {resource} refresh failed: {reason}. No AIRS fallback was used.'
 
 
 def holdings(selected):
@@ -95,7 +125,7 @@ def _refresh_holdings(selected, check):
         check()
         snapshot = composition_cache.composition(name, refresh=True)
         if not snapshot.get('success') or snapshot.get('refresh_error') or not snapshot.get('snapshot_saved'):
-            raise HTTPException(502, 'Leonteq holdings could not be refreshed and saved. No AIRS fallback was used.')
+            raise HTTPException(502, _leonteq_failure('holdings', snapshot))
     else:
         from services.airs_refresh import collect_model_compositions
         result = collect_model_compositions(on_event=lambda *_args, **_kwargs: None, force=True,
@@ -156,11 +186,43 @@ def refresh(portfolio_id, emit, check, *, refresh_holdings=True, source_cache=No
         # Persist failures as well, so a later cached read cannot call a partial run current.
         if bundle.get('prepared_at'):
             supabase.table(V.TABLE).upsert({'portfolio_id': portfolio_id, 'prepared_at': bundle['prepared_at'],
-                'payload': {key: value for key, value in bundle.items() if key not in ('prepared_at', 'ready', 'stale', 'workbook')}}).execute()
+                'payload': {key: value for key, value in bundle.items() if key not in ('prepared_at', 'ready', 'stale', 'workbook')}},
+                on_conflict='portfolio_id').execute()
         final = {**bundle, 'workbook': W.read(portfolio_id, prepared_bundle=bundle, include_membership=True)}
+        gaps = [item['code'] for item in final['workbook'].get('membership_legend', []) if item['status'] != 'complete']
+        if gaps and refresh_holdings:
+            from services import portfolio_membership
+            from scheduler_runtime.context import LogContext
+            class Context(LogContext):
+                def check(self):
+                    check()
+
+                @property
+                def cancelled(self):
+                    return _cancelled(check)
+            context = Context(step=lambda done, total, message: emit({
+                'type': 'progress', 'done': done, 'total': total, 'message': message}))
+            try:
+                portfolio_membership.refresh_holdings(context, source='all')
+            except JobCancelled:
+                raise
+            except Exception:
+                failures['memberships'] = 'Portfolio membership sources could not all be refreshed. Completed data was saved.'
+            check()
+            final['workbook'] = W.read(portfolio_id, prepared_bundle=bundle, include_membership=True)
+            gaps = [item['code'] for item in final['workbook'].get('membership_legend', []) if item['status'] != 'complete']
+        if gaps:
+            failures['memberships'] = 'Membership coverage is incomplete for: ' + ', '.join(gaps)
+        final.update(errors=failures, stale=bool(failures) or final.get('stale', False))
+        if not current[0] and not failures:
+            # A valid all-cash/bond portfolio needs a prepared empty workbook;
+            # no company row exists to create its publication timestamp.
+            final.update(prepared_at=datetime.now(timezone.utc).isoformat(), ready=True,
+                         calculation_date=date.today().isoformat(), stale=False)
         if final.get('prepared_at'):
             supabase.table(V.TABLE).upsert({'portfolio_id': portfolio_id, 'prepared_at': final['prepared_at'],
-                'payload': {key: value for key, value in final.items() if key not in ('prepared_at', 'ready', 'stale')}}).execute()
+                'payload': {key: value for key, value in final.items() if key not in ('prepared_at', 'ready', 'stale')}},
+                on_conflict='portfolio_id').execute()
         emit({'type': 'complete', 'data': final, 'failures': list(failures.values())})
         return final
     finally:
@@ -172,3 +234,63 @@ def save_settings(portfolio_id, payload):
     selected = selection(portfolio_id)
     rows, _evidence = holdings(selected)
     return W.save(portfolio_id, payload, prepared_bundle={'rows': rows})
+
+
+def prepare_all(context):
+    """Bootstrap source snapshots and publish complete bundles, also on a cold DB."""
+    if not _preparation_lock.acquire(blocking=False):
+        raise HTTPException(409, 'Portfolio preparation is already running.')
+    try:
+        return _prepare_all(context)
+    finally:
+        _preparation_lock.release()
+
+
+def _prepare_all(context):
+    from services import airs_refresh, portfolio_membership
+    from scheduler_runtime.execution import Cancelled
+    from jobs import JobCancelled
+    summary = {'saved': [], 'errors': {}}
+    roster = V.portfolios()
+    if not roster or any(row.get('id') is None for row in roster):
+        # Account discovery creates the dashboard roster; model discovery makes
+        # reviewed strategy-map pairings possible without manual seeding.
+        for label, collect in (('accounts', airs_refresh.refresh_accounts), ('models', airs_refresh.scan_models)):
+            context.check()
+            context.progress(0, 0, f'Discovering AIRS {label}…')
+            try:
+                collect(context, force=True)
+            except (Cancelled, JobCancelled):
+                raise
+            except Exception as exc:
+                summary['errors'][label] = f'AIRS {label} discovery failed ({type(exc).__name__}).'
+    context.check()
+    try:
+        portfolio_membership.refresh_holdings(context, source='all', all_portfolios=True)
+    except (Cancelled, JobCancelled):
+        raise
+    except Exception as exc:
+        summary['errors']['holdings'] = str(exc)
+    roster = V.portfolios()
+    selected = {row['id']: row for row in roster if row.get('id') is not None}
+    summary['unavailable_portfolios'] = [row for row in roster if row.get('id') is None]
+    for row in summary['unavailable_portfolios']:
+        summary['errors'][row.get('account') or row['name']] = row.get('unavailable_reason') or 'Portfolio has no linked model.'
+    source_cache = {}
+    for index, (portfolio_id, portfolio) in enumerate(selected.items()):
+        context.check()
+        context.progress(index, len(selected), f"Preparing portfolio: {portfolio['name']}")
+        try:
+            payload = refresh(portfolio_id,
+                lambda event: context.progress(event.get('done', 0), event.get('total', 0), event.get('message', '')),
+                context.check, refresh_holdings='holdings' in summary['errors'], source_cache=source_cache)
+            summary['saved'].append(portfolio_id)
+            if payload.get('errors'):
+                summary['errors'][str(portfolio_id)] = payload['errors']
+        except (Cancelled, JobCancelled):
+            raise
+        except Exception as exc:
+            summary['errors'][str(portfolio_id)] = (exc.detail if isinstance(exc, HTTPException) else type(exc).__name__)
+    if not selected:
+        summary['errors']['roster'] = 'No linked dashboard portfolios found after source discovery.'
+    return summary

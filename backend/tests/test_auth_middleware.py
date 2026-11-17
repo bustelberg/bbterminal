@@ -663,6 +663,7 @@ def test_valuation_workbook_assumptions_are_an_exact_authenticated_user_write(mo
     ('POST', '/api/airs/valuation/portfolios/7/dashboard/refresh'),
     ('POST', '/api/airs/valuation/portfolios/7/rows/US0534841012/refresh'),
     ('POST', '/api/airs/valuation/holdings/refresh/job'),
+    ('POST', '/api/airs/valuation/prepare/refresh'),
     ('PUT', '/api/airs/valuation/portfolios/7/workbook'),
 ])
 def test_valuation_is_fully_available_to_authenticated_users(monkeypatch, method, path):

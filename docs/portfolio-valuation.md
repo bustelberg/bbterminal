@@ -276,7 +276,7 @@ IF 14 October 2026. Those effective dates are not retrieval timestamps. The AIRS
 `positions_scanned_at` field is now exposed separately as Last retrieved.
 
 The valuation page now loads one combined `/portfolios/{id}/dashboard` payload
-for every workbook tab and the historical view. Tab changes make no requests.
+for every workbook tab. Tab changes make no requests.
 Refresh uses one `/dashboard/refresh` POST stream for holdings refresh, source
 updates, per-row progress and the final full payload; no polling or per-row HTTP
 requests are needed. Topselecties use saved/refreshed Leonteq Share holdings only.
@@ -288,3 +288,22 @@ payload. Ordinary selection reads the prepared payload and overlays current save
 analyst assumptions without rebuilding source data. Source failures retain saved
 data and are recorded as incomplete. The backend scheduler must be running for
 the registered daily trigger to execute.
+
+
+With no portfolio selected, Refresh starts `POST /api/airs/valuation/prepare/refresh`.
+This shares `valuation_dashboard.prepare_all` with `portfolio_valuation_daily`:
+when the roster is empty or unlinked it discovers AIRS accounts and model
+compositions, then refreshes every dashboard model and the configured Leonteq
+Topselecties. It resolves missing company identities, fetches Yahoo history and
+GuruFocus statements/forecasts, and saves complete workbook bundles, including
+membership evidence. A migrated empty database needs configured provider
+credentials and network access, but no manually populated source snapshots.
+The returned roster populates the picker without another request. Portfolio
+selection then uses its single bundled GET.
+
+Preparation is exclusive across manual and daily runs. Cancellation and partial
+failures retain completed writes; unresolved links or incomplete memberships
+remain explicit failures. A selected portfolio refresh also fills missing
+membership snapshots. The daily run covers all dashboard models, including
+models outside the membership-code families, and shares fetched company inputs
+across portfolios. No provider work runs on ordinary selection reads.

@@ -259,6 +259,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     "/api/airs/model-portfolios/scan/job",
     "/api/airs/model-portfolios/refresh/job",
     "/api/airs/valuation/holdings/refresh/job",
+    "/api/airs/valuation/prepare/refresh",
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).
     "/api/airs/basket/fundamentals/ingest/job",
     # The Analyse modal's input tables → fetch ONE `no_data` holding's financials.

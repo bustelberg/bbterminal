@@ -2661,6 +2661,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/valuation/prepare/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Valuation Dashboard */
+        post: operations["prepare_valuation_dashboard_api_airs_valuation_prepare_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/vermogen/price-checks/job": {
         parameters: {
             query?: never;
@@ -20678,6 +20695,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_valuation_dashboard_api_airs_valuation_prepare_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

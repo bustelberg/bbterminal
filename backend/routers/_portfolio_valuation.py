@@ -153,13 +153,44 @@ async def valuation_dashboard(portfolio_id: int = Path(ge=1)):
 
 @router.post('/api/airs/valuation/portfolios/{portfolio_id}/dashboard/refresh')
 async def refresh_valuation_dashboard(portfolio_id: int = Path(ge=1)):
+    from services import valuation_dashboard as dashboard
+    return _valuation_stream(lambda emit, check: dashboard.refresh(portfolio_id, emit, check))
+
+
+@router.post('/api/airs/valuation/prepare/refresh')
+async def prepare_valuation_dashboard():
+    from services import valuation_dashboard as dashboard
+    from scheduler_runtime.context import LogContext
+
+    def prepare(emit, check):
+        class Context(LogContext):
+            def check(self):
+                check()
+
+            @property
+            def cancelled(self):
+                from jobs import JobCancelled
+                try:
+                    check()
+                    return False
+                except JobCancelled:
+                    return True
+
+        context = Context(step=lambda done, total, message: emit({
+            'type': 'progress', 'done': done, 'total': total, 'message': message}))
+        summary = dashboard.prepare_all(context)
+        emit({'type': 'complete', 'portfolios': dashboard.V.portfolios(),
+              'failures': [str(reason) for reason in summary['errors'].values()]})
+    return _valuation_stream(prepare)
+
+
+def _valuation_stream(operation):
     import queue
     import threading
     from fastapi import HTTPException
     from fastapi.responses import StreamingResponse
     from jobs import JobCancelled
     from routers._sse import sse_event, sse_keepalive
-    from services import valuation_dashboard as dashboard
 
     events = queue.Queue()
     cancelled = threading.Event()
@@ -168,7 +199,7 @@ async def refresh_valuation_dashboard(portfolio_id: int = Path(ge=1)):
             raise JobCancelled()
     def run():
         try:
-            dashboard.refresh(portfolio_id, events.put, check)
+            operation(events.put, check)
         except JobCancelled:
             events.put({'type': 'cancelled'})
         except Exception as exc:

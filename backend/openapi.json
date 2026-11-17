@@ -26624,6 +26624,26 @@
         ]
       }
     },
+    "/api/airs/valuation/prepare/refresh": {
+      "post": {
+        "operationId": "prepare_valuation_dashboard_api_airs_valuation_prepare_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Prepare Valuation Dashboard",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
     "/api/airs/vermogen/price-checks/job": {
       "post": {
         "operationId": "force_account_price_checks_job_api_airs_vermogen_price_checks_job_post",

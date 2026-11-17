@@ -60,7 +60,34 @@ export default function ValuationPanel() {
   const workbook = data?.workbook as Workbook | null | undefined;
   const rows = [...(data?.rows ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const refreshPortfolio = () => {
-    if (selectedId == null || loading) return;
+    if (loading) return;
+    if (selectedId == null) {
+      setLoading(true); setError('');
+      startLocalJob(nl ? 'Waardering voorbereiden' : 'Prepare valuations', 'valuation.prepare', async (signal, report) => {
+        let complete = false;
+        let failure = '';
+        try {
+          await runSSE(`${API_URL}/api/airs/valuation/prepare/refresh`, { method: 'POST' }, raw => {
+            const event = raw as { type: string; done?: number; total?: number; message?: string; portfolios?: Portfolio[]; failures?: string[] };
+            if (event.type === 'progress') report({ done: event.done ?? 0, total: event.total ?? 0, message: event.message });
+            if (event.type === 'complete') {
+              complete = true;
+              setPortfolios(event.portfolios ?? []);
+              failure = event.failures?.join('\n') ?? '';
+            }
+            if (event.type === 'error') failure = event.message ?? 'Portfolio preparation failed.';
+          }, signal);
+          if (signal.aborted) return;
+          if (failure || !complete) throw new ExpectedJobFailure(failure || 'Portfolio preparation ended before completion.',
+            nl ? 'Niet alle portefeuilles konden worden voorbereid.' : 'Some portfolios could not be prepared.');
+          return nl ? 'Portefeuilles voorbereid.' : 'Portfolios prepared.';
+        } catch (cause) {
+          if (!signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+          throw cause;
+        } finally { setLoading(false); }
+      });
+      return;
+    }
     const id = selectedId, selection = selected;
     setLoading(true); setError('');
     startLocalJob(nl ? 'Waardering vernieuwen' : 'Refresh valuation', 'valuation.portfolio', async (signal, report) => {
@@ -113,7 +140,7 @@ export default function ValuationPanel() {
         </select>
       </label>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={refreshPortfolio} disabled={loading || selectedId == null} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
+        <button type="button" onClick={refreshPortfolio} disabled={loading} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
         <div className="flex flex-wrap items-center gap-3 text-xs" aria-label={nl ? 'Kolomtypen' : 'Column types'}>
           {(['data', 'assumption', 'calculation'] as const).map(kind => <span key={kind} className={`rounded border-t-2 px-3 py-2 ${COLUMN_STYLE[kind]}`}>
             {kind === 'data' ? (nl ? 'Blauw · directe gegevens' : 'Blue · direct data') : kind === 'assumption'

@@ -80,11 +80,14 @@ def test_collector_recovers_only_actual_inception_and_retains_execution_evidence
          'currency': 'EUR', 'totalValueAmcCcy': 500, 'totalUnits': 500}],
         'totals': {'totalValueAmcCcy': 995}}
     def read(_page, _ids, name, **options):
-        if options.get('accounting'): return {'transactions': []}
-        if options.get('instructions'): return {'instructions': [order()]}
-        if options.get('history'): return {'details': {'issueDate': '2026-01-01', 'currency': 'EUR'},
-            'history': {'series': [['2026-01-01', 100], ['2026-01-02', 99.5]],
-                        'performances': [{'nameOrIsin': name, 'performanceYTD': {'value': -.5}}]}}
+        if options.get('accounting'):
+            return {'transactions': []}
+        if options.get('instructions'):
+            return {'instructions': [order()]}
+        if options.get('history'):
+            return {'details': {'issueDate': '2026-01-01', 'currency': 'EUR'},
+                'history': {'series': [['2026-01-01', 100], ['2026-01-02', 99.5]],
+                            'performances': [{'nameOrIsin': name, 'performanceYTD': {'value': -.5}}]}}
         return {'accounting_valuation': first if options['valuation_date']=='2026-01-02' else
                 {'closingPriceDate': '2026-01-01', 'rows': [], 'totals': {}}}
     monkeypatch.setattr(portal_api, 'read', read)

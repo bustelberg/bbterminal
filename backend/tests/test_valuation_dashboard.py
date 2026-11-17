@@ -72,12 +72,41 @@ def test_forced_leonteq_refresh_is_one_selected_composition_and_never_airs(selec
     selected.update(management_group='topselecties', name='Family')
     calls = []
     monkeypatch.setattr(management, 'entries', lambda: [{'display_name': 'Family', 'leonteq_name': 'Family Index'}])
+    monkeypatch.setattr(portfolio_cache, 'saved_portfolios', lambda: {'success': False, 'portfolios': []})
     monkeypatch.setattr(portfolio_cache, 'portfolios', lambda **kwargs: calls.append(('catalogue', kwargs)) or {
         'success': True, 'snapshot_saved': True, 'portfolios': [{'name': 'Family Index'}, {'name': 'Other Index'}]})
     monkeypatch.setattr(composition_cache, 'composition', lambda name, **kwargs: calls.append((name, kwargs)) or {'success': True, 'snapshot_saved': True})
     monkeypatch.setattr(airs_refresh, 'collect_model_compositions', lambda **_: pytest.fail('No AIRS fallback'))
     D._refresh_holdings(selected, lambda: None)
     assert calls == [('catalogue', {'refresh': True}), ('Family Index', {'refresh': True})]
+
+
+def test_known_leonteq_identity_refreshes_holdings_without_catalogue_login(selected, monkeypatch):
+    selected.update(management_group='topselecties', name='AITopSelectie')
+    monkeypatch.setattr(portfolio_cache, 'saved_portfolios', lambda: {
+        'success': True, 'portfolios': [{'name': 'AI-TopSelectie Index'}]})
+    monkeypatch.setattr(portfolio_cache, 'portfolios', lambda **_: pytest.fail('Redundant catalogue login'))
+    calls = []
+    monkeypatch.setattr(composition_cache, 'composition', lambda name, **kwargs:
+        calls.append((name, kwargs)) or {'success': True, 'snapshot_saved': True})
+    D._refresh_holdings(selected, lambda: None)
+    assert calls == [('AI-TopSelectie Index', {'refresh': True})]
+
+
+@pytest.mark.parametrize('result,reason', [
+    ({'success': False, 'status': 'busy'}, 'another Leonteq operation'),
+    ({'success': False, 'status': 'missing_credentials'}, 'credentials are not configured'),
+    ({'success': True, 'refresh_error': 'timeout'}, 'timed out'),
+    ({'success': True, 'snapshot_saved': False}, 'could not be saved'),
+])
+def test_leonteq_refresh_reports_underlying_failure_without_accepting_saved_holdings(selected, monkeypatch, result, reason):
+    selected.update(management_group='topselecties')
+    monkeypatch.setattr(D, '_leonteq_identity', lambda *_args, **_kwargs: 'AI-TopSelectie Index')
+    monkeypatch.setattr(composition_cache, 'composition', lambda *_args, **_kwargs: result)
+    with pytest.raises(HTTPException) as caught:
+        D._refresh_holdings(selected, lambda: None)
+    assert caught.value.status_code == 502
+    assert reason in caught.value.detail
 
 
 @pytest.fixture
@@ -101,7 +130,8 @@ def test_refresh_stream_retains_failures_and_returns_all_tabs_once(refresh_env, 
     def refresh_row(pid, isin, **kwargs):
         refreshed.append(isin)
         assert kwargs['current_holdings'][0] == rows
-        if isin == 'A': raise HTTPException(502, 'GuruFocus returned empty statements.')
+        if isin == 'A':
+            raise HTTPException(502, 'GuruFocus returned empty statements.')
         return {**kwargs['existing'], 'rows': [{**row, 'price': 30 if row['isin'] == 'B' else row['price']} for row in rows]}
     monkeypatch.setattr(V, 'refresh_row', refresh_row)
     events = []
@@ -122,9 +152,11 @@ def test_cancellation_leaves_completed_rows_saved_and_releases_lock(refresh_env,
         saved.append(isin)
         return kwargs['existing']
     def check():
-        if saved: raise JobCancelled()
+        if saved:
+            raise JobCancelled()
     monkeypatch.setattr(V, 'refresh_row', refresh_row)
-    with pytest.raises(JobCancelled): D.refresh(1, lambda _: None, check)
+    with pytest.raises(JobCancelled):
+        D.refresh(1, lambda _: None, check)
     assert saved == ['A']
     lock = V._publication_lock(1)
     assert lock.acquire(blocking=False)
@@ -152,3 +184,72 @@ def test_daily_valuation_uses_amsterdam_eight_am_schedule():
     from scheduled_jobs import SCHEDULED_JOBS
     spec = next(job for job in SCHEDULED_JOBS if job.id == 'portfolio_valuation_daily')
     assert spec.trigger == {'hour': 8, 'minute': 0, 'timezone': 'Europe/Amsterdam'}
+
+
+def test_empty_database_preparation_discovers_sources_before_publishing(monkeypatch):
+    from services import airs_refresh, portfolio_membership
+    from scheduler_runtime.context import LogContext
+    roster, calls = [], []
+    monkeypatch.setattr(V, 'portfolios', lambda: list(roster))
+    def accounts(ctx, *, force):
+        assert force
+        calls.append('accounts')
+    def models(ctx, *, force):
+        assert force
+        calls.append('models')
+        roster.extend([{'id': 7, 'name': 'AIRS'}, {'id': 8, 'name': 'Leonteq'}])
+    monkeypatch.setattr(airs_refresh, 'refresh_accounts', accounts)
+    monkeypatch.setattr(airs_refresh, 'scan_models', models)
+    def holdings(ctx, **kwargs):
+        assert kwargs == {'source': 'all', 'all_portfolios': True}
+        calls.append('holdings')
+    monkeypatch.setattr(portfolio_membership, 'refresh_holdings', holdings)
+    caches = []
+    def publish(pid, emit, check, **kwargs):
+        calls.append(pid)
+        assert kwargs['refresh_holdings'] is False
+        caches.append(kwargs['source_cache'])
+        return {'errors': {}}
+    monkeypatch.setattr(D, 'refresh', publish)
+    summary = D.prepare_all(LogContext())
+    assert calls == ['accounts', 'models', 'holdings', 7, 8]
+    assert summary == {'saved': [7, 8], 'errors': {}, 'unavailable_portfolios': []}
+    assert caches[0] is caches[1]
+
+
+def test_preparation_cancellation_releases_the_global_lock(monkeypatch):
+    from scheduler_runtime.context import LogContext
+    monkeypatch.setattr(V, 'portfolios', lambda: [])
+    with pytest.raises(JobCancelled):
+        class Context(LogContext):
+            def check(self):
+                raise JobCancelled()
+        D.prepare_all(Context())
+    assert D._preparation_lock.acquire(blocking=False)
+    D._preparation_lock.release()
+
+
+def test_refresh_publishes_a_complete_bundle_without_prior_valuation_rows(refresh_env, monkeypatch):
+    rows, _reads, database = refresh_env
+    monkeypatch.setattr(V, 'supabase', database)
+    monkeypatch.setattr(D, '_saved_bundle', lambda *_: {
+        'portfolio_id': 1, 'rows': [{**row, 'status': 'pending'} for row in rows],
+        'method': V.METHOD, 'evidence': {}, 'ready': False, 'prepared_at': None})
+    fetched = []
+    monkeypatch.setattr(V, 'refresh_row_sources', lambda isin, name: fetched.append(isin))
+    monkeypatch.setattr(V, 'load_inputs', lambda *_: ({}, [], [], 'No historical EPS available.'))
+    result = D.refresh(1, lambda _: None, lambda: None)
+    assert fetched == ['A', 'B']
+    assert result['ready'] is True
+    assert result['stale'] is False
+    assert database.tables[V.TABLE][0]['payload']['workbook'] == result['workbook']
+
+
+def test_cash_only_portfolio_also_publishes_a_workbook(refresh_env, monkeypatch):
+    _rows, _reads, database = refresh_env
+    monkeypatch.setattr(D, 'holdings', lambda *_: ([], {}))
+    monkeypatch.setattr(D, '_saved_bundle', lambda *_: {
+        'portfolio_id': 1, 'rows': [], 'method': V.METHOD, 'evidence': {}, 'prepared_at': None})
+    result = D.refresh(1, lambda _: None, lambda: None)
+    assert result['ready'] and not result['stale']
+    assert database.tables[V.TABLE][0]['payload']['workbook'] == result['workbook']

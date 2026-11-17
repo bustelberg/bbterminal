@@ -63,6 +63,28 @@ it('does not launch another preparation request for stale or pending cached data
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
+it('can prepare an empty database and then select a portfolio with one bundled read', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (String(url).endsWith('/portfolios')) return response([]);
+    if (init?.method === 'POST') return new Response(frame({ type: 'complete', portfolios: roster, failures: [] }));
+    return response(payload('Prepared Company'));
+  });
+  const { host, root } = mount();
+  try {
+    await act(async () => root.render(<ValuationPanel />));
+    const refresh = [...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')!;
+    expect(refresh.disabled).toBe(false);
+    await act(async () => refresh.click());
+    expect(vi.mocked(apiFetch).mock.calls[1][0]).toContain('/valuation/prepare/refresh');
+    expect(jobsStore.get().jobs.at(-1)?.status).toBe('done');
+    await select(host);
+    expect(apiFetch).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(apiFetch).mock.calls[2][0]).toContain('/portfolios/1/dashboard');
+    expect(host.textContent).toContain('Prepared Company');
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
 it.each([null, undefined])('keeps selection to one bundled request when workbook data is %s', async missingWorkbook => {
   vi.mocked(apiFetch).mockReset();
   vi.mocked(apiFetch).mockImplementation(async url => response(String(url).endsWith('/portfolios')

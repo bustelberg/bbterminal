@@ -111,7 +111,7 @@ def read():
 
 
 
-def refresh_holdings(ctx, *, source='all'):
+def refresh_holdings(ctx, *, source='all', all_portfolios=False):
     """Refresh membership holdings only, using each family's authoritative source."""
     from services import portfolio_valuation, airs_refresh
     from jobs import JobCancelled
@@ -122,7 +122,8 @@ def refresh_holdings(ctx, *, source='all'):
     failures, done = [], 0
     roster = portfolio_valuation.portfolios() if source in ('all', 'airs') else []
     allowed = {key(account) for definition in DEFINITIONS for account in definition.get('accounts', [])}
-    selected = [row for row in roster if key(row.get('account')) in allowed]
+    selected = [row for row in roster if (all_portfolios and row.get('management_group') != 'topselecties')
+                or key(row.get('account')) in allowed]
     ids = {row['id'] for row in selected if row.get('id') is not None}
     leonteq_entries = management.entries() if source in ('all', 'leonteq') else []
     total = len(ids) + len(leonteq_entries)

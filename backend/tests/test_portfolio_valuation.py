@@ -245,6 +245,9 @@ def test_portfolio_roster_reuses_dashboard_account_names_and_keeps_unlinked_acco
 
 
 def test_daily_job_publishes_shared_model_once_and_reports_unlinked_portfolio(monkeypatch):
+    from services import airs_refresh
+    monkeypatch.setattr(airs_refresh, 'refresh_accounts', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(airs_refresh, 'scan_models', lambda *_args, **_kwargs: None)
     monkeypatch.setattr(V, 'portfolios', lambda: [
         {'id': 7, 'name': 'Account One'}, {'id': 7, 'name': 'Account Two'},
         {'id': None, 'name': 'Unlinked', 'account': 'UNLINKED', 'unavailable_reason': 'Connect model'},
@@ -256,9 +259,13 @@ def test_daily_job_publishes_shared_model_once_and_reports_unlinked_portfolio(mo
     from services import valuation_dashboard as D, portfolio_membership as M
     monkeypatch.setattr(D, 'refresh', lambda pid, *_args, **kwargs: publish(pid, **kwargs))
     monkeypatch.setattr(M, 'refresh_holdings', lambda *_args, **_kwargs: None)
-    _, summary = J.run()
+    from dashboard_daily import IncompleteRefresh
+    with pytest.raises(IncompleteRefresh) as caught:
+        J.run()
+    summary = caught.value.summary
     assert calls == [7]
-    assert summary['unavailable_portfolios'] == [{'name': 'Unlinked', 'account': 'UNLINKED', 'reason': 'Connect model'}]
+    assert summary['errors']['UNLINKED'] == 'Connect model'
+    assert summary['unavailable_portfolios'][0]['name'] == 'Unlinked'
 
 
 def test_selected_refresh_prepares_missing_or_stale_results_and_force_recalculates(monkeypatch):
