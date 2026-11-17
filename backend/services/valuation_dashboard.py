@@ -1,5 +1,5 @@
 """One selected-portfolio payload and one streamed, forced source refresh."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from threading import Lock
 
 from fastapi import HTTPException
@@ -132,12 +132,27 @@ def read(portfolio_id):
         if payload.get('evidence', {}).get('source') == expected:
             settings = (supabase.table(W.TABLE).select('payload,updated_at').eq('portfolio_id', portfolio_id).limit(1).execute().data or [])
             workbook = payload['workbook']
+            # A complete portfolio bundle can outlive a separately repaired or
+            # refreshed company feed. Re-read saved inputs when forecast years
+            # or quotes are missing/expired, without making provider requests.
+            if any('forecast' in row and (row['forecast'].get('fy1') is None
+                   or row['forecast'].get('fy2') is None
+                   or str(row['forecast'].get('fy1_date') or '') < date.today().isoformat())
+                   or ('quote' in row and (row['quote'].get('price') is None
+                       or str(row['quote'].get('price_date') or '') < (date.today() - timedelta(days=7)).isoformat()))
+                   for row in workbook['rows']):
+                current = W.read(portfolio_id, prepared_bundle=payload, include_membership=False)
+                sources = {row.get('isin'): row for row in current['rows']}
+                workbook = {**workbook, 'as_of': current.get('as_of', date.today().isoformat()),
+                    'rows': [{**row, **{key: value for key, value in
+                    sources.get(row.get('isin'), {}).items() if key in ('forecast', 'quote', 'ticker')}}
+                    for row in workbook['rows']]}
             if settings:
                 overrides = settings[0]['payload']
                 workbook = {**workbook, 'parameters': {**workbook['parameters'], **overrides.get('parameters', {})},
                     'updated_at': settings[0]['updated_at'], 'rows': [{**row, 'assumptions': {**row['assumptions'],
                         **overrides.get('companies', {}).get(row.get('isin'), {})}} for row in workbook['rows']]}
-            return {**payload, 'workbook': workbook, 'ready': True, 'prepared_at': saved[0]['prepared_at'],
+            return {**payload, 'workbook': W.attach_fx(workbook), 'ready': True, 'prepared_at': saved[0]['prepared_at'],
                 'stale': bool(payload.get('errors')) or payload.get('calculation_date') != date.today().isoformat()}
     try:
         current = holdings(selected)

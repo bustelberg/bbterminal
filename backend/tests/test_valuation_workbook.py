@@ -36,6 +36,19 @@ def setup(monkeypatch):
     return database
 
 
+def test_saved_fx_is_bundled_without_writing_assumption_overrides(monkeypatch):
+    database = FakeSupabase({'fx_rate': [
+        {'currency_code': 'USD', 'rate_date': '2026-11-13', 'rate': 1.25},
+        {'currency_code': 'USD', 'rate_date': '2026-11-17', 'rate': 2},
+        {'currency_code': 'GBP', 'rate_date': '2026-11-13', 'rate': 0},
+    ]})
+    monkeypatch.setattr(W, 'supabase', database)
+    workbook = {'rows': [{'quote': {'price_date': '2026-11-16'}, 'assumptions': {}}]}
+    row = W.attach_fx(workbook)['rows'][0]
+    assert row['fx_rates'] == {'2026-11-13': {'USD': 1.25}}
+    assert row['assumptions'] == {}
+
+
 def test_exact_security_gets_excel_assumptions_and_forecasts_without_market_price_import(monkeypatch):
     database = setup(monkeypatch)
     result = W.read(7)
@@ -127,6 +140,26 @@ def test_tsmc_adr_uses_one_consistent_taiwan_listing_for_quote_and_eps(monkeypat
     assert row['forecast']['fy2'] == 12
     assert row['seed_source'] == 'test.xlsx'
     assert V.reference_isin('UNREVIEWED_ADR') == 'UNREVIEWED_ADR'
+
+
+@pytest.mark.parametrize('receipt,ordinary,ticker,exchange,currency', [
+    ('USY5217N1183', 'INE018A01030', 'LT', 'NSE', 'INR'),
+    ('US78392B2060', 'KR7000660001', '000660', 'XKRX', 'KRW'),
+])
+def test_reviewed_receipts_keep_prices_and_eps_on_the_same_ordinary_share(
+        monkeypatch, receipt, ordinary, ticker, exchange, currency):
+    database = setup(monkeypatch)
+    database.tables['company'][0].update(isin=ordinary, gurufocus_ticker=ticker,
+        gurufocus_exchange={'is_us': False, 'exchange_code': exchange, 'currency_code': currency})
+    database.tables['company_yahoo_price'] = [{'company_id': 1, 'target_date': date.today().isoformat(),
+        'close': 1234, 'currency': currency}]
+    result = W.read(7, prepared_bundle={'rows': [{'isin': receipt}]}, include_membership=False)['rows'][0]
+    assert result['isin'] == receipt
+    assert result['quote']['price'] == 1234
+    assert result['quote']['currency'] == result['forecast']['currency'] == currency
+    assert result['forecast']['fy2'] == 12
+    assert 'ordinary-share reference' in result['forecast']['basis_label']
+    assert result['assumptions'].get('basis_fx') is None
 
 
 def test_current_quote_does_not_depend_on_historical_valuation_availability(monkeypatch):

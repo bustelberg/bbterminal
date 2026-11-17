@@ -9,6 +9,7 @@ export type CompanyAssumption = {
 export type WorkbookRow = { isin: string | null; ticker: string | null; selections: string[];
   membership_profiles?: Record<string, string[]>; membership_complete?: boolean; membership_unknown_codes?: string[];
   assumptions: CompanyAssumption; seed_source: string | null;
+  fx_rates?: Record<string, Record<string, number>>;
   quote?: { symbol?: string | null; price?: number | null; currency?: string | null; price_date?: string | null; source?: string | null };
   forecast: { fy1?: number; fy2?: number; fy1_date?: string; fy2_date?: string; currency?: string;
     basis_label?: string; metric_code?: string; reason?: string; source?: string } };
@@ -23,6 +24,24 @@ const positive = (n: unknown): n is number => finite(n) && n > 0;
 const unit = (code?: string | null) => code === 'GBp' || code === 'GBX' ? .01 : 1;
 const currency = (code?: string | null) => code === 'GBp' || code === 'GBX' ? 'GBP' : code ?? null;
 
+export function basisFx(row: WorkbookRow, quote: NonNullable<WorkbookRow['quote']>) {
+  const a = row.assumptions;
+  const from = currency(a.basis_kind === 'manual' ? a.basis_currency : row.forecast.currency);
+  const to = currency(quote.currency);
+  if (from && from === to) return 1;
+  if (a.basis_fx != null) return a.basis_fx;
+  if (!from || !to || !quote.price_date) return undefined;
+  const when = Date.parse(quote.price_date);
+  for (const day of Object.keys(row.fx_rates ?? {}).sort().reverse()) {
+    const age = when - Date.parse(day);
+    if (!Number.isFinite(age) || age < 0 || age > 7 * 86400000) continue;
+    const rates = row.fx_rates![day];
+    const source = from === 'EUR' ? 1 : rates[from], target = to === 'EUR' ? 1 : rates[to];
+    if (positive(source) && positive(target)) return target / source;
+  }
+  return undefined;
+}
+
 /** Only blue source fields and green assumptions enter the formula engine.
  * Calculated cell values are deliberately absent from this type. */
 export function valuationInputs(row: WorkbookRow, quote: NonNullable<WorkbookRow['quote']>, p: WorkbookParameters, asOf?: string) {
@@ -30,7 +49,7 @@ export function valuationInputs(row: WorkbookRow, quote: NonNullable<WorkbookRow
   return { raw_price: quote.price, quote_currency: quote.currency, price_date: quote.price_date, as_of: asOf,
     fy1: f.fy1, fy2: f.fy2, fy1_date: f.fy1_date, fy2_date: f.fy2_date, forecast_currency: f.currency,
     manual_basis: a.manual_basis, manual_currency: a.basis_currency,
-    basis_kind: a.basis_kind, basis_fx: a.basis_fx, months_fy1: a.months_fy1,
+    basis_kind: a.basis_kind, basis_fx: basisFx(row, quote), months_fy1: a.months_fy1,
     growth: a.growth, fair_multiple: a.fair_multiple, exit_multiple: a.exit_multiple,
     review_required: a.review_required, ...p } as const;
 }
@@ -120,9 +139,9 @@ export const VALUATION_FORMULAS = {
   buyUpside: { inputs: [...basisInputs, ...priceInputs, 'fair_multiple', 'safety_margin'], expression: `((${B}) × fair_multiple × (1 − safety_margin) / ${P} − 1) × 100; M = ${M}; ${FX}`, evaluate: (i: Inputs) => {
     const target = buyFromInputs(i), price = priceFromInputs(i); return positive(target) && price != null ? (target / price - 1) * 100 : null;
   } },
-  signal: { inputs: [...basisInputs, ...priceInputs, 'fair_multiple', 'safety_margin', 'review_required'], expression: `REVIEW if review_required or inputs unavailable; BUY if ${P} ≤ (${B}) × fair_multiple × (1 − safety_margin); CONSIDER if ${P} ≤ (${B}) × fair_multiple; otherwise DO NOT BUY. M = ${M}; ${FX}`, evaluate: (i: Inputs) => {
+  signal: { inputs: [...basisInputs, ...priceInputs, 'fair_multiple', 'safety_margin', 'review_required'], expression: `? if inputs unavailable; REVIEW if review_required; BUY if ${P} ≤ (${B}) × fair_multiple × (1 − safety_margin); CONSIDER if ${P} ≤ (${B}) × fair_multiple; otherwise DO NOT BUY. M = ${M}; ${FX}`, evaluate: (i: Inputs) => {
     const price = priceFromInputs(i), fair = fairFromInputs(i), buy = buyFromInputs(i);
-    return i.review_required || price == null || !positive(fair) || !positive(buy) ? 'REVIEW'
+    return price == null || !positive(fair) || !positive(buy) ? '?' : i.review_required ? 'REVIEW'
       : price <= buy ? 'BUY' : price <= fair ? 'CONSIDER' : 'DO NOT BUY';
   } },
   bear: { inputs: [...scenarioInputs, 'bear_growth_delta', 'bear_multiple_delta'], expression: `(${B}) × (1 + MAX(−0.9, growth + bear_growth_delta)) ^ years × exit_multiple × (1 + bear_multiple_delta); M = ${M}; ${FX}`, evaluate: (i: Inputs) => scenarioFromInputs(i, i.bear_growth_delta, i.bear_multiple_delta, true) },
@@ -140,13 +159,14 @@ export function workbookValuation(row: WorkbookRow, quote: NonNullable<WorkbookR
   const inputs = valuationInputs(row, quote, p, asOf);
   const values = Object.fromEntries(Object.entries(VALUATION_FORMULAS).map(([key, formula]) => [key, formula.evaluate(inputs)])) as Values;
   let reason: string | null = null;
-  if (!fresh(inputs)) reason = 'Latest saved Yahoo close is more than seven days old or undated.';
+  if (!inputs.price_date || !positive(inputs.raw_price)) reason = 'No saved Yahoo quote for this valuation reference. Press Refresh to fetch it.';
+  else if (!fresh(inputs)) reason = 'Latest saved Yahoo close is more than seven days old. Press Refresh to update it.';
   else if (rawBasis(inputs) == null) reason = row.assumptions.basis_kind === 'manual'
     ? 'Enter a per-share source basis and its currency.' : row.forecast.reason ?? 'Two annual forecasts and fiscal dates are required.';
   else if (basisFromInputs(inputs) == null) {
     const from = currency(inputs.basis_kind === 'manual' ? inputs.manual_currency : inputs.forecast_currency);
     const to = currency(inputs.quote_currency);
-    reason = from && to ? `Enter the ${from} → ${to} basis conversion rate; no FX or ADR ratio is assumed.`
+    reason = from && to ? `No saved ${from} → ${to} FX rate for the quote date. Enter an override.`
       : 'Basis currency or quote currency is missing.';
   }
   return { ...values, reason, basisLabel: row.assumptions.basis_kind === 'manual'

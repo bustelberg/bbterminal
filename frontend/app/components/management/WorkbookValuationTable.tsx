@@ -17,7 +17,7 @@ const SIGNAL_STYLE: Record<string, string> = {
   REVIEW: 'bg-overlay/10 text-fg-muted',
 };
 const sourceFields = (row?: WorkbookRow) => row ? {
-  ticker: row.ticker, quote: row.quote, forecast: row.forecast,
+  ticker: row.ticker, quote: row.quote, forecast: row.forecast, fx_rates: row.fx_rates,
   assumptions: row.assumptions, seed_source: row.seed_source,
 } : {};
 const number = (v: number | null | undefined, suffix = '') => v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(2)}${suffix}`;
@@ -37,7 +37,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
   const [formulaIsin, setFormulaIsin] = useState('');
   const [formula, setFormula] = useState<WorkbookColumn | null>(null);
   const formulaAnchor = useRef<HTMLElement | null>(null);
-  const [formulaPosition, setFormulaPosition] = useState({ left: 12, top: 12, width: 760, maxHeight: 520 });
+  const [formulaPosition, setFormulaPosition] = useState({ left: 12, top: 12, width: 1120, maxHeight: 800 });
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   const table = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
@@ -56,13 +56,11 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
     const clicked = anchor.getBoundingClientRect();
     const visibleWidth = container.clientWidth || bounds.width || window.innerWidth;
     const visibleHeight = container.clientHeight || bounds.height || 520;
-    const width = Math.min(760, Math.max(0, visibleWidth - 24));
+    const width = Math.min(1120, Math.max(0, visibleWidth - 24));
     const left = Math.max(12, Math.min(clicked.left - bounds.left, visibleWidth - width - 12));
     const below = clicked.bottom - bounds.top + 8;
-    const above = clicked.top - bounds.top - 8;
-    const placeAbove = visibleHeight - below - 12 < 180 && above > 180;
-    const maxHeight = Math.max(0, Math.min(520, placeAbove ? above - 12 : visibleHeight - below - 12));
-    const top = placeAbove ? above - maxHeight : Math.max(12, below);
+    const maxHeight = Math.max(0, Math.min(800, visibleHeight - 24));
+    const top = Math.max(12, Math.min(below, visibleHeight - maxHeight - 12));
     setFormulaPosition({ left: container.scrollLeft + left, top: container.scrollTop + top,
       width, maxHeight });
     formulaAnchor.current = anchor;
@@ -145,7 +143,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
     const row = workbook?.rows.find(item => item.isin != null && item.isin === quote.isin);
     const result = row && workbook ? workbookValuation(row, row.quote ?? {}, workbook.parameters, workbook.as_of) : null;
     const warning = row?.assumptions.review_required ? t('Analyst review required', 'Analistencontrole vereist')
-      : result?.reason ?? (result?.signal === 'REVIEW' ? t('Complete valuation assumptions', 'Vul de waarderingsaannames aan')
+      : result?.reason ?? (result?.signal === '?' ? t('Complete valuation assumptions', 'Vul de waarderingsaannames aan')
         : !row ? t('Valuation inputs unavailable', 'Waarderingsinvoer ontbreekt')
           : result?.cagr == null ? t('Scenario assumptions incomplete', 'Scenarioaannames onvolledig') : null);
     return { quote, row, result, warning };
@@ -255,7 +253,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
       {error && <p role="alert" className="absolute right-3 top-3 z-30 max-w-lg rounded-lg bg-card p-3 text-sm text-neg-300 shadow-lg">{error}</p>}
       {error && !workbook && <button type="button" className={control} onClick={() => { setError(''); setLoadAttempt(value => value + 1); }}>{t('Retry valuation inputs', 'Waarderingsinvoer opnieuw laden')}</button>}
       {!workbook && !error && <p role="status" className="absolute right-3 top-3 z-30 rounded-lg bg-card p-3 text-sm text-fg-muted">{t('Loading valuation inputs…', 'Waarderingsinvoer laden…')}</p>}
-    {formula && <section aria-label={t('Formula details', 'Formuledetails')} style={formulaPosition} className={`absolute z-20 space-y-2 overflow-auto rounded-lg border p-3 text-xs shadow-xl ${COLUMN_STYLE.calculation}`}>
+    {formula && <section aria-label={t('Formula details', 'Formuledetails')} style={formulaPosition} className={`absolute z-20 space-y-4 overflow-auto rounded-xl border p-6 text-sm shadow-xl ${COLUMN_STYLE.calculation}`}>
       <div className="flex items-center justify-between gap-3"><strong>{nl ? formula.nl : formula.en}</strong>
         <button type="button" onClick={() => setFormula(null)}>{t('Close formula', 'Formule sluiten')}</button></div>
       {workbook && <ValuationFormulaExplanation calculation={formula.key as CalculationKey} workbook={workbook}
@@ -313,11 +311,11 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
           {column.key === 'selections' && membershipGaps.length > 0 && <button type="button" className="mt-1 block text-xs font-normal underline" title={coverageNote}
             onClick={() => { setPanel('memberships'); setFocusedInput(null); }}>{t('Coverage details', 'Dekkingsdetails')}</button>}
         </th>)}</tr></thead>
-      <tbody className="divide-y divide-neutral-800/30">{entries.map(({ quote, row, result, warning }, i) => {
+      <tbody className="divide-y divide-neutral-800/30">{entries.map(({ quote, row, result }, i) => {
         const source = row?.quote ?? {};
         const a = row?.assumptions, f = row?.forecast;
-        const signals = nl ? { REVIEW: 'NADER TOETSEN', BUY: 'KOOP', CONSIDER: 'TWIJFEL', 'DO NOT BUY': 'NIET KOPEN' }
-          : { REVIEW: 'REVIEW', BUY: 'BUY', CONSIDER: 'CONSIDER', 'DO NOT BUY': 'DO NOT BUY' };
+        const signals = nl ? { '?': '?', REVIEW: 'NADER TOETSEN', BUY: 'KOOP', CONSIDER: 'TWIJFEL', 'DO NOT BUY': 'NIET KOPEN' }
+          : { '?': '?', REVIEW: 'REVIEW', BUY: 'BUY', CONSIDER: 'CONSIDER', 'DO NOT BUY': 'DO NOT BUY' };
         const cells: Record<string, string | number | null | undefined> = {
           company: quote.name, ticker: row?.ticker, selections: row?.selections.join(' | '),
           raw_price: source.price, quote_currency: source.currency, price_date: source.price_date, price_source: source.source,
@@ -329,7 +327,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
           months_fy1: a?.months_fy1, basis_fx: a?.basis_fx, growth: a?.growth, fair_multiple: a?.fair_multiple,
           exit_multiple: a?.exit_multiple, review_required: a?.review_required == null ? '—' : a.review_required ? t('YES', 'JA') : t('NO', 'NEE'),
           risk_note: a?.risk_note, years: workbook?.parameters.years, safety_margin: workbook?.parameters.safety_margin,
-          ...result, signal: signals[result?.signal as keyof typeof signals ?? 'REVIEW'],
+          ...result, signal: signals[result?.signal as keyof typeof signals ?? '?'],
         };
         const percentages = new Set(['growth', 'safety_margin', 'fairUpside', 'buyUpside', 'cagr']);
         const multiples = new Set(['fair_multiple', 'exit_multiple', 'currentMultiple', 'buyMultiple']);
@@ -345,7 +343,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
                 {row?.selections.map(code => <span key={code} className="rounded border border-neutral-800/40 px-1.5 py-0.5"
                   title={`${code} = ${workbook?.membership_legend?.find(item => item.code === code)?.name ?? code}${row.membership_profiles?.[code]?.length ? `: ${row.membership_profiles[code].join(', ')}` : ''}`}>{code}</span>)}
                 {!row?.selections.length && <span title={row?.membership_unknown_codes?.join(', ')}>{row?.membership_complete === false ? t('Not confirmed', 'Niet bevestigd') : '—'}</span>}
-              </div> : column.key === 'company' ? <><span className="block max-w-full truncate" title={quote.name}>{quote.name}</span>{refreshingIsin === quote.isin && <span role="status" aria-label={t('Refreshing row', 'Rij vernieuwen')} className="ml-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}</>
+              </div> : column.key === 'company' ? <><span className="block max-w-full truncate" title={quote.name}>{quote.name}</span>{row?.forecast.basis_label?.includes('ordinary-share reference') && <span className="block text-xs font-normal text-neutral-500">{t('Ordinary-share reference', 'Referentie: gewoon aandeel')}</span>}{refreshingIsin === quote.isin && <span role="status" aria-label={t('Refreshing row', 'Rij vernieuwen')} className="ml-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}</>
                   : (column.key === 'raw_price' || column.key === 'price') && typeof raw === 'number' && source.symbol
                     ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(source.symbol)}/`} target="_blank" rel="noopener noreferrer"
                         className="cursor-pointer underline decoration-current/40 underline-offset-2 hover:text-accent-300"
@@ -356,8 +354,6 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
                     : 'underline decoration-dotted underline-offset-4'}`}
                       aria-label={t(`Explain ${column.en} for ${quote.name}`, `Uitleg ${column.nl} voor ${quote.name}`)}
                       onClick={event => openFormula(column, quote.isin ?? '', event.currentTarget)}>{display}</button> : display)}
-              {column.key === 'signal' && warning && <button type="button" className="mt-1 block max-w-40 whitespace-normal text-left text-xs underline" title={warning}
-                onClick={() => { setPanel('sources'); setFocusedInput(null); }}>{t('Check inputs', 'Controleer invoer')}</button>}
             </td>;
           })}
         </tr>;

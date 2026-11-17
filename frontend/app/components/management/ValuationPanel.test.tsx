@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import ValuationPanel from './ValuationPanel';
 import { apiFetch } from '../../../lib/apiFetch';
-import { jobsStore } from '../../../lib/stores/jobs';
+import { dismissJob, jobsStore } from '../../../lib/stores/jobs';
 import type { Workbook } from './valuationWorkbook';
 
 vi.mock('../../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
@@ -44,6 +44,24 @@ it('shows only Offensief profiles while keeping standalone portfolios and Bustel
       'Bustelberg Offensief', 'Bustelberg 2.0 Offensief', 'Toppenberg Offensief', 'AITopSelectie', 'Imagine Fund',
     ]);
   } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it('unlocks Refresh when the shared job completes and is dismissed independently of the page', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockResolvedValue(response(roster));
+  const job = { id: 'independent-valuation', title: 'Refresh valuation', kind: 'valuation.portfolio', label: 'Refresh valuation',
+    status: 'running' as const, done: 0, total: 20, message: '', summary: null, apiCalls: 0, cancelRequested: false, dismissed: false };
+  jobsStore.set(state => ({ jobs: [...state.jobs, job] }));
+  const { host, root } = mount();
+  try {
+    await act(async () => root.render(<ValuationPanel />));
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Refreshing…')?.disabled).toBe(true);
+    await act(async () => jobsStore.set(state => ({ jobs: state.jobs.map(item => item.id === job.id ? { ...item, status: 'done' } : item) })));
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')?.disabled).toBe(false);
+    await act(async () => dismissJob(job.id));
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')?.disabled).toBe(false);
+    expect(host.querySelector('select')?.disabled).toBe(false);
+  } finally { await act(async () => root.unmount()); host.remove(); dismissJob(job.id); }
 });
 
 it('shows the workbook directly and loads its panels without refetching', async () => {
@@ -116,6 +134,10 @@ it('can prepare an empty database and then select a portfolio with one bundled r
     await act(async () => refresh.click());
     expect(vi.mocked(apiFetch).mock.calls[1][0]).toContain('/valuation/prepare/refresh');
     expect(jobsStore.get().jobs.at(-1)?.status).toBe('done');
+    const completed = jobsStore.get().jobs.at(-1)!;
+    await act(async () => dismissJob(completed.id));
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')?.disabled).toBe(false);
+    expect(host.querySelector('select')?.disabled).toBe(false);
     await select(host);
     expect(apiFetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(apiFetch).mock.calls[2][0]).toContain('/portfolios/1/dashboard');
@@ -208,6 +230,7 @@ it('keeps source failures visible in the shared popup while accepting the final 
     await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Refresh')!.click());
     expect(apiFetch).toHaveBeenCalledTimes(3);
     expect(jobsStore.get().jobs.at(-1)?.status).toBe('failed');
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')?.disabled).toBe(false);
     expect(jobsStore.get().jobs.at(-1)?.summary).toBe('19/20 companies refreshed; 1 failed. Successful updates saved.');
     expect(jobsStore.get().jobs.at(-1)?.details?.join('\n')).toContain('GuruFocus returned empty statements');
     expect(host.textContent).not.toContain('19/20 companies refreshed; 1 failed');

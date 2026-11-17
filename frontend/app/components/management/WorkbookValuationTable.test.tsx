@@ -119,10 +119,10 @@ it('anchors formula popups to the clicked cell within a scrolled table', async (
       vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(new DOMRect(780, 180, 50, 20));
       await act(async () => anchor.click());
       const popup = host.querySelector<HTMLElement>('[aria-label="Formula details"]')!;
-      expect(popup.style.left).toBe('1128px');
-      expect(popup.style.top).toBe('328px');
-      expect(popup.style.width).toBe('760px');
-      expect(popup.style.maxHeight).toBe('360px');
+      expect(popup.style.left).toBe('912px');
+      expect(popup.style.top).toBe('212px');
+      expect(popup.style.width).toBe('976px');
+      expect(popup.style.maxHeight).toBe('476px');
       expect(viewport.scrollLeft).toBe(900);
       expect(viewport.scrollTop).toBe(200);
     }

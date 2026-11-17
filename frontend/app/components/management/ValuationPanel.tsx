@@ -7,7 +7,7 @@ import { useLang } from '../../../lib/i18n';
 import type { components } from '../../../lib/api-types';
 import WorkbookValuationTable from './WorkbookValuationTable';
 import type { Workbook } from './valuationWorkbook';
-import { ExpectedJobFailure, startLocalJob } from '../../../lib/stores/jobs';
+import { ExpectedJobFailure, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
 import { runSSE } from '../../../lib/stream';
 
 type Portfolio = components['schemas']['ValuationPortfolio'];
@@ -22,10 +22,15 @@ export default function ValuationPanel() {
   const [bundle, setBundle] = useState<{ id: string; data: Bundle } | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const refreshing = jobsStore.use(state => state.jobs.some(job =>
+    (job.kind === 'valuation.portfolio' || job.kind === 'valuation.prepare') && job.status === 'running'));
   const [refreshingIsin, setRefreshingIsin] = useState<string | null>(null);
   const [workbookUpdate, setWorkbookUpdate] = useState<Workbook | null>(null);
   const activeSelection = useRef('');
-  useEffect(() => () => { activeSelection.current = ''; }, []);
+  useEffect(() => {
+    activeSelection.current = selected;
+    return () => { activeSelection.current = ''; };
+  }, [selected]);
   const selectedId = portfolios.find(portfolio => selectionKey(portfolio) === selected)?.id;
   const visiblePortfolios = portfolios.filter(portfolio => !/\b(?:defensief|neutraal|beperkt\s+offensief)$/i.test(portfolio.name.trim()));
   useEffect(() => {
@@ -61,9 +66,9 @@ export default function ValuationPanel() {
   const workbook = data?.workbook as Workbook | null | undefined;
   const rows = [...(data?.rows ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const refreshPortfolio = () => {
-    if (loading) return;
+    if (loading || refreshing) return;
     if (selectedId == null) {
-      setLoading(true); setError('');
+      setError('');
       startLocalJob(nl ? 'Waardering voorbereiden' : 'Prepare valuations', 'valuation.prepare', async (signal, report) => {
         let complete = false;
         let failure = '';
@@ -87,7 +92,7 @@ export default function ValuationPanel() {
       return;
     }
     const id = selectedId, selection = selected;
-    setLoading(true); setError(''); setWorkbookUpdate(null);
+    setError(''); setWorkbookUpdate(null);
     startLocalJob(nl ? 'Waardering vernieuwen' : 'Refresh valuation', 'valuation.portfolio', async (signal, report) => {
       let complete = false;
       let failure = '';
@@ -139,13 +144,13 @@ export default function ValuationPanel() {
         if (failure || !complete) throw new ExpectedJobFailure(outcome || failure || 'Portfolio refresh ended before completion.',
           nl ? 'Bekijk de details voor de fouten.' : 'See details for the errors.');
         return outcome;
-      } finally { if (current()) { setRefreshingIsin(null); setLoading(false); } }
+      } finally { if (current()) setRefreshingIsin(null); }
     });
   };
   return <section className="space-y-4" aria-label={nl ? 'Waardering' : 'Valuation'}>
     <div className="flex flex-wrap items-end gap-3">
       <label className="space-y-1 text-sm"><span className="block">{nl ? 'Portefeuille' : 'Portfolio'}</span>
-        <select disabled={loading} value={selected} onChange={event => { activeSelection.current = event.target.value; setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
+        <select disabled={loading || refreshing} value={selected} onChange={event => { activeSelection.current = event.target.value; setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
           <option value="">{nl ? 'Selecteer een portefeuille…' : 'Select a portfolio…'}</option>
           {visiblePortfolios.map(portfolio => <option key={selectionKey(portfolio)} value={selectionKey(portfolio)}
             disabled={portfolio.id == null} title={portfolio.unavailable_reason ?? undefined}>
@@ -154,13 +159,13 @@ export default function ValuationPanel() {
         </select>
       </label>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={refreshPortfolio} disabled={loading} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
+        <button type="button" onClick={refreshPortfolio} disabled={loading || refreshing} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{refreshing ? (nl ? 'Vernieuwen…' : 'Refreshing…') : loading ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
       </div>
     </div>
     {(selected || error) && <>
       {error && <p role="alert" className="text-sm text-neg-300">{error}</p>}
       {data && !workbook && <p role="alert" className="text-sm text-neg-300">{nl ? 'De portefeuillebundel bevat geen werkmapgegevens. Vernieuw de portefeuille.' : 'The portfolio bundle is missing workbook data. Refresh the portfolio.'}</p>}
-      {workbook && selectedId != null && <WorkbookValuationTable key={selected} workbookData={workbook} workbookUpdate={workbookUpdate} refreshingIsin={refreshingIsin}
+      {workbook && selectedId != null && <WorkbookValuationTable key={selected} workbookData={workbook} workbookUpdate={workbookUpdate} refreshingIsin={refreshing ? refreshingIsin : null}
         portfolioId={selectedId} rows={rows} nl={nl} />}
     </>}
   </section>;

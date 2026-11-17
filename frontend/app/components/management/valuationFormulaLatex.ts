@@ -1,4 +1,4 @@
-import { workbookValuation, type CalculationKey, type Workbook, type WorkbookRow } from './valuationWorkbook';
+import { basisFx, workbookValuation, type CalculationKey, type Workbook, type WorkbookRow } from './valuationWorkbook';
 
 const text = (value: string) => `\\text{${value.replace(/[\\{}$&#_%^~]/g, ' ')}}`;
 const formatNumber = (value: unknown) => {
@@ -8,7 +8,6 @@ const formatNumber = (value: unknown) => {
   return value < 0 ? `\\left(${literal}\\right)` : literal;
 };
 const scale = (currency?: string | null) => currency === 'GBp' || currency === 'GBX' ? .01 : 1;
-const normalize = (currency?: string | null) => currency === 'GBp' || currency === 'GBX' ? 'GBP' : currency;
 
 const VARIABLES = [
   ['EPS_1', 'Earnings per share for the first forecast year.', 'Winst per aandeel in het eerste prognosejaar.'],
@@ -48,7 +47,7 @@ export function valuationFormulaLatex(calculation: CalculationKey, workbook: Wor
   const result = row ? workbookValuation(row, q ?? {}, p, workbook.as_of) : null;
   const manual = a?.basis_kind === 'manual';
   const from = manual ? a?.basis_currency : f?.currency;
-  const fx = from && q?.currency && normalize(from) === normalize(q.currency) ? 1 : a?.basis_fx;
+  const fx = row ? basisFx(row, q ?? {}) : undefined;
   const basis = (numeric: boolean) => manual
     ? `${numeric ? n(a?.manual_basis) : 'B_{\\mathrm{manual}}'} \\times ${numeric ? n(scale(from)) : 's_B'} \\times ${numeric ? n(fx) : 'FX'}`
     : `\\left(${numeric ? n(f?.fy1) : 'EPS_1'}\\frac{${numeric ? n(result?.months) : 'M'}}{12}
@@ -84,7 +83,7 @@ export function valuationFormulaLatex(calculation: CalculationKey, workbook: Wor
       case 'base': return scenario('base');
       case 'bull': return scenario('bull');
       case 'cagr': return `\\left[\\left(\\frac{${scenario('base')}}{${P}}\\right)^{\\frac{1}{${v('T', p.years)}}}-1\\right]\\times100`;
-      case 'signal': return `\\begin{cases}\\text{REVIEW}&\\text{review required or missing inputs}\\\\\\text{BUY}&${P}\\leq ${buy}\\\\\\text{CONSIDER}&${P}\\leq ${fair}\\\\\\text{DO NOT BUY}&\\text{otherwise}\\end{cases}`;
+      case 'signal': return `\\begin{cases}\\text{?}&\\text{missing or unusable inputs}\\\\\\text{REVIEW}&\\text{review required}\\\\\\text{BUY}&${P}\\leq ${buy}\\\\\\text{CONSIDER}&${P}\\leq ${fair}\\\\\\text{DO NOT BUY}&\\text{otherwise}\\end{cases}`;
     }
   };
   const value = result?.[calculation];

@@ -3,7 +3,8 @@
 This is a screening estimate, not intrinsic value or a point-in-time backtest.
 The vendor supplies restatable fiscal-period EPS, not original publication dates.
 Historical EPS is therefore delayed 120 days, explicitly disclosed in the payload.
-Only exact company ISINs are price identities; notes/issuer aliases are not used.
+Price identities use exact company ISINs or explicitly reviewed ordinary-share
+references; unreviewed issuer aliases are not used.
 """
 from bisect import bisect_right
 from datetime import date, datetime, timedelta, timezone
@@ -214,9 +215,15 @@ def company_holdings(portfolio_id):
                                      'excluded_funds_cash_bonds': excluded, 'lookthrough': evidence}
 
 
-# Reviewed valuation reference: BOTH prices and EPS use the ordinary Taiwan share.
-# This is not an ADR-price conversion and must never be combined with a TSM USD quote.
-VALUATION_REFERENCE_ISINS = {'US8740391003': 'TW0002330008'}
+# Reviewed references: BOTH prices and EPS use the ordinary share. These are
+# ordinary-share valuations, not converted depositary-receipt price targets.
+# Depositary identities: https://depositaryreceipts.citi.com/adr/guides/pgm_d.aspx?cusip=Y5217N118
+# and https://depositaryreceipts.citi.com/adr/guides/pgm_d.aspx?cusip=78392B206
+VALUATION_REFERENCE_ISINS = {
+    'US8740391003': 'TW0002330008',
+    'USY5217N1183': 'INE018A01030',
+    'US78392B2060': 'KR7000660001',
+}
 
 
 def reference_isin(isin):

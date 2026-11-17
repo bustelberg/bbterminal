@@ -1,5 +1,6 @@
 """Workbook assumptions and saved GuruFocus consensus; no provider requests."""
 import json
+import math
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
@@ -14,6 +15,25 @@ FORECAST_CODES = ('annual_eps_nri_estimate', 'annual_per_share_eps_estimate')
 
 def defaults():
     return json.loads(DEFAULTS.read_text(encoding='utf-8'))
+
+
+def attach_fx(workbook):
+    """Bundle saved units-per-EUR observations; never fetch providers on a read."""
+    dates = [row.get('quote', {}).get('price_date') for row in workbook['rows']]
+    dates = [date.fromisoformat(stamp[:10]) for stamp in dates if stamp]
+    if not dates:
+        return workbook
+    start, end = min(dates) - timedelta(days=7), max(dates)
+    observations = list(paginate(lambda lo, hi: supabase.table('fx_rate')
+        .select('currency_code,rate_date,rate').gte('rate_date', start.isoformat())
+        .lte('rate_date', end.isoformat()).order('rate_date').order('currency_code')
+        .range(lo, hi).execute()))
+    rates = {}
+    for item in observations:
+        rate = item.get('rate')
+        if isinstance(rate, (int, float)) and math.isfinite(rate) and rate > 0:
+            rates.setdefault(str(item['rate_date'])[:10], {})[item['currency_code']] = rate
+    return {**workbook, 'rows': [{**row, 'fx_rates': rates} for row in workbook['rows']]}
 
 
 def source_ticker(company):
@@ -109,7 +129,7 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
         assumptions.update((settings.get('companies') or {}).get(holding.get('isin'), {}))
         forecast = consensus(by_company.get(company.get('company_id'), []), date.today().isoformat())
         if valuation.reference_isin(holding.get('isin')) != holding.get('isin'):
-            forecast['basis_label'] = (forecast.get('basis_label') or 'EPS') + ' - Taiwan ordinary share (TWD)'
+            forecast['basis_label'] = (forecast.get('basis_label') or 'EPS') + ' - ordinary-share reference valuation'
         available_quotes = by_quote.get(company.get('company_id'), [])
         latest_date = max((str(item['target_date'])[:10] for item in available_quotes), default=None)
         observations = [item for item in available_quotes if str(item['target_date'])[:10] == latest_date]
@@ -131,9 +151,9 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
                       'price_date': str(source_quote['target_date'])[:10] if source_quote else None,
                       'source': 'Yahoo Finance' if source_quote else None, 'symbol': yahoo_symbol},
             'seed_source': 'test.xlsx' if initial else None})
-    return {'portfolio_id': portfolio_id, 'as_of': date.today().isoformat(), 'parameters': {**template['parameters'], **settings.get('parameters', {})},
+    return attach_fx({'portfolio_id': portfolio_id, 'as_of': date.today().isoformat(), 'parameters': {**template['parameters'], **settings.get('parameters', {})},
             'rows': rows, 'membership_legend': membership['legend'],
-            'updated_at': saved[0]['updated_at'] if saved else None}
+            'updated_at': saved[0]['updated_at'] if saved else None})
 
 
 def save(portfolio_id, payload, *, prepared_bundle=None):

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { workbookValuation, VALUATION_FORMULAS, type WorkbookRow } from './valuationWorkbook';
+import { basisFx, workbookValuation, VALUATION_FORMULAS, type WorkbookRow } from './valuationWorkbook';
 import { WORKBOOK_COLUMNS, WORKBOOK_PANELS, columnsForPanel, panelForInput } from './valuationWorkbookColumns';
 
 const parameters = { years: 3, safety_margin: .2, bear_growth_delta: -.05,
@@ -8,6 +8,18 @@ const row: WorkbookRow = { isin: 'EXACT', ticker: 'OSTO:ADDT B', selections: ['E
   assumptions: { growth: .11, fair_multiple: 26, exit_multiple: 23.3, basis_kind: 'forward_eps' },
   forecast: { fy1: 10.28, fy2: 11.8, fy1_date: '2027-03-31', fy2_date: '2028-03-31', currency: 'SEK' } };
 const quote = { price: 320.2, currency: 'SEK', price_date: '2026-11-06' };
+
+it('uses saved EUR cross rates on or before the quote date, preserving overrides', () => {
+  const converted = { ...row, forecast: { ...row.forecast, currency: 'USD' }, fx_rates: {
+    '2026-11-05': { USD: 1.25, GBP: .9 }, '2026-11-07': { USD: 2 },
+  } };
+  expect(basisFx(converted, { ...quote, currency: 'EUR' })).toBe(.8);
+  expect(basisFx(converted, { ...quote, currency: 'GBP' })).toBe(.72);
+  expect(basisFx(converted, { ...quote, currency: 'EUR', price_date: '2026-11-16' })).toBeUndefined();
+  expect(basisFx({ ...converted, assumptions: { ...row.assumptions, basis_fx: .85 } }, { ...quote, currency: 'EUR' })).toBe(.85);
+  expect(workbookValuation(converted, { ...quote, currency: 'EUR' }, parameters).basis)
+    .toBeCloseTo(workbookValuation(row, quote, parameters).basis! * .8);
+});
 
 it('reproduces the supplied Addtech workbook row, including upside rather than discount', () => {
   const result = workbookValuation(row, quote, parameters);
@@ -30,7 +42,7 @@ it('keeps zero growth and zero FY1 months, and leaves missing assumptions unavai
   expect(result.basis).toBe(11.8);
   expect(result.base).toBeCloseTo(11.8 * 23.3);
   const missing = workbookValuation({ ...row, assumptions: {} }, quote, parameters);
-  expect(missing.fair).toBeNull(); expect(missing.base).toBeNull(); expect(missing.signal).toBe('REVIEW');
+  expect(missing.fair).toBeNull(); expect(missing.base).toBeNull(); expect(missing.signal).toBe('?');
 });
 
 it('keeps special NAV/book-value bases explicit and converts pence once', () => {
@@ -45,7 +57,7 @@ it('keeps special NAV/book-value bases explicit and converts pence once', () => 
 
 it('withholds buy signals for review flags, stale prices and nonpositive earnings', () => {
   expect(workbookValuation({ ...row, assumptions: { ...row.assumptions, review_required: true } }, { ...quote, price: 1 }, parameters).signal).toBe('REVIEW');
-  expect(workbookValuation(row, { ...quote, price: 1 }, parameters, '2026-11-16').signal).toBe('REVIEW');
+  expect(workbookValuation(row, { ...quote, price: 1 }, parameters, '2026-11-16').signal).toBe('?');
   expect(workbookValuation({ ...row, forecast: { ...row.forecast, fy1: -1, fy2: -2 } }, quote, parameters).fair).toBeNull();
 });
 

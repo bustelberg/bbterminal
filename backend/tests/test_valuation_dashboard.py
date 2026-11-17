@@ -37,6 +37,41 @@ def test_single_cached_payload_contains_all_tab_inputs_without_source_refresh(se
     assert result['rows'][0]['isin'] == 'CURRENT'
 
 
+def test_cached_missing_forecasts_use_repaired_saved_feed(selected, monkeypatch):
+    payload = {'method': V.METHOD, 'evidence': {'source': 'AIRS'}, 'rows': [{'isin': 'HITACHI'}],
+        'workbook': {'parameters': {}, 'rows': [{'isin': 'HITACHI', 'assumptions': {},
+            'selections': ['BB'], 'forecast': {'reason': 'Missing forecasts'}}]}}
+    monkeypatch.setattr(D, 'supabase', FakeSupabase({V.TABLE: [
+        {'portfolio_id': 1, 'prepared_at': 'stamp', 'payload': payload}]}))
+    def saved_inputs(pid, **kwargs):
+        assert kwargs['include_membership'] is False
+        assert kwargs['prepared_bundle'] == payload
+        return {'rows': [{'isin': 'HITACHI', 'forecast': {'fy1': 216.89, 'fy2': 261.26}}]}
+    monkeypatch.setattr(D.W, 'read', saved_inputs)
+    monkeypatch.setattr(D, '_refresh_holdings', lambda *_: pytest.fail('GET must not fetch providers'))
+    row = D.read(1)['workbook']['rows'][0]
+    assert row['forecast']['fy1'] == 216.89
+    assert row['selections'] == ['BB']
+
+
+@pytest.mark.parametrize('price_date', [None, '2020-01-01'])
+def test_cached_quotes_recheck_saved_inputs_without_fetching_providers(selected, monkeypatch, price_date):
+    from datetime import date
+    today = date.today().isoformat()
+    payload = {'method': V.METHOD, 'evidence': {'source': 'AIRS'}, 'rows': [{'isin': 'RECEIPT'}],
+        'workbook': {'as_of': '2020-01-01', 'parameters': {}, 'rows': [{'isin': 'RECEIPT',
+            'assumptions': {}, 'selections': ['BB'], 'quote': {'price': 12, 'price_date': price_date}}]}}
+    monkeypatch.setattr(D, 'supabase', FakeSupabase({V.TABLE: [
+        {'portfolio_id': 1, 'prepared_at': 'stamp', 'payload': payload}]}))
+    monkeypatch.setattr(D.W, 'read', lambda *args, **kwargs: {'as_of': today, 'rows': [
+        {'isin': 'RECEIPT', 'ticker': 'NSE:LT', 'quote': {'price': 4155.5, 'price_date': today}}]})
+    monkeypatch.setattr(D.W, 'attach_fx', lambda workbook: workbook)
+    workbook = D.read(1)['workbook']
+    assert workbook['rows'][0]['quote']['price_date'] == today
+    assert workbook['rows'][0]['selections'] == ['BB']
+    assert workbook['as_of'] == today
+
+
 def test_topselectie_holdings_never_use_an_airs_model(selected, monkeypatch):
     selected.update(management_group='topselecties', name='FamilieTopSelectie')
     monkeypatch.setattr(D, '_leonteq_identity', lambda *_args, **_kwargs: 'Family Index')
