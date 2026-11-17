@@ -50,7 +50,7 @@ export default function FactsheetPanel() {
       <button type="button" disabled={loading} onClick={() => { setError(''); setLoading(true); setRevision(current => current + 1); }} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
     </div>
     <div className="overflow-x-auto rounded-xl border border-neutral-800/40"><table className="w-full text-sm">
-      <caption className="sr-only">ACWI / AGG / QAI Factsheet</caption>
+      <caption className="sr-only">ACWI / SYBA / QAI / HDG Factsheet</caption>
       <thead className="bg-elevated text-xs text-fg-muted"><tr>
         <th className="px-3 py-2 text-left">Benchmark</th>
         <th className="px-3 py-2 text-left">{nl ? 'Periode' : 'Period'}</th>
@@ -62,9 +62,10 @@ export default function FactsheetPanel() {
         {error && <tr><td colSpan={5} role="alert" className="px-3 py-3 text-neg-300 [overflow-wrap:anywhere]">{error}</td></tr>}
         {loading && <tr><td colSpan={5} role="status" className="px-3 py-3 text-fg-muted">{nl ? 'Rendement en risico berekenen…' : 'Calculating returns and risk…'}</td></tr>}
         {entries.map(({ row, stats, period, missing }) => <tr key={`${row.ticker}-${period}`}>
-          <td className="px-3 py-3"><a href={`https://finance.yahoo.com/quote/${encodeURIComponent(row.ticker)}/`} target="_blank" rel="noopener noreferrer"
-            className="font-medium text-accent-600 hover:underline" title={`${row.ticker} · Yahoo Finance`}>{row.ticker}</a>
+          <td className="px-3 py-3"><a href={row.source_url ?? `https://finance.yahoo.com/quote/${encodeURIComponent(row.ticker)}/`} target="_blank" rel="noopener noreferrer"
+            className="font-medium text-accent-600 hover:underline" title={`${row.ticker} · ${row.source_url ? 'justETF' : 'Yahoo Finance'}`}>{row.ticker}</a>
             <div className="text-xs text-fg-muted">{row.name}</div>
+            {row.isin && <div className="text-xs text-fg-muted">{row.isin}</div>}
             <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(row.ticker)}/history/`} target="_blank" rel="noopener noreferrer"
               className="text-xs text-accent-600 hover:underline">{nl ? 'Historische koersen' : 'Historical data'}</a>
           </td>

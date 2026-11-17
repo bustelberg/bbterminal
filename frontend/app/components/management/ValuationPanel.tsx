@@ -6,7 +6,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { useLang } from '../../../lib/i18n';
 import type { components } from '../../../lib/api-types';
 import WorkbookValuationTable from './WorkbookValuationTable';
-import { COLUMN_STYLE } from './valuationWorkbookColumns';
 import type { Workbook } from './valuationWorkbook';
 import { ExpectedJobFailure, startLocalJob } from '../../../lib/stores/jobs';
 import { runSSE } from '../../../lib/stream';
@@ -24,9 +23,11 @@ export default function ValuationPanel() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshingIsin, setRefreshingIsin] = useState<string | null>(null);
+  const [workbookUpdate, setWorkbookUpdate] = useState<Workbook | null>(null);
   const activeSelection = useRef('');
   useEffect(() => () => { activeSelection.current = ''; }, []);
   const selectedId = portfolios.find(portfolio => selectionKey(portfolio) === selected)?.id;
+  const visiblePortfolios = portfolios.filter(portfolio => !/\b(?:defensief|neutraal|beperkt\s+offensief)$/i.test(portfolio.name.trim()));
   useEffect(() => {
     let active = true;
     void apiFetch(`${API_URL}/api/airs/valuation/portfolios`, { cache: 'no-store', noReadCache: true })
@@ -81,24 +82,23 @@ export default function ValuationPanel() {
           if (failure || !complete) throw new ExpectedJobFailure(failure || 'Portfolio preparation ended before completion.',
             nl ? 'Niet alle portefeuilles konden worden voorbereid.' : 'Some portfolios could not be prepared.');
           return nl ? 'Portefeuilles voorbereid.' : 'Portfolios prepared.';
-        } catch (cause) {
-          if (!signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
-          throw cause;
         } finally { setLoading(false); }
       });
       return;
     }
     const id = selectedId, selection = selected;
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setWorkbookUpdate(null);
     startLocalJob(nl ? 'Waardering vernieuwen' : 'Refresh valuation', 'valuation.portfolio', async (signal, report) => {
       let complete = false;
       let failure = '';
+      let outcome = '';
       let progress = { done: 0, total: 0 };
       const current = () => activeSelection.current === selection;
       try {
         await runSSE(`${API_URL}/api/airs/valuation/portfolios/${id}/dashboard/refresh`, { method: 'POST' }, raw => {
           const event = raw as { type: string; done?: number; total?: number; message?: string; isin?: string;
-            row?: Bundle['rows'][number]; rows?: Bundle['rows']; data?: Bundle; failures?: string[] };
+            row?: Bundle['rows'][number]; rows?: Bundle['rows']; data?: Bundle; failures?: string[]; workbook?: Workbook;
+            counts?: { succeeded: number; failed: number; total: number } };
           if (event.type === 'progress') {
             progress = { done: event.done ?? 0, total: event.total ?? 0 };
             report({ ...progress, message: event.message });
@@ -106,6 +106,15 @@ export default function ValuationPanel() {
           } else if (event.type === 'holdings' && event.rows && current()) {
             setBundle(existing => existing?.id === selection ? { ...existing, data: { ...existing.data, rows: event.rows! } } : existing);
           } else if (event.type === 'row' && event.row && current()) {
+            if (event.workbook) {
+              const update = event.workbook;
+              setWorkbookUpdate(previous => {
+                if (!previous || previous.portfolio_id !== update.portfolio_id) return update;
+                const rows = new Map(previous.rows.map(row => [row.isin, row]));
+                for (const row of update.rows) rows.set(row.isin, row);
+                return { ...update, rows: [...rows.values()] };
+              });
+            }
             const row = event.row;
             setBundle(existing => existing?.id === selection ? { ...existing, data: { ...existing.data,
               rows: existing.data.rows.some(item => item.isin === row.isin)
@@ -116,15 +125,20 @@ export default function ValuationPanel() {
             complete = true;
             if (current()) setBundle({ id: selection, data: event.data });
             failure = event.failures?.join('\n') ?? '';
+            const total = event.counts?.total ?? event.data.rows.length;
+            const failed = event.counts?.failed ?? (event.failures?.length ?? 0);
+            const succeeded = event.counts?.succeeded ?? Math.max(0, total - failed);
+            outcome = nl ? `${succeeded}/${total} bedrijven vernieuwd; ${failed} mislukt. Succesvolle updates zijn opgeslagen.`
+              : `${succeeded}/${total} companies refreshed; ${failed} failed. Successful updates saved.`;
+            const otherFailures = Math.max(0, (event.failures?.length ?? 0) - failed);
+            if (otherFailures) outcome += nl ? ` ${otherFailures} aanvullende controles mislukt.` : ` ${otherFailures} additional checks failed.`;
+            for (const detail of event.failures ?? []) report({ done: total, total, message: detail });
           } else if (event.type === 'error') failure = event.message ?? 'Portfolio refresh failed.';
         }, signal);
         if (signal.aborted) return;
-        if (failure || !complete) throw new ExpectedJobFailure(failure || 'Portfolio refresh ended before completion.',
-          nl ? 'Niet alle brongegevens konden worden vernieuwd.' : 'Some source data could not be refreshed.');
-        return nl ? 'Portefeuille bijgewerkt.' : 'Portfolio updated.';
-      } catch (cause) {
-        if (current() && !signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
-        throw cause;
+        if (failure || !complete) throw new ExpectedJobFailure(outcome || failure || 'Portfolio refresh ended before completion.',
+          nl ? 'Bekijk de details voor de fouten.' : 'See details for the errors.');
+        return outcome;
       } finally { if (current()) { setRefreshingIsin(null); setLoading(false); } }
     });
   };
@@ -133,7 +147,7 @@ export default function ValuationPanel() {
       <label className="space-y-1 text-sm"><span className="block">{nl ? 'Portefeuille' : 'Portfolio'}</span>
         <select disabled={loading} value={selected} onChange={event => { activeSelection.current = event.target.value; setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
           <option value="">{nl ? 'Selecteer een portefeuille…' : 'Select a portfolio…'}</option>
-          {portfolios.map(portfolio => <option key={selectionKey(portfolio)} value={selectionKey(portfolio)}
+          {visiblePortfolios.map(portfolio => <option key={selectionKey(portfolio)} value={selectionKey(portfolio)}
             disabled={portfolio.id == null} title={portfolio.unavailable_reason ?? undefined}>
             {portfolio.name}{portfolio.id == null ? (nl ? ' — geen gekoppeld AIRS-model' : ' — no linked AIRS model') : ''}
           </option>)}
@@ -141,19 +155,13 @@ export default function ValuationPanel() {
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={refreshPortfolio} disabled={loading} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
-        <div className="flex flex-wrap items-center gap-3 text-xs" aria-label={nl ? 'Kolomtypen' : 'Column types'}>
-          {(['data', 'assumption', 'calculation'] as const).map(kind => <span key={kind} className={`rounded border-t-2 px-3 py-2 ${COLUMN_STYLE[kind]}`}>
-            {kind === 'data' ? (nl ? 'Blauw · directe gegevens' : 'Blue · direct data') : kind === 'assumption'
-              ? (nl ? 'Groen · aannames' : 'Green · assumptions') : (nl ? 'Geel · berekening' : 'Yellow · calculation')}
-          </span>)}
-        </div>
       </div>
     </div>
     {(selected || error) && <>
       {error && <p role="alert" className="text-sm text-neg-300">{error}</p>}
       {data && !workbook && <p role="alert" className="text-sm text-neg-300">{nl ? 'De portefeuillebundel bevat geen werkmapgegevens. Vernieuw de portefeuille.' : 'The portfolio bundle is missing workbook data. Refresh the portfolio.'}</p>}
-      {workbook && selectedId != null && <WorkbookValuationTable key={selected} workbookData={workbook} refreshingIsin={refreshingIsin}
-        portfolioId={selectedId} rows={rows} nl={nl} portfolioName={portfolios.find(row => selectionKey(row) === selected)?.name ?? ''} />}
+      {workbook && selectedId != null && <WorkbookValuationTable key={selected} workbookData={workbook} workbookUpdate={workbookUpdate} refreshingIsin={refreshingIsin}
+        portfolioId={selectedId} rows={rows} nl={nl} />}
     </>}
   </section>;
 }

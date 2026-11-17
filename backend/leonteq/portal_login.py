@@ -200,7 +200,7 @@ def _read_in_session(user: str, password: str, portfolio_name: str | None, perfo
                 page.wait_for_timeout(300)
             else:
                 session.close()
-                return {'success': False, 'status': 'timeout'}
+                return {'success': False, 'status': 'timeout', 'diagnostics': {'stage': 'authentication'}}
         if not page.url.endswith('#/amc/indices'):
             stage = 'indices_navigation'
             page.goto(INDICES_URL, wait_until='domcontentloaded', timeout=30000)
@@ -222,6 +222,7 @@ def _read_in_session(user: str, password: str, portfolio_name: str | None, perfo
             report(f'Reading monthly returns for {portfolio_name}…', f'Maandrendementen lezen voor {portfolio_name}…')
             from leonteq.monthly_performance import read_details
             return read_details(page, portfolio_name)
+        stage = 'composition'
         report(f'Reading holdings and weights for {portfolio_name}…', f'Posities en gewichten lezen voor {portfolio_name}…')
         return _read_composition(page, portfolio_name)
     except TimeoutError as exc:

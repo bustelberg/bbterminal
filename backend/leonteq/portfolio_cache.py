@@ -50,5 +50,5 @@ def portfolios(refresh: bool = False) -> dict:
             log.warning('Leonteq portfolio list snapshot could not be saved')
         return {**result, 'cached': False, 'snapshot_saved': persisted}
     if saved['success']:
-        return {**saved, 'refresh_error': result['status']}
+        return {**saved, 'refresh_error': result['status'], 'refresh_diagnostics': result.get('diagnostics')}
     return result

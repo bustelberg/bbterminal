@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { workbookValuation, VALUATION_FORMULAS, type WorkbookRow } from './valuationWorkbook';
-import { WORKBOOK_COLUMNS, WORKBOOK_PANELS, columnsForPanel } from './valuationWorkbookColumns';
+import { WORKBOOK_COLUMNS, WORKBOOK_PANELS, columnsForPanel, panelForInput } from './valuationWorkbookColumns';
 
 const parameters = { years: 3, safety_margin: .2, bear_growth_delta: -.05,
   bear_multiple_delta: -.25, bull_growth_delta: .05, bull_multiple_delta: .25 };
@@ -86,7 +86,9 @@ it('calculates from the raw pence quote without changing the blue source observa
 
 it('keeps all source fields, assumptions and calculations accessible across the workbook tabs', () => {
   const visible = new Set(WORKBOOK_PANELS.flatMap(panel => columnsForPanel(panel.key).map(column => column.key)));
-  expect(WORKBOOK_COLUMNS.filter(column => !visible.has(column.key))).toEqual([]);
+  const shared = WORKBOOK_COLUMNS.filter(column => !visible.has(column.key));
+  expect(shared.map(column => column.key)).toEqual(['safety_margin', 'years']);
+  for (const column of shared) expect(panelForInput(column.key)).toBe('parameters');
   for (const panel of WORKBOOK_PANELS) {
     const keys = columnsForPanel(panel.key).map(column => column.key);
     if (panel.key !== 'memberships' && panel.key !== 'parameters') expect(keys[0]).toBe('company');

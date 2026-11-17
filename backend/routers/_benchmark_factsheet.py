@@ -24,6 +24,8 @@ class FactsheetRow(BaseModel):
     ticker: str
     name: str
     currency: str
+    isin: str | None = None
+    source_url: str | None = None
     requested_start: str
     end: str
     period: FactsheetStatistics | None = None

@@ -2,24 +2,26 @@
 
 The separate sidebar entry opens `/factsheet`. The table
 shows fifteen-year EUR total return, CAGR and daily annualized volatility for ACWI,
-AGG (iShares Core U.S. Aggregate Bond ETF) and QAI (NYLIM Hedge Multi-Strategy Tracker ETF,
-a liquid-alternatives proxy). These are ETF returns, after fund expenses,
-not a reconstruction of the underlying index.
+SYBA.DE (State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF, ISIN
+IE00B41RYL63), QAI (NYLIM Hedge Multi-Strategy Tracker ETF, a liquid-alternatives
+proxy), and HDG (ProShares Hedge Replication ETF, an HFRI-oriented replication proxy). These are ETF returns after fund expenses.
 
-AGG is a U.S. investment-grade aggregate bond proxy with fund history since 2003.
-It replaces AGGH.AS on this Factsheet only; the management dashboard's global
-EUR-hedged bond benchmark is unchanged. The snapshot key includes the asset
-selection and window length, so earlier AGGH or ten-year snapshots are not reused. If source data
-is too short, fifteen-year cells stay blank and available history is labelled separately.
+The bond reference is the user's justETF profile:
+https://www.justetf.com/en/etf-profile.html?isin=IE00B41RYL63#overview
+The verified Yahoo listing is SYBA.DE, quoted in EUR. It replaces AGG on the
+Factsheet only. The snapshot key includes this asset selection, so old AGG
+snapshots are never reused. The underlying fund launched in May 2011; shorter
+listing histories are labelled separately rather than filled from another fund.
 
-Sources: Yahoo completed **adjusted** daily closes (distributions reinvested),
-with historical USD/EUR from the existing FX store. All three ETFs are converted at each
-date's own FX rate. This includes USD/EUR exposure and does not currency-hedge AGG. Missing FX,
-adjusted closes or daily coverage produces an error, never price-only or USD
-figures labelled as EUR. Raw source observations remain in the saved snapshot
-for audit but are excluded from the HTTP response.
+Sources for calculations remain Yahoo completed **adjusted** daily closes,
+including reinvested distributions. ACWI, QAI and HDG use historical USD/EUR from
+the existing FX store; SYBA's EUR prices require no FX conversion. The bond row
+links to justETF for the fund reference and Yahoo for historical price data.
+Missing adjusted closes, FX or daily coverage produces an explicit error.
+Raw source observations remain in the saved snapshot for audit but are excluded
+from the HTTP response.
 
-All three funds use the latest shared completed closing date. A full fifteen-year opening
+All four funds use the latest shared completed closing date. A full fifteen-year opening
 uses the latest close on/before its calendar anniversary, no more than seven
 days earlier. Where all have full history, they share that opening date too.
 CAGR uses actual elapsed years (`days / 365.2425`). Volatility is sample standard
@@ -31,7 +33,12 @@ Apply `supabase/migrations/20261113200000_benchmark_factsheet.sql` before rollou
 GET reads the saved snapshot. Opening missing/stale data requests preparation
 through POST; Refresh forces a new calculation. A daily scheduler job,
 `benchmark_factsheet_daily`, runs at 23:45 UTC. Preparation downloads only the
-three ETF series (fifteen years plus an opening-date buffer). Provider/calculation
+four ETF series (fifteen years plus an opening-date buffer). Provider/calculation
 failure leaves the prior complete snapshot unchanged. FX synchronization must
 already cover the window. Direct table access is service-role only; authenticated
 dashboard users can read and refresh through the existing authorization tier.
+
+HDG appears immediately after QAI and uses the same shared EUR calculation
+window, adjusted-close methodology and daily volatility convention. Both are
+replication ETF proxies, not the HFRI index itself. The cache key includes HDG,
+so previously saved three-fund snapshots are not reused.

@@ -52,5 +52,6 @@ def composition(name: str, refresh: bool = False, saved_only: bool = False) -> d
         persisted = _write(account_key, name, result)
         return {**result, 'cached': False, 'snapshot_saved': persisted}
     if saved:
-        return {**saved, 'cached': True, 'refresh_error': result['status']}
+        return {**saved, 'cached': True, 'refresh_error': result['status'],
+                'refresh_diagnostics': result.get('diagnostics')}
     return result

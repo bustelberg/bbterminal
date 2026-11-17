@@ -13,10 +13,13 @@ const stats = { start: '2011-11-11', end: '2026-11-12', years: 15, observations:
   total_return_pct: 100, cagr_pct: 4.73, volatility_pct: 15 };
 const saved = { ready: true, stale: false, currency: 'EUR', prepared_at: '2026-11-13T23:45:00Z', rows: [
   { ticker: 'ACWI', name: 'iShares MSCI ACWI ETF', requested_start: '2011-11-12', end: stats.end, period: stats },
-  { ticker: 'AGG', name: 'iShares Core U.S. Aggregate Bond ETF', requested_start: '2011-11-12', end: stats.end,
+  { ticker: 'SYBA.DE', name: 'State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF', requested_start: '2011-11-12', end: stats.end,
+    isin: 'IE00B41RYL63', source_url: 'https://www.justetf.com/en/etf-profile.html?isin=IE00B41RYL63#overview',
     period: null, reason: 'Fifteen years of fund history are not available.',
     available_history: { ...stats, start: '2017-11-22', years: 8.98, total_return_pct: 14, cagr_pct: 1.5, volatility_pct: 5 } },
   { ticker: 'QAI', name: 'NYLIM Hedge Multi-Strategy Tracker ETF · Liquid alternatives proxy', requested_start: '2011-11-12', end: stats.end, period: stats },
+  { ticker: 'HDG', name: 'ProShares Hedge Replication ETF · HFRI-oriented replication proxy', requested_start: '2011-11-12', end: stats.end,
+    period: { ...stats, cagr_pct: 3.21, volatility_pct: 6.54 } },
 ] };
 
 it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async () => {
@@ -28,17 +31,21 @@ it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async (
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
     await act(async () => root.render(<FactsheetPanel />));
-    expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(4);
     const bond = host.querySelectorAll('tbody tr')[1];
-    expect(bond.textContent).toContain('iShares Core U.S. Aggregate Bond ETF');
+    expect(bond.textContent).toContain('State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF');
     expect(bond.textContent).toContain('15 years');
     expect(bond.textContent).not.toContain('Available history');
-    expect(bond.querySelector('a')?.getAttribute('href')).toBe('https://finance.yahoo.com/quote/AGG/');
+    expect(bond.querySelector('a')?.getAttribute('href')).toBe('https://www.justetf.com/en/etf-profile.html?isin=IE00B41RYL63#overview');
+    expect(bond.textContent).toContain('IE00B41RYL63');
     expect(host.textContent).toContain('USD/EUR currency movements');
     const alternatives = host.querySelectorAll('tbody tr')[2];
     expect(alternatives.textContent).toContain('Liquid alternatives proxy');
     expect(alternatives.textContent).toContain('15 years');
     expect(alternatives.querySelector('a')?.getAttribute('href')).toBe('https://finance.yahoo.com/quote/QAI/');
+    const hdg = host.querySelectorAll('tbody tr')[3];
+    expect(hdg.textContent).toContain('ProShares Hedge Replication ETF');
+    expect(hdg.querySelector('a')?.getAttribute('href')).toBe('https://finance.yahoo.com/quote/HDG/');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -49,7 +56,9 @@ it('separates true fifteen-year statistics from the bond funds shorter available
   try {
     await act(async () => root.render(<FactsheetPanel />));
     const rows = host.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(5);
+    expect(rows[4].textContent).toContain('3.21%');
+    expect(rows[4].textContent).toContain('6.54%');
     expect(rows[0].textContent).toContain('4.73%');
     expect(rows[0].textContent).toContain('15.00%');
     expect(rows[1].textContent).toContain('Fifteen years of fund history are not available');

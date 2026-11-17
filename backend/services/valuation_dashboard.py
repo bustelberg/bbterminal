@@ -10,6 +10,13 @@ from services import portfolio_valuation as V, valuation_workbook as W
 _preparation_lock = Lock()
 
 
+class NotPrepared(HTTPException):
+    """A valid portfolio whose initial source snapshot has not been fetched."""
+
+    def __init__(self):
+        super().__init__(503, 'Portfolio holdings have not been prepared yet.')
+
+
 def selection(portfolio_id):
     matches = [row for row in V.portfolios() if row.get('id') == portfolio_id]
     if len(matches) != 1:
@@ -28,14 +35,16 @@ def _leonteq_identity(selected, *, refresh=False):
     if refresh and not matched:
         catalogue = portfolio_cache.portfolios(refresh=True)
         if not catalogue.get('success') or catalogue.get('refresh_error') or not catalogue.get('snapshot_saved'):
-            raise HTTPException(502, _leonteq_failure('catalogue', catalogue))
+            raise HTTPException(502, _leonteq_failure('catalogue', catalogue, selected['name']))
         matched = management.resolve(entry, catalogue.get('portfolios') or []) if entry else None
     if not matched:
+        if not refresh and catalogue.get('status') == 'not_cached':
+            raise NotPrepared()
         raise HTTPException(503, 'Selected Topselectie is unavailable in Leonteq. No AIRS fallback was used.')
     return matched['name']
 
 
-def _leonteq_failure(resource, result):
+def _leonteq_failure(resource, result, portfolio_name=None):
     # Only expose known status codes; browser exception text can contain secrets.
     reasons = {
         'missing_credentials': 'Leonteq credentials are not configured on the server',
@@ -52,9 +61,23 @@ def _leonteq_failure(resource, result):
     }
     status = result.get('refresh_error') or result.get('status')
     reason = reasons.get(status, 'Leonteq did not return a successful response')
+    if status == 'timeout':
+        stage = (result.get('refresh_diagnostics') or result.get('diagnostics') or {}).get('stage')
+        activity = {
+            'browser_start': 'opening the Leonteq connection',
+            'login_navigation': 'opening the Leonteq sign-in page',
+            'login_form': 'loading the Leonteq sign-in form',
+            'authentication': 'waiting for Leonteq sign-in to finish',
+            'indices_navigation': 'loading the Leonteq portfolio list',
+            'composition': 'loading the portfolio holdings from Leonteq',
+        }.get(stage, 'loading the portfolio holdings from Leonteq' if resource == 'holdings' else 'loading the Leonteq portfolio list')
+        reason = f'Leonteq timed out while {activity}'
     if result.get('success') and not result.get('refresh_error') and not result.get('snapshot_saved'):
         reason = 'the refreshed snapshot could not be saved'
-    return f'Leonteq {resource} refresh failed: {reason}. No AIRS fallback was used.'
+    prefix = f'{portfolio_name}: ' if portfolio_name else ''
+    return (f'{prefix}{reason[0].upper() + reason[1:]}. '
+            'Company price and forecast updates have not started. Any previously saved valuation remains unchanged. '
+            'Try Refresh again in a minute. If this keeps happening, check the Leonteq connection.')
 
 
 def holdings(selected):
@@ -63,6 +86,8 @@ def holdings(selected):
         return rows, {**evidence, 'source': 'AIRS'}
     from leonteq import composition_cache
     snapshot = composition_cache.composition(_leonteq_identity(selected), saved_only=True)
+    if snapshot.get('status') == 'not_cached':
+        raise NotPrepared()
     if not snapshot.get('success') or not snapshot.get('groups'):
         raise HTTPException(503, 'Leonteq holdings are not saved. Refresh this portfolio; no AIRS fallback is used.')
     rows = {}
@@ -114,8 +139,23 @@ def read(portfolio_id):
                         **overrides.get('companies', {}).get(row.get('isin'), {})}} for row in workbook['rows']]}
             return {**payload, 'workbook': workbook, 'ready': True, 'prepared_at': saved[0]['prepared_at'],
                 'stale': bool(payload.get('errors')) or payload.get('calculation_date') != date.today().isoformat()}
-    bundle = _saved_bundle(selected, holdings(selected))
+    try:
+        current = holdings(selected)
+    except NotPrepared:
+        return _unprepared_bundle(portfolio_id)
+    except ValueError as exc:
+        if str(exc).startswith('No saved composition for portfolio '):
+            return _unprepared_bundle(portfolio_id)
+        raise
+    bundle = _saved_bundle(selected, current)
     return {**bundle, 'workbook': W.read(portfolio_id, prepared_bundle=bundle, include_membership=True)}
+
+
+def _unprepared_bundle(portfolio_id):
+    return {'portfolio_id': portfolio_id, 'ready': False, 'stale': True,
+            'rows': [], 'method': V.METHOD, 'detail': 'Portfolio data has not been prepared yet. Press Refresh to fetch it.',
+            'workbook': {'portfolio_id': portfolio_id, 'as_of': None, 'rows': [],
+                         'parameters': W.defaults()['parameters'], 'membership_legend': []}}
 
 
 def _refresh_holdings(selected, check):
@@ -125,7 +165,7 @@ def _refresh_holdings(selected, check):
         check()
         snapshot = composition_cache.composition(name, refresh=True)
         if not snapshot.get('success') or snapshot.get('refresh_error') or not snapshot.get('snapshot_saved'):
-            raise HTTPException(502, _leonteq_failure('holdings', snapshot))
+            raise HTTPException(502, _leonteq_failure('holdings', snapshot, selected['name']))
     else:
         from services.airs_refresh import collect_model_compositions
         result = collect_model_compositions(on_event=lambda *_args, **_kwargs: None, force=True,
@@ -164,6 +204,7 @@ def refresh(portfolio_id, emit, check, *, refresh_holdings=True, source_cache=No
         bundle = _saved_bundle(selected, current)
         emit({'type': 'holdings', 'rows': bundle['rows']})
         failures = {}
+        succeeded = failed = 0
         for index, row in enumerate(current[0]):
             check()
             emit({'type': 'progress', 'done': index, 'total': len(current[0]), 'isin': row['isin'],
@@ -172,13 +213,17 @@ def refresh(portfolio_id, emit, check, *, refresh_holdings=True, source_cache=No
                 if not row.get('isin'):
                     raise HTTPException(422, 'Holding has no verified ISIN. Source data could not be refreshed.')
                 bundle = V.refresh_row(portfolio_id, row['isin'], existing=bundle, current_holdings=current, source_cache=source_cache)
-                emit({'type': 'row', 'row': next(item for item in bundle['rows'] if item.get('isin') == row['isin'])})
+                workbook_row = W.read(portfolio_id, only_isin=row['isin'], prepared_bundle=bundle, include_membership=False)
+                succeeded += 1
+                emit({'type': 'row', 'row': next(item for item in bundle['rows'] if item.get('isin') == row['isin']),
+                      'workbook': workbook_row})
             except JobCancelled:
                 raise
             except Exception as exc:
                 reason = exc.detail if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else 'Source refresh failed. Previous saved data was kept.'
                 identity = row.get('isin') or row['name']
                 failures[identity] = f"{row['name']}: {reason}"
+                failed += 1
                 emit({'type': 'row_error', 'message': failures[identity]})
             emit({'type': 'progress', 'done': index + 1, 'total': len(current[0]), 'message': row['name']})
         check()
@@ -223,7 +268,8 @@ def refresh(portfolio_id, emit, check, *, refresh_holdings=True, source_cache=No
             supabase.table(V.TABLE).upsert({'portfolio_id': portfolio_id, 'prepared_at': final['prepared_at'],
                 'payload': {key: value for key, value in final.items() if key not in ('prepared_at', 'ready', 'stale')}},
                 on_conflict='portfolio_id').execute()
-        emit({'type': 'complete', 'data': final, 'failures': list(failures.values())})
+        emit({'type': 'complete', 'data': final, 'failures': list(failures.values()),
+              'counts': {'succeeded': succeeded, 'failed': failed, 'total': len(current[0])}})
         return final
     finally:
         lock.release()

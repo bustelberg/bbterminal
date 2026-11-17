@@ -9,12 +9,15 @@ from deps import supabase
 
 TABLE = 'benchmark_factsheet'
 PERIOD_YEARS = 15
-KEY = f'eur-total-return-{PERIOD_YEARS}y-acwi-agg-qai-v4'
+KEY = f'eur-total-return-{PERIOD_YEARS}y-acwi-syba-qai-hdg-v6'
 ASSETS = (
     ('ACWI', 'iShares MSCI ACWI ETF', 'USD'),
-    ('AGG', 'iShares Core U.S. Aggregate Bond ETF', 'USD'),
+    ('SYBA.DE', 'State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF', 'EUR'),
     ('QAI', 'NYLIM Hedge Multi-Strategy Tracker ETF · Liquid alternatives proxy', 'USD'),
+    ('HDG', 'ProShares Hedge Replication ETF · HFRI-oriented replication proxy', 'USD'),
 )
+BOND_ISIN = 'IE00B41RYL63'
+BOND_SOURCE = f'https://www.justetf.com/en/etf-profile.html?isin={BOND_ISIN}#overview'
 _lock = RLock()
 
 
@@ -84,7 +87,7 @@ def calculate(series):
     # Same closing date and same opening date wherever all funds have full history.
     common = set.intersection(*(set(series[ticker]) for ticker, _, _ in ASSETS))
     if not common:
-        raise ValueError('ACWI, AGG and QAI have no shared completed trading date.')
+        raise ValueError('ACWI, SYBA.DE, QAI and HDG have no shared completed trading date.')
     end = max(common)
     anchor = years_before(date.fromisoformat(end)).isoformat()
     shared_open = max((day for day in common if day <= anchor), default=None)
@@ -109,6 +112,8 @@ def calculate(series):
             except ValueError as exc:
                 reason = f'{reason or ""} Available-history calculation: {exc}'.strip()
         rows.append({'ticker': ticker, 'name': name, 'currency': 'EUR', 'requested_start': anchor,
+                     'isin': BOND_ISIN if ticker == 'SYBA.DE' else None,
+                     'source_url': BOND_SOURCE if ticker == 'SYBA.DE' else None,
                      'end': end, 'period': full, 'available_history': available, 'reason': reason,
                      'source_prices_eur': prices})
     return rows
@@ -148,7 +153,8 @@ def prepare(*, force=False, today=None):
                 raise ValueError(f'{ticker}: Yahoo did not return history; previous Factsheet remains saved.')
             series[ticker] = eur_prices(adjusted_prices(chart, ticker, currency, today), currency, fx)
         payload = {'currency': 'EUR', 'period_years': PERIOD_YEARS, 'calculation_date': today.isoformat(), 'rows': calculate(series),
-                   'method': 'Yahoo dividend-adjusted completed daily closes, converted to EUR at historical FX. '
+                   'method': 'Yahoo dividend-adjusted completed daily closes, converted to EUR at historical FX where needed. '
+                             'The bond fund is State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF, ISIN IE00B41RYL63 (justETF reference). '
                              'CAGR uses elapsed calendar years; volatility is sample standard deviation of daily '
                              'arithmetic returns × sqrt(252). Fifteen-year windows use the last close on/before the anniversary '
                              '(maximum seven days earlier). Shorter history is labelled separately.'}

@@ -34,7 +34,7 @@ def test_short_history_is_not_presented_as_fifteen_years():
     end = date(2026, 11, 12)
     stock = series(date(2011, 10, 1), end)
     bonds = series(date(2017, 11, 22), end)
-    rows = F.calculate({'ACWI': stock, 'AGG': bonds, 'QAI': stock})
+    rows = F.calculate({'ACWI': stock, 'SYBA.DE': bonds, 'QAI': stock, 'HDG': stock})
     assert rows[0]['period']['start'] == '2011-11-11'  # Anniversary is a Saturday.
     assert rows[0]['period']['end'] == '2026-11-12'
     assert rows[1]['period'] is None
@@ -47,7 +47,7 @@ def test_all_benchmarks_use_qais_earlier_shared_end_and_the_same_open():
     stock = series(date(2011, 10, 1), date(2026, 11, 12))
     bonds = series(date(2011, 10, 1), date(2026, 11, 13))
     qai = series(date(2011, 10, 1), date(2026, 11, 11))
-    rows = F.calculate({'ACWI': stock, 'AGG': bonds, 'QAI': qai})
+    rows = F.calculate({'ACWI': stock, 'SYBA.DE': bonds, 'QAI': qai, 'HDG': stock})
     assert {row['period']['end'] for row in rows} == {'2026-11-11'}
     assert {row['period']['start'] for row in rows} == {'2011-11-11'}
 
@@ -90,7 +90,7 @@ def test_raw_closes_are_never_substituted_for_dividend_adjusted_data(monkeypatch
     assert F.adjusted_prices(chart, 'ACWI', 'USD', date(2026, 11, 13)) == {'2026-11-12': 95}
     chart['meta']['currency'] = 'EUR'
     with pytest.raises(ValueError, match='expected USD'):
-        F.adjusted_prices(chart, 'AGG', 'USD', date(2026, 11, 13))
+        F.adjusted_prices(chart, 'SYBA.DE', 'USD', date(2026, 11, 13))
 
 
 def test_provider_failure_does_not_overwrite_previous_factsheet(monkeypatch):
@@ -130,8 +130,9 @@ def test_read_is_database_only_and_new_store_has_no_placeholder_metrics(monkeypa
 def test_http_schema_does_not_return_thousands_of_source_prices():
     from routers._benchmark_factsheet import FactsheetResponse
     rows = F.calculate({'ACWI': series(date(2011, 10, 1), date(2026, 11, 12)),
-                        'AGG': series(date(2017, 11, 22), date(2026, 11, 12)),
-                        'QAI': series(date(2011, 10, 1), date(2026, 11, 12))})
+                        'SYBA.DE': series(date(2017, 11, 22), date(2026, 11, 12)),
+                        'QAI': series(date(2011, 10, 1), date(2026, 11, 12)),
+                        'HDG': series(date(2011, 10, 1), date(2026, 11, 12))})
     response = FactsheetResponse.model_validate({'ready': True, 'currency': 'EUR', 'rows': rows})
     assert 'source_prices_eur' not in response.model_dump()['rows'][0]
 
@@ -140,13 +141,14 @@ def test_first_preparation_publishes_auditable_eur_metrics_after_both_sources_su
     import asset_pipeline.yahoo as Y
     import common.fx_load as FX
     source = {'ACWI': series(date(2011, 10, 1), date(2026, 11, 12)),
-              'AGG': series(date(2011, 10, 1), date(2026, 11, 12)),
-              'QAI': series(date(2011, 10, 1), date(2026, 11, 12), growth=1.00015)}
+              'SYBA.DE': series(date(2011, 10, 1), date(2026, 11, 12)),
+              'QAI': series(date(2011, 10, 1), date(2026, 11, 12), growth=1.00015),
+              'HDG': series(date(2011, 10, 1), date(2026, 11, 12), growth=1.00012)}
     requested_starts = []
     def chart(ticker, *_args):
         requested_starts.append(datetime.fromtimestamp(_args[0], timezone.utc).date())
         rows = source[ticker]
-        return {'meta': {'currency': 'USD'},
+        return {'meta': {'currency': 'EUR' if ticker == 'SYBA.DE' else 'USD'},
                 'timestamp': [int(datetime.combine(date.fromisoformat(day), datetime.min.time(), timezone.utc).timestamp()) for day in rows],
                 'indicators': {'adjclose': [{'adjclose': list(rows.values())}]}}
     monkeypatch.setattr(Y, 'chart_window', chart)
@@ -165,14 +167,16 @@ def test_first_preparation_publishes_auditable_eur_metrics_after_both_sources_su
     result = F.prepare(today=date(2026, 11, 13))
     assert result['ready'] is True
     assert result['period_years'] == 15
-    assert len(requested_starts) == 3
+    assert len(requested_starts) == 4
     assert all(day.year == 2011 for day in requested_starts)
     assert len(saved) == 1
     assert result['rows'][0]['currency'] == 'EUR'
     assert result['rows'][0]['source_prices_eur']['2011-10-03'] == 50
     assert result['rows'][0]['period'] is not None
-    assert result['rows'][1]['ticker'] == 'AGG'
-    assert result['rows'][1]['source_prices_eur']['2011-10-03'] == 50
+    assert result['rows'][1]['ticker'] == 'SYBA.DE'
+    assert result['rows'][1]['source_prices_eur']['2011-10-03'] == 100
+    assert result['rows'][1]['isin'] == 'IE00B41RYL63'
+    assert result['rows'][1]['source_url'] == F.BOND_SOURCE
     assert result['rows'][1]['period'] is not None
     assert result['rows'][1]['available_history'] is None
     assert result['rows'][1]['period']['years'] > 14.99
@@ -183,14 +187,22 @@ def test_first_preparation_publishes_auditable_eur_metrics_after_both_sources_su
     assert result['rows'][2]['period']['start'] == result['rows'][0]['period']['start']
     assert result['rows'][2]['period']['end'] == result['rows'][0]['period']['end']
     assert result['rows'][2]['period']['cagr_pct'] != result['rows'][0]['period']['cagr_pct']
+    assert result['rows'][3]['ticker'] == 'HDG'
+    assert result['rows'][3]['source_prices_eur']['2011-10-03'] == 50
+    assert result['rows'][3]['period']['start'] == result['rows'][2]['period']['start']
+    assert result['rows'][3]['period']['end'] == result['rows'][2]['period']['end']
+    assert result['rows'][3]['period']['cagr_pct'] != result['rows'][2]['period']['cagr_pct']
+    assert saved[0]['key'] != 'eur-total-return-15y-acwi-syba-qai-v5'
     assert saved[0]['key'] != 'eur-total-return-15y-acwi-agg-v3'
+    assert saved[0]['key'] != 'eur-total-return-15y-acwi-agg-qai-v4'
 
 
 def test_daily_receipt_retains_fifteen_year_statistics_without_raw_prices(monkeypatch):
     from scheduler_jobs.factsheet import run
     rows = F.calculate({'ACWI': series(date(2011, 10, 1), date(2026, 11, 12)),
-                        'AGG': series(date(2011, 10, 1), date(2026, 11, 12)),
-                        'QAI': series(date(2011, 10, 1), date(2026, 11, 12))})
+                        'SYBA.DE': series(date(2011, 10, 1), date(2026, 11, 12)),
+                        'QAI': series(date(2011, 10, 1), date(2026, 11, 12)),
+                        'HDG': series(date(2011, 10, 1), date(2026, 11, 12))})
     def prepare(*, force):
         assert force is True
         return {'period_years': 15, 'prepared_at': '2026-11-13T23:45:00Z', 'rows': rows}

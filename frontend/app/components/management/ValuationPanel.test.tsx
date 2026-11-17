@@ -29,6 +29,23 @@ function mount() {
   return { host, root: createRoot(host) };
 }
 
+it('shows only Offensief profiles while keeping standalone portfolios and Bustelberg 2.0', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockResolvedValue(response([
+    { id: 1, name: 'Bustelberg Defensief' }, { id: 2, name: 'Bustelberg Neutraal' },
+    { id: 3, name: 'Bustelberg Beperkt Offensief' }, { id: 4, name: 'Bustelberg Offensief' },
+    { id: 5, name: 'Bustelberg 2.0 Offensief' }, { id: 6, name: 'Toppenberg Neutraal' },
+    { id: 7, name: 'Toppenberg Offensief' }, { id: 8, name: 'AITopSelectie' }, { id: 9, name: 'Imagine Fund' },
+  ]));
+  const { host, root } = mount();
+  try {
+    await act(async () => root.render(<ValuationPanel />));
+    expect([...host.querySelectorAll('select option')].slice(1).map(option => option.textContent)).toEqual([
+      'Bustelberg Offensief', 'Bustelberg 2.0 Offensief', 'Toppenberg Offensief', 'AITopSelectie', 'Imagine Fund',
+    ]);
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
 it('shows the workbook directly and loads its panels without refetching', async () => {
   vi.mocked(apiFetch).mockReset();
   vi.mocked(apiFetch).mockImplementation(async url => response(String(url).endsWith('/portfolios') ? roster : payload('Company One')));
@@ -60,6 +77,27 @@ it('does not launch another preparation request for stale or pending cached data
     expect(apiFetch).toHaveBeenCalledTimes(2);
     expect(host.textContent).toContain('Pending Company');
     expect(vi.mocked(apiFetch).mock.calls.every(([, init]) => !init?.method)).toBe(true);
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it('shows the full workbook and tabs for an unprepared portfolio and leaves Refresh available', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockImplementation(async url => response(String(url).endsWith('/portfolios') ? roster : {
+    ...payload('Unused'), ready: false, rows: [], detail: 'Portfolio data has not been prepared yet. Press Refresh to fetch it.',
+    workbook: { ...workbook(), rows: [] },
+  }));
+  const { host, root } = mount();
+  try {
+    await act(async () => root.render(<ValuationPanel />)); await select(host);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).toContain('Press Refresh to load companies.');
+    expect(host.textContent).not.toContain('No matching companies.');
+    expect(host.querySelector('table')).not.toBeNull();
+    expect(host.querySelectorAll('nav[aria-label="Valuation panels"] button')).toHaveLength(7);
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Valuation panels"] button')].find(button => button.textContent === 'Parameters')!.click());
+    expect(host.querySelector('nav[aria-label="Valuation panels"] button[aria-pressed="true"]')?.textContent).toBe('Parameters');
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')?.disabled).toBe(false);
+    expect(apiFetch).toHaveBeenCalledTimes(2);
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -136,6 +174,13 @@ it('Refresh uses one POST stream for row progress and the complete data without 
     expect(host.querySelector('tr[aria-busy="true"]')).not.toBeNull();
     expect(jobsStore.get().jobs.at(-1)?.message).toContain('Company One');
     const final = payload('Updated Company');
+    final.workbook.rows[0].quote!.price = 72;
+    final.workbook.rows[0].forecast.fy1 = 9;
+    await act(async () => stream.enqueue(encoder.encode(frame({ type: 'row', row: final.rows[0], workbook: final.workbook }))));
+    expect(host.querySelector('tbody [data-column="raw_price"]')?.textContent).toContain('72.00');
+    expect(host.textContent).toContain('Updated Company');
+    expect(jobsStore.get().jobs.at(-1)?.status).toBe('running');
+    expect(apiFetch).toHaveBeenCalledTimes(3);
     await act(async () => {
       stream.enqueue(encoder.encode(frame({ type: 'row', row: final.rows[0] }) + frame({ type: 'progress', done: 1, total: 1, message: 'Updated Company' }) + frame({ type: 'complete', data: final, failures: [] })));
       stream.close();
@@ -153,7 +198,8 @@ it('keeps source failures visible in the shared popup while accepting the final 
   vi.mocked(apiFetch).mockImplementation(async (url, init) => {
     if (String(url).endsWith('/portfolios')) return response(roster);
     if (init?.method === 'POST') return new Response(frame({ type: 'row_error', message: 'Company One: GuruFocus returned empty statements.' })
-      + frame({ type: 'complete', data: payload('Company One'), failures: ['Company One: GuruFocus returned empty statements.'] }));
+      + frame({ type: 'complete', data: payload('Company One'), counts: { succeeded: 19, failed: 1, total: 20 },
+        failures: ['Company One: GuruFocus returned empty statements.'] }));
     return response(payload('Company One'));
   });
   const { host, root } = mount();
@@ -162,7 +208,10 @@ it('keeps source failures visible in the shared popup while accepting the final 
     await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Refresh')!.click());
     expect(apiFetch).toHaveBeenCalledTimes(3);
     expect(jobsStore.get().jobs.at(-1)?.status).toBe('failed');
-    expect(jobsStore.get().jobs.at(-1)?.summary).toContain('empty statements');
-    expect(host.textContent).toContain('GuruFocus returned empty statements');
+    expect(jobsStore.get().jobs.at(-1)?.summary).toBe('19/20 companies refreshed; 1 failed. Successful updates saved.');
+    expect(jobsStore.get().jobs.at(-1)?.details?.join('\n')).toContain('GuruFocus returned empty statements');
+    expect(host.textContent).not.toContain('19/20 companies refreshed; 1 failed');
+    expect(host.textContent).not.toContain('GuruFocus returned empty statements');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });

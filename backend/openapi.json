@@ -8987,6 +8987,17 @@
             "title": "End",
             "type": "string"
           },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -9015,6 +9026,17 @@
           "requested_start": {
             "title": "Requested Start",
             "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           },
           "ticker": {
             "title": "Ticker",

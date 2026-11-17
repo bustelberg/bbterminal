@@ -2,9 +2,9 @@ import { VALUATION_FORMULAS, type CalculationKey } from './valuationWorkbook';
 
 export type ColumnKind = 'data' | 'assumption' | 'calculation';
 export const COLUMN_STYLE: Record<ColumnKind, string> = {
-  data: 'bg-blue-500/10 border-blue-500',
-  assumption: 'bg-green-500/10 border-green-500',
-  calculation: 'bg-yellow-500/10 border-yellow-500',
+  data: 'bg-card border-neutral-800/40',
+  assumption: 'bg-card border-neutral-800/40',
+  calculation: 'bg-card border-neutral-800/40',
 };
 export type WorkbookColumn = { key: string; en: string; nl: string; kind: ColumnKind; formula?: string };
 const data = [
@@ -46,13 +46,13 @@ export const WORKBOOK_PANELS = [
   ] },
   { key: 'earnings', en: 'Koers & winst', nl: 'Koers & winst', columns: [
     'company', 'raw_price', 'quote_currency', 'unitScale', 'price', 'basis_kind', 'fy1', 'fy1_date', 'fy2', 'fy2_date', 'forecast_currency', 'forecast_basis',
-    'months_fy1', 'calendarMonths', 'months', 'manual_basis', 'manual_currency', 'manual_label', 'basis_fx', 'basis', 'currentMultiple', 'growth',
+    'months_fy1', 'calendarMonths', 'months', 'manual_basis', 'manual_currency', 'manual_label', 'basis_fx', 'basis', 'currentMultiple',
   ] },
   { key: 'valuation', en: 'Waardering & koopzone', nl: 'Waardering & koopzone', columns: [
-    'company', 'valuationCurrency', 'price', 'fair_multiple', 'fair', 'fairUpside', 'safety_margin', 'buyMultiple', 'buyPrice', 'buyUpside', 'signal',
+    'company', 'valuationCurrency', 'price', 'growth', 'fair_multiple', 'fair', 'fairUpside', 'buyMultiple', 'buyPrice', 'buyUpside', 'signal',
   ] },
   { key: 'scenario', en: 'Scenario', nl: 'Scenario', columns: [
-    'company', 'valuationCurrency', 'growth', 'exit_multiple', 'years', 'bear', 'base', 'bull', 'cagr',
+    'company', 'valuationCurrency', 'growth', 'exit_multiple', 'bear', 'base', 'bull', 'cagr',
   ] },
   { key: 'sources', en: 'Bron & controle', nl: 'Bron & controle', columns: [
     'company', 'ticker', 'price_date', 'price_source', 'forecast_source', 'forecast_basis', 'manual_date', 'manual_source', 'review_required', 'risk_note',

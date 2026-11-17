@@ -9,6 +9,7 @@ import {
 } from '../../../lib/stores/jobs';
 import { fundamentalJobMessage } from './fundamentalJobMessage';
 import JobDetails from './JobDetails';
+import ValuationJobOutcome from './ValuationJobOutcome';
 
 const JOB_COPY: Record<Lang, {
   cancel: string; cancelling: string; cancelTitle: string; working: string; dismiss: string;
@@ -173,7 +174,7 @@ export function unavailableNotice(summary: string | null): UnavailableNotice | n
   return { company, reason };
 }
 
-function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
+export function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   const copy = JOB_COPY[lang];
   const busy = isAirsBusy(job);
   const unavailable = unavailableNotice(job.summary);
@@ -191,7 +192,9 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
     : fundamentals
     ? fundamentalJobMessage(humanSummary || humanMessage)
     : (humanSummary || humanMessage);
-  const tone = unavailable || busy ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
+  const valuationOutcome = job.kind === 'valuation.portfolio' && (job.status === 'done' || job.status === 'failed');
+  const tone = valuationOutcome ? { bar: 'bg-overlay/30', text: 'text-fg-muted', label: 'text-fg-muted' }
+    : unavailable || busy ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
   const running = job.status === 'running';
   //  Indeterminate until a total arrives. `done/0` is NaN, and a bar that reads 100% before the
   // first step is worse than one that reads nothing.
@@ -280,7 +283,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
             {job.apiCalls} call{job.apiCalls === 1 ? '' : 's'}
           </span>
         )}
-        <span className={`inline-flex items-center gap-1 text-[11px] font-mono ${tone.label}`}>
+        {!valuationOutcome && <span className={`inline-flex items-center gap-1 text-[11px] font-mono ${tone.label}`}>
           {running && !job.cancelRequested && (
             <svg viewBox="0 0 24 24" aria-hidden="true"
               className="h-3 w-3 shrink-0 animate-spin fill-none stroke-current stroke-2">
@@ -296,7 +299,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
               // says it was always going to. `paused` on hover explains why it stopped.
               : `${busy ? (lang === 'nl' ? 'Al bezig' : 'Already running') : unavailable ? 'Unavailable' : copy.status[job.status as 'done' | 'failed' | 'cancelled']}${secondsLeft === null ? ''
                 : hover ? ' · paused' : ` · ${secondsLeft}s`}`}
-        </span>
+        </span>}
       </div>
 
       {/* Running: the work's progress. Stale: the countdown draining, so the bar keeps meaning
@@ -341,9 +344,9 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           </p>
         </div>
       ) : (
-        <p className={`whitespace-normal break-words text-[12px] ${tone.text}`}
+        <p className={`whitespace-normal break-words text-[12px] ${job.kind === 'valuation.portfolio' ? 'text-fg-muted' : tone.text}`}
           title={portfolioRefresh ? undefined : [humanSummary, humanMessage].filter(Boolean).join('\n') || undefined}>
-          {displayMessage}
+          {job.kind === 'valuation.portfolio' && displayMessage ? <ValuationJobOutcome message={displayMessage} /> : displayMessage}
         </p>
       )}
 

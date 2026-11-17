@@ -29,6 +29,118 @@ const workbook: Workbook = { portfolio_id: 7, as_of: '2026-11-16',
     forecast: { fy1: 10, fy2: 12, fy1_date: '2026-12-31', fy2_date: '2027-12-31', currency: 'GBP' } }],
 };
 
+it('saves company assumptions directly from cells and recalculates without opening a dialog', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => new Response(JSON.stringify(init?.method === 'PUT'
+    ? { ...JSON.parse(String(init.body)), updated_at: 'now' } : workbook)));
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
+      workbookData={workbook} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
+    const growth = host.querySelector<HTMLInputElement>('td[data-column="growth"] input')!;
+    expect(growth.value).toBe('10.0');
+    await act(async () => { growth.focus(); growth.value = '0'; growth.blur(); });
+    const saved = JSON.parse(String(vi.mocked(apiFetch).mock.calls.at(-1)![1]?.body));
+    expect(saved.companies.EXACT.growth).toBe(0);
+    expect(saved.companies.EXACT.exit_multiple).toBe(18);
+    expect(saved.companies.EXACT.price).toBeUndefined();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    const previousFair = host.querySelector('td[data-column="fair"]')?.textContent;
+    const multiple = host.querySelector<HTMLInputElement>('td[data-column="fair_multiple"] input')!;
+    await act(async () => {
+      multiple.focus(); multiple.value = '14';
+      multiple.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls.at(-1)![1]?.body)).companies.EXACT.fair_multiple).toBe(14);
+    expect(host.querySelector('td[data-column="fair"]')?.textContent).not.toBe(previousFair);
+    const input = host.querySelector<HTMLInputElement>('td[data-column="fair_multiple"] input')!;
+    const calls = vi.mocked(apiFetch).mock.calls.length;
+    await act(async () => {
+      input.focus(); input.value = '99';
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(input.value).toBe('14.0');
+    expect(apiFetch).toHaveBeenCalledTimes(calls);
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it('retains an inline draft when saving fails', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockResolvedValue(new Response('{}', { status: 500 }));
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
+      workbookData={workbook} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
+    const input = host.querySelector<HTMLInputElement>('td[data-column="fair_multiple"] input')!;
+    await act(async () => { input.focus(); input.value = '14'; input.blur(); });
+    expect(input.value).toBe('14');
+    expect(input.disabled).toBe(false);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('could not be saved');
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it.each([
+  [50, false, 'BUY', 'text-pos-400'],
+  [90, false, 'CONSIDER', 'text-warn-400'],
+  [110, false, 'DO NOT BUY', 'text-neg-400'],
+  [50, true, 'REVIEW', 'text-fg-muted'],
+])('colors the %s / review=%s buy signal while retaining its explanation', async (price, review, label, tone) => {
+  const data: Workbook = { ...workbook, rows: [{ ...workbook.rows[0],
+    quote: { price, currency: 'GBP', price_date: '2026-11-13' },
+    assumptions: { basis_kind: 'manual', manual_basis: 5, basis_currency: 'GBP', fair_multiple: 20, review_required: review } }] };
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
+      workbookData={data} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
+    const signal = host.querySelector<HTMLButtonElement>('td[data-column="signal"] button')!;
+    expect(signal.textContent).toBe(label);
+    expect(signal.className).toContain(tone);
+    await act(async () => signal.click());
+    expect(host.querySelector('[aria-label="Formula details"]')).not.toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it('anchors formula popups to the clicked cell within a scrolled table', async () => {
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
+      workbookData={workbook} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
+    const viewport = host.querySelector<HTMLElement>('[data-valuation-viewport]')!;
+    Object.defineProperties(viewport, { clientWidth: { value: 1000 }, clientHeight: { value: 500 } });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 80, 1000, 500));
+    viewport.scrollLeft = 900;
+    viewport.scrollTop = 200;
+    for (const selector of ['td[data-column="fair"] button', 'th[data-column="fair"] button']) {
+      const anchor = host.querySelector<HTMLButtonElement>(selector)!;
+      vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(new DOMRect(780, 180, 50, 20));
+      await act(async () => anchor.click());
+      const popup = host.querySelector<HTMLElement>('[aria-label="Formula details"]')!;
+      expect(popup.style.left).toBe('1128px');
+      expect(popup.style.top).toBe('328px');
+      expect(popup.style.width).toBe('760px');
+      expect(popup.style.maxHeight).toBe('360px');
+      expect(viewport.scrollLeft).toBe(900);
+      expect(viewport.scrollTop).toBe(200);
+    }
+    const header = host.querySelector<HTMLButtonElement>('th[data-column="fair"] button')!;
+    await act(async () => header.click());
+    expect(host.querySelector('[aria-label="Formula details"]')).toBeNull();
+    const cell = host.querySelector<HTMLButtonElement>('td[data-column="fair"] button')!;
+    await act(async () => cell.click());
+    expect(host.querySelector('[aria-label="Formula details"]')).not.toBeNull();
+    await act(async () => cell.click());
+    expect(host.querySelector('[aria-label="Formula details"]')).toBeNull();
+    await act(async () => cell.click());
+    const other = host.querySelector<HTMLButtonElement>('td[data-column="buyPrice"] button')!;
+    await act(async () => other.click());
+    expect(host.querySelector('[aria-label="Formula details"] strong')?.textContent).toBe('Buy price');
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
 it('separates blue source values from yellow conversions and preserves green analyst edits', async () => {
   vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
     const saved = init?.method === 'PUT' ? { portfolio_id: 7, ...JSON.parse(String(init.body)), updated_at: '2026-11-16T12:00:00Z' } : null;
@@ -36,7 +148,7 @@ it('separates blue source values from yellow conversions and preserves green ana
   });
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio"
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
       rows={[{ isin: 'EXACT', name: 'Company', price: 100, currency: 'USD', price_date: '2026-11-13' }]} />));
     expect([...host.querySelectorAll('nav button')].map(button => button.textContent)).toEqual([
       'Onderneming', 'Koers & winst', 'Waardering & koopzone', 'Scenario 2029', 'Bron & controle', 'Afkortingen', 'Parameters',
@@ -45,19 +157,19 @@ it('separates blue source values from yellow conversions and preserves green ana
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Koers & winst')!.click());
     expect(host.querySelector('tbody [data-column="price"]')?.textContent).toBe('100.00');
     expect(host.querySelector('tbody [data-column="price"]')?.getAttribute('data-kind')).toBe('calculation');
-    expect(host.querySelector('tbody [data-column="price"]')?.className).toContain('bg-yellow-500/10');
+    expect(host.querySelector('tbody [data-column="price"]')?.className).toContain('bg-card');
     expect(host.querySelector('tbody [data-column="raw_price"]')?.textContent).toBe('10000.00');
     expect(host.querySelector('tbody [data-column="raw_price"]')?.getAttribute('data-kind')).toBe('data');
-    expect(host.querySelector('tbody [data-column="raw_price"]')?.className).toContain('bg-blue-500/10');
+    expect(host.querySelector('tbody [data-column="raw_price"]')?.className).toContain('bg-card');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Waardering & koopzone')!.click());
     expect(host.querySelector('thead [data-column="fair"]')?.getAttribute('title')).toContain('Click to see the calculation');
     expect(host.textContent).toContain('Buy signal');
-    expect(host.querySelector('tbody [data-column="fair_multiple"]')?.className).toContain('bg-green-500/10');
-    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Company')!.click());
-    const form = host.querySelector<HTMLFormElement>('[role="dialog"] form')!;
-    form.querySelector<HTMLInputElement>('input[name="growth"]')!.value = '0';
-    form.querySelector<HTMLInputElement>('input[name="fair_multiple"]')!.value = '14';
-    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    expect(host.querySelector('tbody [data-column="fair_multiple"]')?.className).toContain('bg-card');
+    expect(host.querySelector('td[data-column="company"] button')).toBeNull();
+    const growth = host.querySelector<HTMLInputElement>('td[data-column="growth"] input')!;
+    await act(async () => { growth.focus(); growth.value = '0'; growth.blur(); });
+    const multiple = host.querySelector<HTMLInputElement>('td[data-column="fair_multiple"] input')!;
+    await act(async () => { multiple.focus(); multiple.value = '14'; multiple.blur(); });
     const [url, options] = vi.mocked(apiFetch).mock.calls.at(-1)!;
     expect(String(url)).toContain('/portfolios/7/workbook');
     expect(options?.method).toBe('PUT');
@@ -66,7 +178,7 @@ it('separates blue source values from yellow conversions and preserves green ana
     expect(payload.companies.EXACT.fair_multiple).toBe(14);
     expect(payload.companies.EXACT.price).toBeUndefined();
     expect(host.querySelector('[role="dialog"]')).toBeNull();
-    expect(host.textContent).toContain('14.00×');
+    expect(host.querySelector<HTMLInputElement>('td[data-column="fair_multiple"] input')?.value).toBe('14.0');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -76,7 +188,7 @@ it('preserves drag-selected tab text while allowing ordinary clicks and keyboard
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   const selection = document.getSelection()!;
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[]} />));
     const tab = [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Koers & winst')!;
     const range = document.createRange(); range.selectNodeContents(tab);
     selection.removeAllRanges(); selection.addRange(range);
@@ -97,7 +209,7 @@ it('explains current portfolio shorthand in Afkortingen and shows full membershi
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify(workbook)));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ isin: 'EXACT', name: 'Company' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
     expect(host.querySelector('td[data-column="selections"]')?.textContent).toBe('BBFTS');
     expect(host.querySelector('td[data-column="selections"] [title^="BB = Bustelberg"]')?.getAttribute('title')).toContain('Bustelberg Defensief');
     expect(host.textContent).not.toContain('Selections (Excel)');
@@ -107,7 +219,8 @@ it('explains current portfolio shorthand in Afkortingen and shows full membershi
     expect(legend.textContent).toContain('FamilieTopSelectie');
     expect(legend.textContent).toContain('Leonteq');
     expect(legend.textContent).toContain('2026-11-13');
-    expect(legend.textContent).toContain('at least one');
+    expect(legend.querySelectorAll('p')).toHaveLength(1);
+    expect(legend.querySelector('p')?.textContent).toBe('Codes show which portfolios hold each company, using saved AIRS and Leonteq holdings.');
     expect(apiFetch).toHaveBeenCalledTimes(2);
     expect(vi.mocked(apiFetch).mock.calls.filter(([url]) => String(url).endsWith('/workbook'))).toHaveLength(1);
   } finally { await act(async () => root.unmount()); host.remove(); }
@@ -122,7 +235,7 @@ it('shows source coverage once instead of labelling every confirmed membership p
   })));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio"
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
       rows={[{ isin: 'EXACT', name: 'Confirmed company' }, { isin: 'OTHER', name: 'Unknown company' }]} />));
     const cells = [...host.querySelectorAll('td[data-column="selections"]')];
     expect(cells[0].textContent).toBe('BBFTS');
@@ -132,7 +245,7 @@ it('shows source coverage once instead of labelling every confirmed membership p
     expect(links).toHaveLength(1);
     expect(links[0].title).toContain('FTS (FamilieTopSelectie)');
     await act(async () => links[0].click());
-    expect(host.querySelector('[aria-label="Portfolio abbreviations"] [role="status"]')?.textContent).toContain('Displayed codes are confirmed');
+    expect(host.querySelector('[aria-label="Portfolio abbreviations"] table')?.textContent).toContain('Partial');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -141,7 +254,7 @@ it('switches panels without refetching, keeps search/sort, and links formulas to
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify(workbook)));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio"
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
       rows={[{ isin: 'EXACT', name: 'Company' }, { isin: 'OTHER', name: 'Other' }]} />));
     const search = host.querySelector<HTMLInputElement>('input[type="search"]')!;
     const navigation = host.querySelector('nav[aria-label="Valuation panels"]')!;
@@ -182,7 +295,7 @@ it('edits all shared parameters in one tab and updates the scenario year without
     ? { portfolio_id: 7, ...JSON.parse(String(init.body)), updated_at: '2026-11-16T12:00:00Z' } : workbook)));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ isin: 'EXACT', name: 'Company' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Waardering & koopzone')!.click());
     expect(host.querySelector('input[name="safety_margin"]')).toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('th[data-column="buyPrice"] button')!.click());
@@ -228,7 +341,7 @@ it('replaces a stalled initial read with a retry control', async () => {
   vi.mocked(apiFetch).mockImplementation(() => new Promise(() => {}));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ name: 'Company', isin: 'EXACT' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
     expect(host.textContent).toContain('Loading valuation inputs');
     await act(async () => vi.advanceTimersByTime(30001));
     expect(host.textContent).not.toContain('Loading valuation inputs');
@@ -242,7 +355,7 @@ it('links stock prices to their actual Yahoo listing in a new tab', async () => 
     rows: [{ ...workbook.rows[0], quote: { ...workbook.rows[0].quote, symbol: 'ABC.L' } }] })));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ name: 'Company', isin: 'EXACT' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Koers & winst')!.click());
     const link = host.querySelector<HTMLAnchorElement>('td[data-column="raw_price"] a')!;
     expect(link.href).toBe('https://finance.yahoo.com/quote/ABC.L/');
@@ -257,17 +370,19 @@ it('explains fair value using company inputs while retaining the expanded formul
   vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(workbook)));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ name: 'Company', isin: 'EXACT' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
     await act(async () => host.querySelector<HTMLButtonElement>('th[data-column="fair"] button')!.click());
     const formula = host.querySelector('[aria-label="Formula details"]')!;
-    expect(formula.textContent).toContain('Multiply the selected per-share valuation basis by your fair multiple');
-    expect(formula.querySelector('[data-input="fair_multiple"]')?.textContent).toContain('20×');
-    expect(formula.querySelector('[data-input="fy1"]')?.textContent).toContain('10');
+    expect(formula.querySelectorAll('.katex-display')).toHaveLength(2);
+    expect(formula.querySelector('[aria-label="Variables"]')?.textContent).toContain('Fair valuation multiple.');
+    expect(formula.querySelectorAll('[aria-label="Variables"] dt')).toHaveLength(6);
+    expect(formula.querySelector('[data-input="fair_multiple"]')?.getAttribute('title')).toBe('20');
+    expect(formula.querySelector('[data-input="fy1"]')?.getAttribute('title')).toBe('10');
     expect(formula.querySelector('[data-input="manual_basis"]')).toBeNull();
     expect(formula.textContent).toContain('GBP');
     expect(formula.querySelector('details')?.open).toBe(false);
-    expect(formula.querySelector('details')?.textContent).toContain('fair_multiple');
+    expect(formula.querySelector('details')?.textContent).toContain('Edit inputs');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -277,16 +392,16 @@ it('explains a manual basis without displaying unused forecast inputs', async ()
       basis_kind: 'manual', manual_basis: 5, basis_currency: 'GBP' } }] })));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ name: 'Company', isin: 'EXACT' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
     await act(async () => host.querySelector<HTMLButtonElement>('td[data-column="fair"] button')!.click());
     const formula = host.querySelector('[aria-label="Formula details"]')!;
-    expect(formula.textContent).toContain('100 GBP');
-    expect(formula.textContent).toContain('Forecast EPS and month weights are not used');
-    expect(formula.querySelector('[data-input="manual_basis"]')?.textContent).toContain('5');
+    expect(formula.querySelector('[aria-label="With company data"] annotation')?.textContent).toContain('100.00\\;\\text{GBP}');
+    expect(formula.querySelector('[aria-label="Formula"] annotation')?.textContent).not.toContain('EPS_1');
+    expect(formula.querySelector('[data-input="manual_basis"]')?.getAttribute('title')).toBe('5');
     expect(formula.querySelector('[data-input="fy1"]')).toBeNull();
     expect(formula.querySelector('[data-input="basis_fx"]')).toBeNull();
-    expect(formula.querySelector('select')?.value).toBe('EXACT');
+    expect(formula.querySelector('select')).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -298,7 +413,7 @@ it('separates source holdings dates from retrieval timestamps and labels missing
   vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(data)));
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
-    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} portfolioName="Portfolio" rows={[{ name: 'Company', isin: 'EXACT' }]} />));
+    await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Afkortingen')!.click());
     const legend = host.querySelector('[aria-label="Portfolio abbreviations"]')!;
     expect(legend.textContent).toContain('Last retrieved');
@@ -306,7 +421,7 @@ it('separates source holdings dates from retrieval timestamps and labels missing
     expect(cells[4].textContent).toBe('Date unavailable');
     expect(cells[5].querySelector('time')?.getAttribute('datetime')).toBe(retrieved);
     expect(cells[6].textContent).toBe('Complete');
-    expect(legend.textContent).toContain('does not confirm freshness');
+    expect(legend.querySelectorAll('p')).toHaveLength(1);
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 

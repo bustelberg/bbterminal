@@ -199,7 +199,9 @@ def _valuation_stream(operation):
             raise JobCancelled()
     def run():
         try:
-            operation(events.put, check)
+            from leonteq.progress import observe
+            with observe(lambda english, _dutch: events.put({'type': 'progress', 'done': 0, 'total': 0, 'message': english})):
+                operation(events.put, check)
         except JobCancelled:
             events.put({'type': 'cancelled'})
         except Exception as exc:

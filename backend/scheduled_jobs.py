@@ -239,12 +239,12 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     ),
     JobSpec(
         id='benchmark_factsheet_daily', label='Daily benchmark factsheet',
-        fills='Fifteen-year EUR total returns, CAGR and daily annualized volatility for ACWI, AGG and QAI',
+        fills='Fifteen-year EUR total returns, CAGR and daily annualized volatility for ACWI, SYBA, QAI and HDG',
         cadence='Daily, 23:45 UTC',
         trigger={'hour': 23, 'minute': 45, 'timezone': 'UTC'},
         options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
         max_age_hours=30,
-        note='Three adjusted USD ETF histories converted to EUR, including currency movements. QAI is a liquid-alternatives proxy. Short histories are labelled separately; no synthetic backfill.',
+        note='Adjusted ETF histories in EUR: ACWI, QAI and HDG converted from USD; SYBA (IE00B41RYL63) quoted in EUR. QAI and HDG are hedge-fund replication proxies. Short histories are labelled separately; no synthetic backfill.',
     ),
     JobSpec(
         id='acwi_weekly_coverage',

@@ -53,6 +53,39 @@ def test_topselectie_holdings_never_use_an_airs_model(selected, monkeypatch):
         D.holdings(selected)
 
 
+def test_missing_leonteq_snapshot_returns_a_valid_unprepared_bundle(selected, monkeypatch):
+    selected.update(management_group='topselecties', name='AITopSelectie')
+    monkeypatch.setattr(D, 'supabase', FakeSupabase({V.TABLE: []}))
+    monkeypatch.setattr(D, '_leonteq_identity', lambda *_: 'AI-TopSelectie')
+    monkeypatch.setattr(composition_cache, 'composition', lambda *args, **kwargs: {'success': False, 'status': 'not_cached'})
+    monkeypatch.setattr(D.W, 'read', lambda *_args, **_kwargs: pytest.fail('No source-input reads before first preparation'))
+    result = D.read(1)
+    assert result['ready'] is False and result['stale'] is True
+    assert result['rows'] == result['workbook']['rows'] == []
+    assert result['workbook']['parameters']
+    assert 'Press Refresh' in result['detail']
+
+
+def test_unprepared_read_does_not_hide_real_holdings_failures(selected, monkeypatch):
+    monkeypatch.setattr(D, 'supabase', FakeSupabase({V.TABLE: []}))
+    def failed(_selected):
+        raise HTTPException(503, 'Storage unavailable')
+    monkeypatch.setattr(D, 'holdings', failed)
+    with pytest.raises(HTTPException, match='Storage unavailable'):
+        D.read(1)
+
+
+def test_leonteq_timeout_explains_stage_impact_and_retry_without_browser_secrets():
+    message = D._leonteq_failure('holdings', {
+        'status': 'timeout', 'diagnostics': {'stage': 'authentication', 'error': 'secret token'}}, 'AITopSelectie')
+    assert 'AITopSelectie: Leonteq timed out while waiting for Leonteq sign-in to finish.' in message
+    assert 'Company price and forecast updates have not started.' in message
+    assert 'previously saved valuation remains unchanged' in message
+    assert 'Try Refresh again in a minute.' in message
+    assert 'secret token' not in message
+    assert 'AIRS fallback' not in message
+
+
 def test_forced_airs_refresh_scopes_only_the_selected_model(selected, monkeypatch):
     from services import airs_refresh
     calls = []
@@ -106,7 +139,7 @@ def test_leonteq_refresh_reports_underlying_failure_without_accepting_saved_hold
     with pytest.raises(HTTPException) as caught:
         D._refresh_holdings(selected, lambda: None)
     assert caught.value.status_code == 502
-    assert reason in caught.value.detail
+    assert reason.casefold() in caught.value.detail.casefold()
 
 
 @pytest.fixture
@@ -137,12 +170,16 @@ def test_refresh_stream_retains_failures_and_returns_all_tabs_once(refresh_env, 
     events = []
     result = D.refresh(1, events.append, lambda: None)
     assert refreshed == ['A', 'B']
-    assert len(reads) == 1
+    assert len(reads) == 2
+    assert reads[0][1]['only_isin'] == 'B'
+    assert reads[0][1]['include_membership'] is False
+    assert next(event for event in events if event['type'] == 'row')['workbook']
     assert result['rows'][0]['price'] == 10
     assert result['rows'][1]['price'] == 30
     assert result['stale'] is True
     assert 'empty statements' in result['errors']['A']
     assert events[-1]['type'] == 'complete' and events[-1]['data']['workbook'] == result['workbook']
+    assert events[-1]['counts'] == {'succeeded': 1, 'failed': 1, 'total': 2}
     assert database.tables[V.TABLE][0]['payload']['errors'] == result['errors']
 
 

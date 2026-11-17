@@ -12946,6 +12946,8 @@ export interface components {
             currency: string;
             /** End */
             end: string;
+            /** Isin */
+            isin?: string | null;
             /** Name */
             name: string;
             period?: components["schemas"]["FactsheetStatistics"] | null;
@@ -12953,6 +12955,8 @@ export interface components {
             reason?: string | null;
             /** Requested Start */
             requested_start: string;
+            /** Source Url */
+            source_url?: string | null;
             /** Ticker */
             ticker: string;
         };
