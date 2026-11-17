@@ -19694,6 +19694,18 @@
             "default": false,
             "title": "Stale",
             "type": "boolean"
+          },
+          "workbook": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workbook"
           }
         },
         "required": [
@@ -20235,6 +20247,249 @@
           "weight_pct"
         ],
         "title": "WeightedBenchmarkComponent",
+        "type": "object"
+      },
+      "WorkbookAssumptions": {
+        "additionalProperties": false,
+        "properties": {
+          "companies": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WorkbookCompanyAssumption"
+            },
+            "maxProperties": 500,
+            "title": "Companies",
+            "type": "object"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/WorkbookParameters"
+          }
+        },
+        "required": [
+          "parameters"
+        ],
+        "title": "WorkbookAssumptions",
+        "type": "object"
+      },
+      "WorkbookCompanyAssumption": {
+        "additionalProperties": false,
+        "properties": {
+          "basis_currency": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis Currency"
+          },
+          "basis_date": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis Date"
+          },
+          "basis_fx": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis Fx"
+          },
+          "basis_kind": {
+            "default": "forward_eps",
+            "enum": [
+              "forward_eps",
+              "manual"
+            ],
+            "title": "Basis Kind",
+            "type": "string"
+          },
+          "basis_label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Basis Label",
+            "type": "string"
+          },
+          "basis_source": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis Source"
+          },
+          "exit_multiple": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Multiple"
+          },
+          "fair_multiple": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fair Multiple"
+          },
+          "growth": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": -1.0,
+                "maximum": 10.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Growth"
+          },
+          "manual_basis": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Basis"
+          },
+          "months_fy1": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months Fy1"
+          },
+          "review_required": {
+            "default": false,
+            "title": "Review Required",
+            "type": "boolean"
+          },
+          "risk_note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Risk Note",
+            "type": "string"
+          }
+        },
+        "title": "WorkbookCompanyAssumption",
+        "type": "object"
+      },
+      "WorkbookParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "bear_growth_delta": {
+            "default": -0.05,
+            "maximum": 2.0,
+            "minimum": -2.0,
+            "title": "Bear Growth Delta",
+            "type": "number"
+          },
+          "bear_multiple_delta": {
+            "default": -0.25,
+            "exclusiveMinimum": -1.0,
+            "maximum": 10.0,
+            "title": "Bear Multiple Delta",
+            "type": "number"
+          },
+          "bull_growth_delta": {
+            "default": 0.05,
+            "maximum": 2.0,
+            "minimum": -2.0,
+            "title": "Bull Growth Delta",
+            "type": "number"
+          },
+          "bull_multiple_delta": {
+            "default": 0.25,
+            "exclusiveMinimum": -1.0,
+            "maximum": 10.0,
+            "title": "Bull Multiple Delta",
+            "type": "number"
+          },
+          "safety_margin": {
+            "default": 0.2,
+            "exclusiveMaximum": 1.0,
+            "minimum": 0.0,
+            "title": "Safety Margin",
+            "type": "number"
+          },
+          "years": {
+            "default": 3,
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Years",
+            "type": "integer"
+          }
+        },
+        "title": "WorkbookParameters",
+        "type": "object"
+      },
+      "WorkbookSaveResult": {
+        "additionalProperties": false,
+        "properties": {
+          "companies": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WorkbookCompanyAssumption"
+            },
+            "maxProperties": 500,
+            "title": "Companies",
+            "type": "object"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/WorkbookParameters"
+          },
+          "portfolio_id": {
+            "title": "Portfolio Id",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameters",
+          "portfolio_id",
+          "updated_at"
+        ],
+        "title": "WorkbookSaveResult",
         "type": "object"
       },
       "YearStat": {
@@ -25923,6 +26178,53 @@
         ]
       }
     },
+    "/api/airs/valuation/holdings/refresh/job": {
+      "post": {
+        "operationId": "refresh_valuation_holdings_api_airs_valuation_holdings_refresh_job_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "airs",
+                "leonteq"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Valuation Holdings",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
     "/api/airs/valuation/portfolios": {
       "get": {
         "operationId": "valuation_portfolios_api_airs_valuation_portfolios_get",
@@ -25993,6 +26295,92 @@
         ]
       }
     },
+    "/api/airs/valuation/portfolios/{portfolio_id}/dashboard": {
+      "get": {
+        "operationId": "valuation_dashboard_api_airs_valuation_portfolios__portfolio_id__dashboard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuationBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Valuation Dashboard",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/{portfolio_id}/dashboard/refresh": {
+      "post": {
+        "operationId": "refresh_valuation_dashboard_api_airs_valuation_portfolios__portfolio_id__dashboard_refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Valuation Dashboard",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
     "/api/airs/valuation/portfolios/{portfolio_id}/refresh": {
       "post": {
         "operationId": "refresh_valuation_api_airs_valuation_portfolios__portfolio_id__refresh_post",
@@ -26041,6 +26429,195 @@
           }
         },
         "summary": "Refresh Valuation",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/{portfolio_id}/rows/{isin}/refresh": {
+      "post": {
+        "operationId": "refresh_valuation_row_api_airs_valuation_portfolios__portfolio_id__rows__isin__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuationBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Valuation Row",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/{portfolio_id}/workbook": {
+      "get": {
+        "operationId": "valuation_workbook_api_airs_valuation_portfolios__portfolio_id__workbook_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Valuation Workbook",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      },
+      "put": {
+        "operationId": "save_valuation_workbook_api_airs_valuation_portfolios__portfolio_id__workbook_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbookAssumptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookSaveResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Valuation Workbook",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/{portfolio_id}/workbook/memberships": {
+      "get": {
+        "operationId": "valuation_workbook_memberships_api_airs_valuation_portfolios__portfolio_id__workbook_memberships_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Valuation Workbook Memberships",
         "tags": [
           "airs",
           "airs"
@@ -35298,6 +35875,184 @@
           }
         },
         "summary": "Frozen Yahoo Mappings",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/management/topselecties": {
+      "get": {
+        "operationId": "management_topselecties_api_leonteq_management_topselecties_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Management Topselecties",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/management/topselecties/dashboard": {
+      "get": {
+        "operationId": "management_dashboard_topselecties_api_leonteq_management_topselecties_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Management Dashboard Topselecties",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/management/topselecties/{name}": {
+      "get": {
+        "operationId": "management_topselectie_api_leonteq_management_topselecties__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Management Topselectie",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/management/topselecties/{name}/analysis": {
+      "get": {
+        "operationId": "management_topselectie_analysis_api_leonteq_management_topselecties__name__analysis_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_holding_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Holding Risk",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Management Topselectie Analysis",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/management/topselecties/{name}/refresh/job": {
+      "post": {
+        "operationId": "refresh_management_topselectie_api_leonteq_management_topselecties__name__refresh_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Management Topselectie",
         "tags": [
           "leonteq"
         ]

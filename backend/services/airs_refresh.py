@@ -221,7 +221,7 @@ def scan_accounts(**options) -> dict:
 
 def collect_model_compositions(*, on_event, force: bool, should_stop=None,
                                on_selection=None, wait_seconds: int = 0,
-                               require_nonempty: bool = False) -> dict | None:
+                               require_nonempty: bool = False, portfolio_ids: set[int] | None = None) -> dict | None:
     """Discover, persist and scan dashboard models under the shared AIRS session lock.
 
     A nonblocking manual caller gets None when busy; the daily caller can wait.
@@ -241,7 +241,8 @@ def collect_model_compositions(*, on_event, force: bool, should_stop=None,
         if require_nonempty and not rows:
             raise RuntimeError("AIRS model discovery returned no portfolios")
         store.save_portfolios(rows)
-        scoped = dashboard_model_rows(rows)
+        scoped = (dashboard_model_rows(rows) if portfolio_ids is None
+                  else [row for row in rows if row['id'] in portfolio_ids])
         missing = set() if force else store.unscanned_position_ids([row['id'] for row in scoped])
         selected = scoped if force else [row for row in scoped if row['id'] in missing]
         if not force and on_selection:

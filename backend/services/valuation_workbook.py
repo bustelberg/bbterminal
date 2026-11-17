@@ -1,0 +1,150 @@
+"""Workbook assumptions and saved GuruFocus consensus; no provider requests."""
+import json
+from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
+
+from fastapi import HTTPException
+from deps import paginate, supabase
+from services.portfolio_membership import read as read_memberships
+
+DEFAULTS = Path(__file__).resolve().parents[1] / 'config' / 'valuation_workbook_defaults.json'
+TABLE = 'portfolio_valuation_assumptions'
+FORECAST_CODES = ('annual_eps_nri_estimate', 'annual_per_share_eps_estimate')
+
+
+def defaults():
+    return json.loads(DEFAULTS.read_text(encoding='utf-8'))
+
+
+def source_ticker(company):
+    ticker = (company.get('gurufocus_ticker') or '').strip()
+    exchange = company.get('gurufocus_exchange') or {}
+    if ':' in ticker or exchange.get('is_us'):
+        return ticker
+    return f"{exchange.get('exchange_code')}:{ticker}" if exchange.get('exchange_code') and ticker else ''
+
+
+def consensus(rows, after):
+    """One coherent EPS series, with adjacent future annual fiscal targets."""
+    for code in FORECAST_CODES:
+        values = {}
+        for row in rows:
+            stamp = str(row.get('target_date') or '')[:10]
+            value = row.get('numeric_value')
+            if row.get('metric_code') != code or not stamp or stamp < after or value is None:
+                continue
+            if stamp in values and values[stamp] != value:
+                return {'reason': 'Conflicting GuruFocus annual EPS estimates.'}
+            values[stamp] = value
+        dates = sorted(values)
+        if len(dates) >= 2:
+            first, second = dates[:2]
+            if not 330 <= (date.fromisoformat(second) - date.fromisoformat(first)).days <= 400:
+                return {'reason': 'GuruFocus forecast fiscal years are not consecutive.'}
+            return {'fy1': values[first], 'fy2': values[second], 'fy1_date': first, 'fy2_date': second,
+                    'metric_code': code, 'basis_label': 'EPS without NRI (consensus)' if code == FORECAST_CODES[0]
+                    else 'EPS (consensus; reported basis)', 'source': 'GuruFocus'}
+    return {'reason': 'Two consecutive future annual GuruFocus EPS forecasts are not saved.'}
+
+
+def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bundle=None):
+    from services import portfolio_valuation as valuation
+    # An internal refresh caller already validated scope and saved this exact bundle.
+    bundle = prepared_bundle if prepared_bundle is not None else valuation.read(portfolio_id)
+    if only_isin is not None:
+        bundle = {**bundle, 'rows': [row for row in bundle['rows'] if row.get('isin') == only_isin]}
+    template = defaults()
+    from services.portfolio_membership import DEFINITIONS
+    membership = (read_memberships() if only_isin is None and include_membership else
+                  {'memberships': {}, 'legend': [{**{k: v for k, v in item.items() if k != 'accounts'},
+                    'status': 'unavailable', 'portfolios': [], 'source': 'AIRS' if 'accounts' in item else 'Leonteq'}
+                    for item in DEFINITIONS]})
+    seed = {row['ticker']: row for row in template['companies']}
+    try:
+        saved = (supabase.table(TABLE).select('payload,updated_at').eq('portfolio_id', portfolio_id)
+                 .limit(1).execute().data or [])
+    except Exception:
+        raise HTTPException(503, 'Valuation assumptions storage is unavailable. Apply migration '
+                            '20261116140000_valuation_workbook_assumptions.sql.') from None
+    settings = saved[0]['payload'] if saved else {}
+    isins = sorted({row['isin'] for row in bundle['rows'] if row.get('isin')})
+    companies = list(paginate(lambda lo, hi: supabase.table('company').select(
+        'company_id,isin,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(currency_code,exchange_code,is_us)')
+        .in_('isin', sorted({valuation.reference_isin(isin) for isin in isins})).is_('out_of_scope_at', 'null').order('company_id').range(lo, hi).execute())) if isins else []
+    by_isin = {}
+    for company in companies:
+        by_isin.setdefault(company['isin'], []).append(company)
+    ids = [c['company_id'] for c in companies]
+    metrics = list(paginate(lambda lo, hi: supabase.table('metric_data')
+        .select('company_id,target_date,numeric_value,metric_code').in_('company_id', ids)
+        .eq('source_code', 'gurufocus').in_('metric_code', FORECAST_CODES)
+        .gte('target_date', date.today().isoformat()).order('company_id').order('target_date')
+        .order('metric_code').range(lo, hi).execute())) if ids else []
+    by_company = {}
+    for metric in metrics:
+        by_company.setdefault(metric['company_id'], []).append(metric)
+    # Expose the untouched Yahoo observation separately from unit normalization.
+    # Read recent closes independently of historical P/E availability. A missing
+    # historical valuation must not hide a valid current quote or forecast.
+    quote_start = (date.today() - timedelta(days=14)).isoformat()
+    quotes = list(paginate(lambda lo, hi: supabase.table('company_yahoo_price')
+        .select('company_id,analysis_id,target_date,close,currency').in_('company_id', ids)
+        .gte('target_date', quote_start).lte('target_date', date.today().isoformat()).order('company_id').order('target_date')
+        .order('analysis_id').range(lo, hi).execute())) if ids else []
+    executions = list(paginate(lambda lo, hi: supabase.table('asset_execution')
+        .select('isin,analysis_id,yahoo_symbol').in_('isin', sorted(by_isin))
+        .eq('status', 'ok').order('isin').range(lo, hi).execute())) if by_isin else []
+    symbols = {(item['isin'], item.get('analysis_id')): item.get('yahoo_symbol') for item in executions}
+    by_quote = {}
+    for quote in quotes:
+        by_quote.setdefault(quote['company_id'], []).append(quote)
+    rows = []
+    incomplete_codes = [item['code'] for item in membership['legend'] if item['status'] != 'complete']
+    for holding in bundle['rows']:
+        matches = by_isin.get(valuation.reference_isin(holding.get('isin')), [])
+        company = matches[0] if len(matches) == 1 else {}
+        ticker = source_ticker(company)
+        initial = seed.get(ticker, {})
+        assumptions = {k: v for k, v in initial.items() if k not in ('name', 'ticker', 'selections')}
+        assumptions.update((settings.get('companies') or {}).get(holding.get('isin'), {}))
+        forecast = consensus(by_company.get(company.get('company_id'), []), date.today().isoformat())
+        if valuation.reference_isin(holding.get('isin')) != holding.get('isin'):
+            forecast['basis_label'] = (forecast.get('basis_label') or 'EPS') + ' - Taiwan ordinary share (TWD)'
+        available_quotes = by_quote.get(company.get('company_id'), [])
+        latest_date = max((str(item['target_date'])[:10] for item in available_quotes), default=None)
+        observations = [item for item in available_quotes if str(item['target_date'])[:10] == latest_date]
+        unique = {(item.get('close'), item.get('currency')) for item in observations}
+        source_quote = observations[0] if len(unique) == 1 else {}
+        quote_symbols = {symbols.get((company.get('isin'), item.get('analysis_id'))) for item in observations}
+        yahoo_symbol = next(iter(quote_symbols)) if len(quote_symbols) == 1 and source_quote else None
+        confirmed = membership['memberships'].get(holding.get('isin'), {})
+        # Membership in a family is proved by one positive holding, even if
+        # another profile in that family is unavailable. Only unconfirmed codes
+        # can still be affected by missing sources.
+        unknown_codes = [code for code in incomplete_codes if code not in confirmed]
+        rows.append({'isin': holding.get('isin'), 'ticker': ticker or None,
+            'selections': list(confirmed), 'membership_profiles': confirmed,
+            'membership_complete': bool(holding.get('isin')) and not unknown_codes,
+            'membership_unknown_codes': unknown_codes, 'assumptions': assumptions,
+            'forecast': {**forecast, 'currency': (company.get('gurufocus_exchange') or {}).get('currency_code')},
+            'quote': {'price': source_quote.get('close'), 'currency': source_quote.get('currency'),
+                      'price_date': str(source_quote['target_date'])[:10] if source_quote else None,
+                      'source': 'Yahoo Finance' if source_quote else None, 'symbol': yahoo_symbol},
+            'seed_source': 'test.xlsx' if initial else None})
+    return {'portfolio_id': portfolio_id, 'as_of': date.today().isoformat(), 'parameters': {**template['parameters'], **settings.get('parameters', {})},
+            'rows': rows, 'membership_legend': membership['legend'],
+            'updated_at': saved[0]['updated_at'] if saved else None}
+
+
+def save(portfolio_id, payload, *, prepared_bundle=None):
+    from services import portfolio_valuation as valuation
+    bundle = valuation.read(portfolio_id) if prepared_bundle is None else prepared_bundle
+    allowed = {row['isin'] for row in bundle['rows'] if row.get('isin')}
+    if set(payload.get('companies', {})) - allowed:
+        raise HTTPException(422, 'Assumptions must belong to companies in this portfolio.')
+    stamp = datetime.now(timezone.utc).isoformat()
+    supabase.table(TABLE).upsert({'portfolio_id': portfolio_id, 'payload': payload,
+        'updated_at': stamp}, on_conflict='portfolio_id').execute()
+    # A save confirms the write only. Source facts and cross-portfolio membership
+    # checks are unrelated to an assumption edit and must not delay its acknowledgement.
+    return {'portfolio_id': portfolio_id, **payload, 'updated_at': stamp}

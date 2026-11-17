@@ -61,6 +61,24 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify(fixture)));
 });
 
+it('shows Leonteq monthly performance in the shared panel without AIRS requests or jobs', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ success: true,
+    performance: { months: [{ month: october, return_pct: 0 }, { month: november, return_pct: -1.2 }],
+      yearly_totals: { '2026': -0.81 } } })));
+  await act(async () => root.render(<MonthlyReportPanel name="AITopSelectie" leonteqPortfolio="AITopSelectie"
+    leonteqReturns={{ portfolio_ytd_pct: -0.81, benchmark_ytd_pct: 12, ytd_excess_pct: -12.81,
+      ytd_from: '2026-06-08', portfolio_as_of: '2026-11-13' }} />));
+  expect(host.textContent).toContain('Leonteq · Performance');
+  expect(host.textContent).toContain('-0.81%');
+  expect(host.textContent).toContain('+12.00%');
+  expect(host.querySelectorAll('nav button')).toHaveLength(2);
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[1].click());
+  expect(host.querySelector('#monthly-report-details')?.textContent).toContain('-1.20%');
+  expect(host.textContent).not.toContain('AIRS');
+  expect(vi.mocked(apiFetch).mock.calls.every(([url]) => String(url).includes('/api/leonteq/management/topselecties/'))).toBe(true);
+  expect(startJob).not.toHaveBeenCalled();
+});
+
 it('switches to bundled certificate constituents without fetching again', async () => {
   await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
   await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[1].click());

@@ -30,6 +30,61 @@ from deps import supabase
 router = APIRouter(tags=["leonteq"])
 
 
+@router.get('/api/leonteq/management/topselecties')
+async def management_topselecties():
+    from leonteq.management import overview
+    return await asyncio.to_thread(overview)
+
+
+@router.get('/api/leonteq/management/topselecties/dashboard')
+async def management_dashboard_topselecties():
+    from leonteq.management import dashboard_overview
+    return await asyncio.to_thread(dashboard_overview)
+
+
+@router.get('/api/leonteq/management/topselecties/{name}')
+async def management_topselectie(name: str):
+    from leonteq.management import detail
+    return await asyncio.to_thread(detail, name)
+
+
+@router.get('/api/leonteq/management/topselecties/{name}/analysis')
+async def management_topselectie_analysis(name: str, benchmark: str = 'ACWI', include_holding_risk: bool = False):
+    from leonteq.management import analysis
+    return await asyncio.to_thread(analysis, name, benchmark, include_holding_risk)
+
+
+@router.post('/api/leonteq/management/topselecties/{name}/refresh/job')
+async def refresh_management_topselectie(name: str):
+    import jobs
+    from jobs import UserFacingJobError
+    from leonteq.management import detail, entries
+    from fastapi import HTTPException
+    if name not in {row['display_name'] for row in entries()}:
+        raise HTTPException(404, 'Unknown TopSelectie')
+
+    def run(ctx):
+        ctx.progress(0, 1, f'Reading {name} from Leonteq…')
+        def progress(done, total, message):
+            ctx.check()
+            ctx.progress(done, total, message)
+        result = detail(name, refresh=True, progress=progress)
+        if (not result.get('success') or result.get('catalogue_error')
+                or result.get('composition', {}).get('refresh_error')
+                or not result.get('performance', {}).get('success')
+                or result.get('performance', {}).get('refresh_error')
+                or result.get('composition', {}).get('snapshot_saved') is False):
+            raise UserFacingJobError('Leonteq refresh incomplete. Last successful Leonteq snapshots remain available.')
+        if not (result.get('accounting') or {}).get('success'):
+            raise UserFacingJobError('Leonteq holdings updated; contribution unavailable: '
+                                    + ((result.get('accounting') or {}).get('reason') or 'opening valuations or net transactions are incomplete'))
+        ctx.progress(1, 1, 'Leonteq holdings and returns updated.')
+        return 'Leonteq holdings and returns updated.'
+
+    job, reused = jobs.start(f'leonteq.management.{name}', name, run)
+    return {'job_id': job.id, 'already_running': reused}
+
+
 class PortfolioRefreshRequest(BaseModel):
     operation: Literal['list', 'composition', 'airs', 'monthly', 'prices', 'transactions']
     name: str | None = Field(default=None, min_length=1, max_length=300)

@@ -8,6 +8,9 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
 import { CompactHelpProvider } from '../../lib/compactHelp';
 
 /**
+ * The shared portfolio panel selects a Leonteq-only adapter for TopSelecties and AIRS for
+ * the other collections. The table and its controls stay identical across sources.
+ *
  * The AIRS portfolios — a sibling of Execution instruments in the asset-pipeline nav, not a tab
  * inside it: they are different universes. Instruments are per-ISIN rows we resolve and price;
  * portfolios are AirSPMS constructs whose positions happen to carry the ISIN that joins the two.
@@ -111,10 +114,8 @@ export default function Page() {
           ))}
         </div>
 
-        {/*  HIDDEN, NOT UNMOUNTED. Unmounting throws away the table's expanded rows, sort and
-            filters — and refetches the panel — on a switch a reader makes to glance at one thing
-            and come back. */}
-        <PortfolioOverviewPanel collection={tab} />
+        {/* Remount at the source boundary so cached AIRS rows cannot enter TopSelecties. */}
+        <PortfolioOverviewPanel key={tab === 'topselecties' ? 'leonteq' : 'airs'} collection={tab} />
       </div>
     </div></CompactHelpProvider>
   );

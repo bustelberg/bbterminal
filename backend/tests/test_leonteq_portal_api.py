@@ -36,6 +36,12 @@ def test_catalogue_preserves_zero_and_source_names_are_trimmed_like_the_portal()
     assert row['last_7_days_path'] == 'M 0.00 20.00'
 
 
+def test_catalogue_uses_explicit_source_valuation_date():
+    payload = catalogue()
+    payload['rows'][0]['valuationDate'] = '2026-11-13'
+    assert api.catalogue(payload)[0]['as_of'] == '2026-11-13'
+
+
 def test_catalogue_rejects_partial_results_and_ambiguous_names():
     with pytest.raises(api.ApiUnavailable):
         api.catalogue([])

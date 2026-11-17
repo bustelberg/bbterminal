@@ -191,6 +191,7 @@ def fetch_financials(
     force_refresh: bool = False,
     on_log: callable = None,
     metric_codes: set[str] | None = None,
+    retry_empty: bool = False,
 ) -> EarningsResult:
     def _log(msg: str):
         result.logs.append(msg)
@@ -232,12 +233,18 @@ def fetch_financials(
         # endpoint in `ingest.prices`; do not claim this request can expand it with an order flag.
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials")
         _log(f"Calling {_mask_url(url)} ...")
-        api = _api_request(url)
-        track_api_call(supabase, exchange, job="financial_statements",
-                       outcome=classify_outcome(
-                           getattr(api, "status_code", None), has_data=api.data is not None))
-        result.api_calls += 1
-        _log(api.log)
+        for attempt in range(2 if retry_empty else 1):
+            api = _api_request(url)
+            result.http_status = getattr(api, 'status_code', None)
+            track_api_call(supabase, exchange, job="financial_statements",
+                           outcome=classify_outcome(result.http_status, has_data=api.data is not None))
+            result.api_calls += 1
+            _log(api.log)
+            empty_success = (result.http_status == 200 and not api.is_forbidden and
+                             (not isinstance(api.data, dict) or not _extract_financials_dates(api.data)))
+            if not (retry_empty and attempt == 0 and empty_success):
+                break
+            _log('GuruFocus returned empty financials; retrying once through the shared rate limiter.')
         if api.is_forbidden:
             result.cache_status = "forbidden"
             result.is_forbidden = True
@@ -248,10 +255,10 @@ def fetch_financials(
             if cached is not None:
                 _log("API failed, using stale cache")
             else:
-                result.cache_status = "api_error"
+                result.cache_status = "api_empty" if result.http_status == 200 else "api_error"
                 result.error = api.log
                 return result
-        elif not _extract_financials_dates(api.data or {}):
+        elif not isinstance(api.data, dict) or not _extract_financials_dates(api.data or {}):
             #  A 200 CARRYING NO PERIODS IS AN OUTAGE, NOT AN ANSWER, AND IT MUST NOT BE CACHED.
             # Measured 2026-08-31: GuruFocus returned the full 15.7 KB template for EVERY symbol —
             # every section and every key present, every array EMPTY — for AAPL and ASML as much as

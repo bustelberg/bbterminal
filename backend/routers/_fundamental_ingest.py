@@ -150,6 +150,20 @@ def _resolve_primary(isin: str, canon: str, *, force: bool,
     """
     from routers._asset_dividends import _resolve_listing  # noqa: PLC0415
 
+    # Reviewed security/listing identities bypass a missing or broken ISIN bridge,
+    # never the provider's exchange-subscription guard or actual financials fetch.
+    import json
+    from pathlib import Path
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
+    overrides = json.loads((Path(__file__).resolve().parents[1] / 'config' /
+                            'gurufocus_listing_overrides.json').read_text(encoding='utf-8'))
+    reviewed = overrides.get(canon) if isin == canon else None
+    if reviewed:
+        if not is_gf_subscribed_exchange(reviewed['exchange']):
+            return None, None, {'isin': isin, 'status': 'unsubscribed',
+                                'detail': 'Reviewed listing is outside the GuruFocus subscription.'}
+        return reviewed['ticker'], reviewed['exchange'], None
+
     listing = _resolve_listing(canon, force=force)
     status = listing.get("status")
     base = {"isin": isin}
@@ -166,23 +180,25 @@ def _resolve_primary(isin: str, canon: str, *, force: bool,
 
 
 def _fetch_and_report(company_id: int, ticker: str, exchange: str, *,
-                      isin: str, force: bool, created: bool) -> dict:
+                      isin: str, force: bool, created: bool, metric_codes: set[str] | None = None) -> dict:
     from deps import supabase  # noqa: PLC0415
     from ingest.earnings import fetch_financials  # noqa: PLC0415
 
-    r = fetch_financials(supabase, company_id, ticker, exchange, force_refresh=force)
+    r = fetch_financials(supabase, company_id, ticker, exchange, force_refresh=force, **({'metric_codes': metric_codes, 'retry_empty': True} if metric_codes is not None else {}))
+    from ingest.earnings._common import failure_message
     status, detail = classify_fetch_outcome(
         r.rows_loaded, r.metrics_found, getattr(r, "is_forbidden", False), r.error)
     return {
         "isin": isin, "status": status, "detail": detail,
         "company_id": company_id, "ticker": ticker, "exchange": exchange,
         "created_company": created,
+        "failure_reason": failure_message(r) if r.error or r.is_forbidden else None,
         "rows_loaded": r.rows_loaded, "metrics": r.metrics_found,
     }
 
 
 def ingest_fundamentals_for_isin(isin: str, name: str | None = None, *,
-                                 force: bool = False) -> dict:
+                                 force: bool = False, metric_codes: set[str] | None = None) -> dict:
     """Attempt to fetch + load one holding's GuruFocus fundamentals.
 
     Returns `{isin, status, detail, ...}` where `status` is one of:
@@ -211,7 +227,7 @@ def ingest_fundamentals_for_isin(isin: str, name: str | None = None, *,
         exch = (row.get("gurufocus_exchange") or {}).get("exchange_code")
         # 1a. Already on an exchange we can fetch from → fetch straight into it.
         if ticker and exch and is_gf_subscribed_exchange(exch):
-            return _fetch_and_report(cid, ticker, exch, isin=isin, force=force, created=False)
+            return _fetch_and_report(cid, ticker, exch, isin=isin, force=force, created=False, metric_codes=metric_codes)
         # 1b. Pinned to an UNSUBSCRIBED (or unknown) exchange — Shopify on TSX. Detect the primary
         # subscribed listing (NASDAQ:SHOP), REPOINT the company to it, then fetch. If nothing is
         # subscribed, the resolver's refusal is the honest answer.
@@ -221,7 +237,7 @@ def ingest_fundamentals_for_isin(isin: str, name: str | None = None, *,
         rerr = _repoint_company(cid, new_ticker, new_exch)
         if rerr:
             return {"isin": isin, "status": "error", "company_id": cid, "detail": rerr}
-        out = _fetch_and_report(cid, new_ticker, new_exch, isin=isin, force=force, created=False)
+        out = _fetch_and_report(cid, new_ticker, new_exch, isin=isin, force=force, created=False, metric_codes=metric_codes)
         out["repointed_from"] = exch  # so the caller can see the listing changed
         return out
 
@@ -232,4 +248,4 @@ def ingest_fundamentals_for_isin(isin: str, name: str | None = None, *,
     cid, err = _create_or_reuse_company(canon, name or f"{ticker}.{exch}", ticker, exch)
     if err:
         return {"isin": isin, "status": "error", "detail": err}
-    return _fetch_and_report(cid, ticker, exch, isin=isin, force=force, created=True)
+    return _fetch_and_report(cid, ticker, exch, isin=isin, force=force, created=True, metric_codes=metric_codes)

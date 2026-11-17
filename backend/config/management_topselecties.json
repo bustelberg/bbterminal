@@ -1,16 +1,56 @@
 {
   "version": 1,
-  "note": "Explicit allowlist for the TopSelecties tab on /management-dashboard. Each AIRS Dynamic account is shown under its reviewed display name.",
+  "note": "Reviewed TopSelecties identities. Management data is exclusively Leonteq; AIRS codes identify legacy accounts only.",
   "topselecties": [
-    { "dynamic_portefeuille": "AITopSelectie OFF DYN", "display_name": "AITopSelectie" },
-    { "dynamic_portefeuille": "AzTopSelectie_DYN", "display_name": "AzieTopSelectie" },
-    { "dynamic_portefeuille": "DiTopSelectie OFF DYN", "display_name": "DividendTopSelectie" },
-    { "dynamic_portefeuille": "EuropaTopSelect OFF DYN", "display_name": "EuropaTopSelectie" },
-    { "dynamic_portefeuille": "BUS_FTS_OFF_DYN", "display_name": "FamilieTopSelectie" },
-    { "dynamic_portefeuille": "BUS_MTS_OFF_AFS_DYN", "display_name": "MerkenTopSelectie" },
-    { "dynamic_portefeuille": "MoTopSelectie_DYN", "display_name": "MomentumTopSelectie" },
-    { "dynamic_portefeuille": "OBTopSelectie_DYN", "display_name": "ObligatieTopSelectie" },
-    { "dynamic_portefeuille": "StarTopSelectie OFF DYN", "display_name": "StarTopSelectie" },
-    { "dynamic_portefeuille": "VTopSelectie OFF DY", "display_name": "VastgoedTopSelectie" }
+    {
+      "dynamic_portefeuille": "AITopSelectie OFF DYN",
+      "display_name": "AITopSelectie",
+      "leonteq_name": "AI-TopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "AzTopSelectie_DYN",
+      "display_name": "AzieTopSelectie",
+      "leonteq_name": "AzieTopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "DiTopSelectie OFF DYN",
+      "display_name": "DividendTopSelectie",
+      "leonteq_name": "DividendTopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "EuropaTopSelect OFF DYN",
+      "display_name": "EuropaTopSelectie",
+      "leonteq_name": "EuropaTopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "BUS_FTS_OFF_DYN",
+      "display_name": "FamilieTopSelectie",
+      "leonteq_name": "FamilieTopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "BUS_MTS_OFF_AFS_DYN",
+      "display_name": "MerkenTopSelectie",
+      "leonteq_name": "MerkenTopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "MoTopSelectie_DYN",
+      "display_name": "MomentumTopSelectie",
+      "leonteq_name": "MomentumTopSelectie Index"
+    },
+    {
+      "dynamic_portefeuille": "OBTopSelectie_DYN",
+      "display_name": "ObligatieTopSelectie",
+      "leonteq_name": "ObligatieTopSelectie"
+    },
+    {
+      "dynamic_portefeuille": "StarTopSelectie OFF DYN",
+      "display_name": "StarTopSelectie",
+      "leonteq_name": "Star Selection Index"
+    },
+    {
+      "dynamic_portefeuille": "VTopSelectie OFF DY",
+      "display_name": "VastgoedTopSelectie",
+      "leonteq_name": "VastgoedTopSelectie index"
+    }
   ]
 }

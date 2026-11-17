@@ -42,6 +42,11 @@ def _attribute_certificate(wrapper, sections, positions, closing_date):
 
 
 def _child_reports(account: str, months: dict[str, str]) -> dict:
+    from leonteq.management import entry_for_identity
+    if entry_for_identity(account):
+        # Current Leonteq weights are not dated monthly accounting. Mark this route
+        # unavailable until Leonteq historical reports exist; never download AIRS instead.
+        return {}
     from dashboard_daily import prepare_month
     from routers._airs_monthly_report import _PREPARATION_LOCKS, _PerformancePreparation, collect_report
 

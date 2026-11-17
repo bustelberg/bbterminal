@@ -129,3 +129,17 @@ class TestResolvingThePrimaryListing:
         self._patch(monkeypatch, {"status": "error", "gurufocus_ticker": None, "exchange_code": None})
         _t, _e, refusal = _resolve_primary("X", "X", force=False)
         assert refusal["status"] == "error"
+
+
+def test_reviewed_besi_mapping_does_not_depend_on_gurufocus_isin_bridge(monkeypatch):
+    from routers import _asset_dividends
+    from routers._fundamental_ingest import _resolve_primary
+    from index_universe.acwi import exchange_map
+    monkeypatch.setattr(exchange_map, 'is_gf_subscribed_exchange', lambda exchange: exchange == 'XAMS')
+    monkeypatch.setattr(_asset_dividends, '_resolve_listing', lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError('Reviewed BESI identity must not depend on ISIN lookup')))
+    assert _resolve_primary('NL0012866412', 'NL0012866412', force=True) == ('BESI', 'XAMS', None)
+    monkeypatch.setattr(exchange_map, 'is_gf_subscribed_exchange', lambda _exchange: False)
+    ticker, exchange, refusal = _resolve_primary('NL0012866412', 'NL0012866412', force=True)
+    assert ticker is exchange is None
+    assert refusal['status'] == 'unsubscribed'

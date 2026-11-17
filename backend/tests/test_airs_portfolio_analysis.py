@@ -1055,12 +1055,9 @@ class TestBookWeighting:
         pa._book_port_items(7, {})
         assert self.calls == [{"portefeuille": "X_DYN", "freshen": False}]
 
-    def test_topselectie_route_carries_the_reviewed_direct_model_for_fundamentals(
+    def test_topselectie_route_does_not_replace_leonteq_basket_with_airs_model(
             self, monkeypatch):
-        """The model valuing a certificate route need not be the TopSelecties row the reader
-        opens. Graphs must follow the reviewed direct row, or Familie is 25/27 names through a
-        parent while the same TopSelectie is 28 companies directly.
-        """
+        """Fundamental must retain Leonteq basket members rather than load an AIRS model."""
         import routers._airs_account_links as links
 
         self._wire(monkeypatch, rows=[{
@@ -1077,7 +1074,7 @@ class TestBookWeighting:
 
         source = pa._book_port_items(7, {})["holdings_detail"][0]["sources"][0]
         assert source["model_id"] == 1917
-        assert source["fundamental_model_id"] == 1920
+        assert source["fundamental_model_id"] is None
 
 
 class TestTheAllocationBarAlwaysShowsTheFourClasses:

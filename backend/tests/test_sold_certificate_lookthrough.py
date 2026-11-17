@@ -6,6 +6,7 @@ from routers import _airs_portfolio_analysis as analysis, _airs_portfolio_links 
 
 
 def setup_links(monkeypatch, target=2):
+    monkeypatch.setattr(analysis, 'ref_model', lambda _: {'name': 'Other strategy'})
     monkeypatch.setattr(links, 'resolve_links', lambda _db, _owner, rows: {
         links.link_key(r.get('isin'), r.get('fonds')): SimpleNamespace(linked_portfolio_id=target)
         for r in rows})
@@ -55,4 +56,14 @@ def test_dismissed_links_and_self_references_are_not_expanded(monkeypatch, targe
     monkeypatch.setattr(analysis, 'ref_positions_for', lambda _: pytest.fail('not a child'))
     p = {'name': 'Direct stock', 'closed_out': True, 'last_sale': '2026-10-12'}
     analysis._with_sold_lookthrough({'positions': [p]}, 1)
+    assert 'lookthrough_positions' not in p
+
+
+def test_topselectie_sales_never_use_historical_airs_composition(monkeypatch):
+    setup_links(monkeypatch)
+    monkeypatch.setattr(analysis, 'ref_model', lambda _: {'name': 'StarTopSelectie OFF FX'})
+    monkeypatch.setattr(analysis, 'ref_positions_for', lambda _: pytest.fail('AIRS fallback'))
+    p = {'name': 'Star Selection Index', 'closed_out': True, 'last_sale': '2026-10-12'}
+    analysis._with_sold_lookthrough({'positions': [p]}, 1)
+    assert p['lookthrough_note'] == 'Historical Leonteq composition unavailable on the sale date.'
     assert 'lookthrough_positions' not in p

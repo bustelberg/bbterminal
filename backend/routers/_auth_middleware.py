@@ -93,6 +93,7 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # `POST /api/jobs`) — the owning endpoint starts it — and the one job write, Cancel, is in
 # `_USER_REFRESH_PATTERNS`.
 _USER_READ_PREFIXES: tuple[str, ...] = (
+    '/api/leonteq/management/topselecties',
     "/api/market/",
     "/api/log-dashboard/",
     "/api/companies",
@@ -278,6 +279,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
 _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/leonteq/management/topselecties/[^/]+/refresh/job$"),
     re.compile(r"^/api/airs/valuation/portfolios/\d+/refresh$"),
     # Analyse → fetch exactly one month's AIRS reports, with progress/cancel.
     re.compile(r"^/api/airs/accounts/[^/]+/monthly-report/job$"),
@@ -518,6 +520,7 @@ async def enforce_api_auth(
             or (request.method == "PUT" and _is_company_sector_override(path))
             or (request.method == "PUT" and _is_company_investment_note(path))
             or (request.method == "PUT" and _is_company_egm_assumption(path))
+            or (request.method == "PUT" and re.fullmatch(r'/api/airs/valuation/portfolios/\d+/workbook', path) is not None)
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)
             or (request.method == "POST" and _is_user_refresh(path))

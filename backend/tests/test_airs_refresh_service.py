@@ -146,3 +146,12 @@ def test_progress_listener_failure_does_not_fail_completed_work(monkeypatch):
         raise RuntimeError('stream disconnected')
     reporter(SimpleNamespace(progress=broken))(1, 2, 'x' * 400)
     assert recorded == [(1, 2, 'x' * 300)]
+
+
+def test_explicit_composition_scope_never_expands_to_other_dashboard_models(models, monkeypatch):
+    _, saved = models
+    counted = []
+    monkeypatch.setattr(airs_scanner, 'count_model_portfolio_holdings_sync', lambda rows, *_args, **_kwargs: counted.extend(row['id'] for row in rows))
+    result = service.collect_model_compositions(on_event=lambda *_args, **_kwargs: None, force=True, portfolio_ids={1})
+    assert counted == [1]
+    assert [row['id'] for row in result['selected']] == [1]

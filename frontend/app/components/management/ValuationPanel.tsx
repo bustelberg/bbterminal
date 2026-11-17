@@ -5,10 +5,14 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { useLang } from '../../../lib/i18n';
 import type { components } from '../../../lib/api-types';
+import WorkbookValuationTable from './WorkbookValuationTable';
+import { COLUMN_STYLE } from './valuationWorkbookColumns';
+import type { Workbook } from './valuationWorkbook';
+import { ExpectedJobFailure, startLocalJob } from '../../../lib/stores/jobs';
+import { runSSE } from '../../../lib/stream';
 
 type Portfolio = components['schemas']['ValuationPortfolio'];
 type Bundle = components['schemas']['ValuationBundle'];
-const value = (number: number | null | undefined, suffix = '') => number == null || !Number.isFinite(number) ? '—' : `${number.toFixed(2)}${suffix}`;
 const selectionKey = (portfolio: Portfolio) => portfolio.account ?? String(portfolio.id);
 
 export default function ValuationPanel() {
@@ -19,9 +23,9 @@ export default function ValuationPanel() {
   const [bundle, setBundle] = useState<{ id: string; data: Bundle } | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [retry, setRetry] = useState(0);
-  const [sortDiscount, setSortDiscount] = useState(false);
-  const refreshFor = useRef<string | null>(null);
+  const [refreshingIsin, setRefreshingIsin] = useState<string | null>(null);
+  const activeSelection = useRef('');
+  useEffect(() => () => { activeSelection.current = ''; }, []);
   const selectedId = portfolios.find(portfolio => selectionKey(portfolio) === selected)?.id;
   useEffect(() => {
     let active = true;
@@ -32,39 +36,75 @@ export default function ValuationPanel() {
       }).then(rows => { if (active) setPortfolios(rows); })
       .catch(cause => { if (active) setError(String(cause)); });
     return () => { active = false; };
-  }, [retry]);
+  }, []);
   useEffect(() => {
     if (!selected || selectedId == null) return;
     let active = true;
-    const force = refreshFor.current === selected;
-    if (force) refreshFor.current = null;
-    void apiFetch(`${API_URL}/api/airs/valuation/portfolios/${selectedId}`, { cache: 'no-store', noReadCache: true })
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { controller.abort(); if (active) { setError(nl ? 'Portefeuille laden duurt te lang. Probeer opnieuw.' : 'Portfolio data took too long to load. Select it again to retry.'); setLoading(false); } }, 45000);
+    void apiFetch(`${API_URL}/api/airs/valuation/portfolios/${selectedId}/dashboard`, { cache: 'no-store', noReadCache: true, signal: controller.signal })
       .then(async response => {
         const body = await response.json();
         if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : `HTTP ${response.status}`);
         return body as Bundle;
       }).then(async data => {
-        if (!active) return;
+        if (!active || controller.signal.aborted) return;
         setBundle({ id: selected, data });
-        if (!data.ready || data.stale || force) {
-          const response = await apiFetch(`${API_URL}/api/airs/valuation/portfolios/${selectedId}/refresh${force ? '?force=true' : ''}`, { method: 'POST' });
-          const prepared = await response.json();
-          if (!response.ok) throw new Error(typeof prepared.detail === 'string' ? prepared.detail : `HTTP ${response.status}`);
-          if (active) setBundle({ id: selected, data: prepared as Bundle });
-        }
+
       })
-      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [selected, selectedId, retry]);
+      .catch(cause => { if (active && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { clearTimeout(timeout); if (active) setLoading(false); });
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [selected, selectedId, nl]);
   const data = bundle?.id === selected ? bundle.data : null;
-  const rows = [...(data?.rows ?? [])].sort((a, b) => sortDiscount
-    ? (b.discount_pct ?? -Infinity) - (a.discount_pct ?? -Infinity) || a.name.localeCompare(b.name)
-    : a.name.localeCompare(b.name));
+  const workbook = data?.workbook as Workbook | null | undefined;
+  const rows = [...(data?.rows ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const refreshPortfolio = () => {
+    if (selectedId == null || loading) return;
+    const id = selectedId, selection = selected;
+    setLoading(true); setError('');
+    startLocalJob(nl ? 'Waardering vernieuwen' : 'Refresh valuation', 'valuation.portfolio', async (signal, report) => {
+      let complete = false;
+      let failure = '';
+      let progress = { done: 0, total: 0 };
+      const current = () => activeSelection.current === selection;
+      try {
+        await runSSE(`${API_URL}/api/airs/valuation/portfolios/${id}/dashboard/refresh`, { method: 'POST' }, raw => {
+          const event = raw as { type: string; done?: number; total?: number; message?: string; isin?: string;
+            row?: Bundle['rows'][number]; rows?: Bundle['rows']; data?: Bundle; failures?: string[] };
+          if (event.type === 'progress') {
+            progress = { done: event.done ?? 0, total: event.total ?? 0 };
+            report({ ...progress, message: event.message });
+            if (current()) setRefreshingIsin(event.isin ?? null);
+          } else if (event.type === 'holdings' && event.rows && current()) {
+            setBundle(existing => existing?.id === selection ? { ...existing, data: { ...existing.data, rows: event.rows! } } : existing);
+          } else if (event.type === 'row' && event.row && current()) {
+            const row = event.row;
+            setBundle(existing => existing?.id === selection ? { ...existing, data: { ...existing.data,
+              rows: existing.data.rows.some(item => item.isin === row.isin)
+                ? existing.data.rows.map(item => item.isin === row.isin ? row : item) : [...existing.data.rows, row] } } : existing);
+          } else if (event.type === 'row_error') {
+            report({ ...progress, message: event.message });
+          } else if (event.type === 'complete' && event.data) {
+            complete = true;
+            if (current()) setBundle({ id: selection, data: event.data });
+            failure = event.failures?.join('\n') ?? '';
+          } else if (event.type === 'error') failure = event.message ?? 'Portfolio refresh failed.';
+        }, signal);
+        if (signal.aborted) return;
+        if (failure || !complete) throw new ExpectedJobFailure(failure || 'Portfolio refresh ended before completion.',
+          nl ? 'Niet alle brongegevens konden worden vernieuwd.' : 'Some source data could not be refreshed.');
+        return nl ? 'Portefeuille bijgewerkt.' : 'Portfolio updated.';
+      } catch (cause) {
+        if (current() && !signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+        throw cause;
+      } finally { if (current()) { setRefreshingIsin(null); setLoading(false); } }
+    });
+  };
   return <section className="space-y-4" aria-label={nl ? 'Waardering' : 'Valuation'}>
     <div className="flex flex-wrap items-end gap-3">
       <label className="space-y-1 text-sm"><span className="block">{nl ? 'Portefeuille' : 'Portfolio'}</span>
-        <select value={selected} onChange={event => { setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
+        <select disabled={loading} value={selected} onChange={event => { activeSelection.current = event.target.value; setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
           <option value="">{nl ? 'Selecteer een portefeuille…' : 'Select a portfolio…'}</option>
           {portfolios.map(portfolio => <option key={selectionKey(portfolio)} value={selectionKey(portfolio)}
             disabled={portfolio.id == null} title={portfolio.unavailable_reason ?? undefined}>
@@ -72,36 +112,21 @@ export default function ValuationPanel() {
           </option>)}
         </select>
       </label>
-      <button type="button" onClick={() => { refreshFor.current = selected; setLoading(!!selected); setError(''); setRetry(current => current + 1); }} disabled={loading} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={refreshPortfolio} disabled={loading || selectedId == null} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
+        <div className="flex flex-wrap items-center gap-3 text-xs" aria-label={nl ? 'Kolomtypen' : 'Column types'}>
+          {(['data', 'assumption', 'calculation'] as const).map(kind => <span key={kind} className={`rounded border-t-2 px-3 py-2 ${COLUMN_STYLE[kind]}`}>
+            {kind === 'data' ? (nl ? 'Blauw · directe gegevens' : 'Blue · direct data') : kind === 'assumption'
+              ? (nl ? 'Groen · aannames' : 'Green · assumptions') : (nl ? 'Geel · berekening' : 'Yellow · calculation')}
+          </span>)}
+        </div>
+      </div>
     </div>
     {(selected || error) && <>
-      <div className="overflow-x-auto rounded-xl border border-neutral-800/40"><table className="w-full text-sm">
-        <caption className="sr-only">{nl ? 'Historische waardering per bedrijf' : 'Historical valuation by company'}</caption>
-        <thead className="bg-elevated text-xs text-fg-muted"><tr>
-          <th className="px-3 py-2 text-left">{nl ? 'Bedrijf' : 'Company'}</th>
-          <th className="px-3 py-2 text-right">{nl ? 'Koers' : 'Price'}</th>
-          <th className="px-3 py-2 text-right">{nl ? 'Actuele K/W' : 'Current P/E'}</th>
-          <th className="px-3 py-2 text-right" title={nl ? 'Mediane positieve K/W over vijf jaar' : 'Five-year median positive P/E'}>{nl ? 'Historische K/W' : 'Historical P/E'}</th>
-          <th className="px-3 py-2 text-right" title={String(data?.method?.description ?? '')}>{nl ? 'Waardeschatting' : 'Value estimate'}</th>
-          <th className="px-3 py-2 text-right"><button type="button" onClick={() => setSortDiscount(current => !current)} aria-pressed={sortDiscount}>{nl ? 'Korting' : 'Discount'} {sortDiscount ? '↓' : '↕'}</button></th>
-        </tr></thead>
-        <tbody className="divide-y divide-neutral-800/30">
-          {error && <tr><td colSpan={6} role="alert" className="whitespace-normal px-3 py-2 text-neg-300 [overflow-wrap:anywhere]">{error}</td></tr>}
-          {loading && <tr><td colSpan={6} role="status" className="px-3 py-4 text-center text-fg-muted">{nl ? 'Laden…' : 'Loading…'}</td></tr>}
-          {rows.map((row, index) => <tr key={row.isin ?? `${row.name}-${index}`}>
-          <td className="px-3 py-2 font-medium" title={row.isin ?? undefined}>{row.name}</td>
-          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums" title={row.price_date ?? undefined}>{value(row.price)} {row.price != null && row.currency}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{value(row.current_pe, '×')}</td>
-          <td className="px-3 py-2 text-right tabular-nums">{value(row.median_pe, '×')}</td>
-          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums" title={row.reason ?? (data?.stale ? (nl ? 'Dagelijkse update loopt achter' : 'Daily update overdue') : `${row.observations} observations · ${row.history_from ?? ''} → ${row.history_to ?? ''}`)}>
-            {row.estimated_value != null ? <>{value(row.estimated_value)} {row.currency}</>
-              : <span className="text-xs text-fg-muted">{row.status === 'pending' ? (nl ? 'Nog niet berekend' : 'Pending') : (nl ? 'Onvoldoende gegevens' : 'Insufficient data')}</span>}
-          </td>
-          <td className="px-3 py-2 text-right tabular-nums">{value(row.discount_pct, '%')}</td>
-        </tr>)}
-          {!loading && !error && !rows.length && <tr><td colSpan={6} className="px-3 py-6 text-center text-fg-muted">{data?.detail ?? (nl ? 'Geen bedrijven in deze portefeuille.' : 'No companies in this portfolio.')}</td></tr>}
-        </tbody>
-      </table></div>
+      {error && <p role="alert" className="text-sm text-neg-300">{error}</p>}
+      {data && !workbook && <p role="alert" className="text-sm text-neg-300">{nl ? 'De portefeuillebundel bevat geen werkmapgegevens. Vernieuw de portefeuille.' : 'The portfolio bundle is missing workbook data. Refresh the portfolio.'}</p>}
+      {workbook && selectedId != null && <WorkbookValuationTable key={selected} workbookData={workbook} refreshingIsin={refreshingIsin}
+        portfolioId={selectedId} rows={rows} nl={nl} portfolioName={portfolios.find(row => selectionKey(row) === selected)?.name ?? ''} />}
     </>}
   </section>;
 }

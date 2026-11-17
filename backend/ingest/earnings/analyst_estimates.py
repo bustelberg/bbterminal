@@ -85,6 +85,8 @@ def fetch_analyst_estimates(
     *,
     force_refresh: bool = False,
     on_log: callable = None,
+    metric_codes: set[str] | None = None,
+    include_history: bool = True,
 ) -> EarningsResult:
     def _log(msg: str):
         result.logs.append(msg)
@@ -122,6 +124,7 @@ def fetch_analyst_estimates(
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/analyst_estimate")
         _log(f"Calling {_mask_url(url)} ...")
         api = _api_request(url)
+        result.http_status = getattr(api, 'status_code', None)
         track_api_call(supabase, exchange, job="analyst_estimates",
                        outcome=classify_outcome(
                            getattr(api, "status_code", None), has_data=api.data is not None))
@@ -137,9 +140,14 @@ def fetch_analyst_estimates(
             if cached is not None:
                 _log("API failed, using stale cache")
             else:
-                result.cache_status = "api_error"
+                result.cache_status = "api_empty" if result.http_status == 200 else "api_error"
                 result.error = api.log
                 return result
+        elif not isinstance(api.data, dict) or not _extract_analyst_dates(api.data):
+            result.cache_status = "api_empty"
+            result.error = "GuruFocus returned no usable forecast periods. Previous saved forecasts were kept."
+            _log(result.error)
+            return result
         else:
             cached = api.data
             result.cache_status = "api_fresh"
@@ -148,6 +156,8 @@ def fetch_analyst_estimates(
 
     # Always load into DB
     rows = _parse_analyst_estimates(cached, company_id)
+    if metric_codes is not None:
+        rows = [row for row in rows if row['metric_code'] in metric_codes]
     result.metrics_found = len(set(r["metric_code"] for r in rows))
     _log(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
     result.rows_loaded, result.rows_unchanged = _upsert_metric_rows(supabase, rows)
@@ -156,6 +166,8 @@ def fetch_analyst_estimates(
     #  Even when `rows` IS EMPTY — a company analysts do not cover is the case this records. See
     # `_stamp_fetched`: without it the smart refresh re-asks that company on every press, for ever.
     _stamp_fetched(supabase, company_id, "analyst_estimates", _log)
+    if not include_history:
+        return result
     # Current consensus only answers the outlook. The historical feed carries
     # the pre-release consensus and actual needed for a truthful beat/miss.
     from .estimate_history import fetch_estimate_history  # noqa: PLC0415

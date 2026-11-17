@@ -31,6 +31,7 @@ import type {
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
 import { canAnalyseAccount as canAnalyse, MIN_REAL_HOLDINGS } from './management/portfolioAccounts';
+import { LEONTEQ_DASHBOARD, leonteqBasket, type LeonteqDetail } from './management/leonteqDashboard';
 
 // These are substantial, self-contained workspaces that only exist after a row action. Keeping
 // them out of the overview chunk makes opening /management-dashboard about the table, rather than
@@ -79,6 +80,7 @@ function prefetchModelAnalysis(id: number, name: string) {
  */
 
 const SHOW_SECONDARY_ROW_ACTIONS = false;
+type OverviewRow = AirsPortfolioOverview & { month_fetched_at?: string | null };
 
 const pct = (v: number | null | undefined) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
@@ -234,6 +236,8 @@ function defaultTableSort(collection: PortfolioCollection): TableSort {
 }
 
 export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
+  const leonteq = collection === 'topselecties';
+  const canOpen = (row: AirsPortfolioOverview) => leonteq || canAnalyse(row);
   const currentMonth = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit' }).format(new Date());
   const monthToDate = (row: AirsPortfolioOverview) => row.periode?.slice(0, 7) === currentMonth ? row.latest_month_pct ?? null : null;
   //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
@@ -248,7 +252,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // to 403 — a button that only fails is worse than no button. The split is refresh vs. mutate,
   // and `_auth_middleware.py::_USER_REFRESH_PATHS` is the same split on the server.
   const isAdmin = useIsAdmin();
-  const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
+  const [rows, setRows] = useState<OverviewRow[] | null>(null);
   // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
   // The name comparator still uses the explicit profile order.
   const [storedSort, setStoredSort] = useState<TableSort>(() => defaultTableSort(collection));
@@ -282,7 +286,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /** `pf` is the AIRS portefeuille code — what `refreshOne` is keyed on, carried so the modal's
    *  Refresh fires the identical scan the row's does. */
   const [analyse, setAnalyse] = useState<
-    { id?: number; name: string; basket?: Basket; pf?: string } | null>(null);
+    { id?: number; name: string; basket?: Basket; pf?: string; leonteqPortfolio?: string } | null>(null);
   const [fundamental, setFundamental] = useState<
     { id?: number; name: string; basket?: Basket; bookPortfolio?: string } | null>(null);
   const [earnings, setEarnings] = useState<
@@ -416,6 +420,26 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const openModal = async (r: AirsPortfolioOverview,
     destination: 'analyse' | 'fundamental' | 'earnings' = 'analyse') => {
+    if (leonteq) {
+      if (destination === 'analyse') {
+        setAnalyse({ name: r.name, leonteqPortfolio: r.name });
+        return;
+      }
+      setOpening(r.dynamic_portefeuille);
+      try {
+        const response = await apiFetch(`${API_URL}${LEONTEQ_DASHBOARD}/${encodeURIComponent(r.name)}`,
+          { cache: 'no-store', noReadCache: true });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const basket = leonteqBasket(r.name, await response.json() as LeonteqDetail);
+        if (!basket) throw new Error('Leonteq holdings are unavailable. Refresh this portfolio.');
+        const target = { name: r.name, basket };
+        if (destination === 'fundamental') setFundamental(target);
+        else setEarnings(target);
+      } catch (error) {
+        setRefreshMsg({ text: `${r.name}: ${error instanceof Error ? error.message : String(error)}`, kind: 'error' });
+      } finally { setOpening(null); }
+      return;
+    }
     //  The portefeuille code travels with the modal. `refreshOne` is keyed on it, not on the
     // fixed portfolio id, so without it the modal's Refresh has nothing to call — the row and the
     // modal must fire the identical scan.
@@ -567,17 +591,17 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const loadOverview = useCallback(async (completedAccount?: string) => {
     await traceScope('overview', 'loading the portfolios table', async () => {
       try {
-        const r = await apiFetch(`${API_URL}/api/airs/portfolios/overview`);
+        const r = await apiFetch(`${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/dashboard` : '/api/airs/portfolios/overview'}`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const body = (await r.json()) as AirsPortfolioOverview[];
+        const body = (await r.json()) as OverviewRow[];
         //  An empty table is the state a fresh production database is in, and it renders exactly
         // like a broken page. It is not an error — nothing has been scanned yet — so it is a
         // WARN with the remedy in it, not a red banner and not silence.
-        traceRows('overview', 'portfolios', body,
+        traceRows('overview', 'portfolios', body, leonteq ? 'No saved Leonteq portfolio snapshots. Use Refresh all.' :
           'nothing in `airs_account_roster` / `airs_performance` yet. This is what a fresh '
           + 'database looks like — press "Refresh all from AIRS" to run the Front-Office '
           + 'discovery and populate it. Not an error.');
-        if (body.length) {
+        if (body.length && !leonteq) {
           // The three facts that decide whether every OTHER number on the page can exist. A row
           // with no pairing has no Analyse-by-id; a row with no YTD had no Rendement report.
           const paired = body.filter((x) => x.fixed_portfolio_id != null).length;
@@ -602,7 +626,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               : [...current, updated];
           });
         } else {
-          writeOverviewCache(body);
+          if (!leonteq) writeOverviewCache(body);
           setRows(body);
         }
         setErr(null);
@@ -611,14 +635,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         setErr(e instanceof Error ? e.message : String(e));
       }
     });
-  }, []);
+  }, [leonteq]);
 
   // Paint the last short-lived snapshot before the browser shows the client render, then always
   // revalidate against the backend. That is stale-while-revalidate rather than a cache-only view.
   useBrowserLayoutEffect(() => {
+    if (leonteq) return;
     const cached = readOverviewCache();
     if (cached) setRows(cached);
-  }, []);
+  }, [leonteq]);
 
   useEffect(() => {
     let pending = false;
@@ -669,8 +694,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     setRefreshingRows((s) => new Set(s).add(portefeuille));
     try {
       const { id, done } = await startJob(
-        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job?cascade=${cascade}`,
-        t.common.refreshingFromAirs(displayName), undefined, undefined, { label: displayName });
+        `${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/${encodeURIComponent(displayName)}/refresh/job`
+          : `/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job?cascade=${cascade}`}`,
+        leonteq ? `${displayName} · Leonteq` : t.common.refreshingFromAirs(displayName), undefined, undefined, { label: displayName });
       setRowJobs((m) => ({ ...m, [portefeuille]: id }));
       //  The cancel that arrived before the id. The button flips on the press, so Cancel is
       // pressable during the round-trip above — and a press that reached a control offering it must
@@ -745,6 +771,22 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // A manual press must re-read AIRS, even if the incremental scheduler would skip it.
   const refreshAll = async (force = true) => {
     if (refreshingAll) return;
+    if (leonteq) {
+      setRefreshingAll(true);
+      setRefreshMsg(null);
+      try {
+        for (const row of rows ?? []) {
+          const { id, done } = await startJob(`${API_URL}${LEONTEQ_DASHBOARD}/${encodeURIComponent(row.name)}/refresh/job`, row.name);
+          setFleetJob(id);
+          const job = await done;
+          await loadOverview();
+          if (job.status === 'cancelled') break;
+        }
+      } catch (error) {
+        setRefreshMsg({ text: String(error), kind: 'error' });
+      } finally { setRefreshingAll(false); setFleetJob(null); setRefreshSeq(seq => seq + 1); }
+      return;
+    }
     setRefreshMsg(null);
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
@@ -900,7 +942,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const collectionRows = (rows ?? []).filter((r) => r.management_group === collection);
   const substantial = collectionRows.filter(canAnalyse).length;
-  const effectiveHideSmall = substantial > 0;
+  const effectiveHideSmall = !leonteq && substantial > 0;
 
   const view = (() => {
     const base = collectionRows.filter((r) => (effectiveHideSmall ? canAnalyse(r) : true));
@@ -973,7 +1015,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               ? (modelsJob
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
                 : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
-              : 'Updates each portfolio from AIRS, in tab order. Each row updates as soon as its AIRS data is saved.'}
+              : leonteq ? 'Updates each TopSelectie directly from Leonteq.'
+                : 'Updates each portfolio from AIRS, in tab order. Each row updates as soon as its AIRS data is saved.'}
             className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
@@ -1046,14 +1089,14 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortTh label="Month-to-date" k="mtd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
-                  title="This month's return, reported by AIRS Rendementen. Shown only when AIRS has a value for the current month." />
+                  title={leonteq ? "This month's return, reported by Leonteq." : "This month's return, reported by AIRS Rendementen. Shown only when AIRS has a value for the current month."} />
                 <SortTh label="Year-to-date" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
-                  title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
+                  title={leonteq ? "Leonteq's reported year-to-date return." : "AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)."} />
                 <th className="px-2 py-2.5 font-medium text-right normal-case"
-                  title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">{t.overviewDates.since}</th>
+                  title={leonteq ? 'Start of the Leonteq year-to-date return window.' : 'Start of the AIRS return reporting window, excluding months before the portfolio was funded.'}>{t.overviewDates.since}</th>
                 <th className="px-2 py-2.5 font-medium text-right normal-case"
-                  title="Latest AIRS valuation date available for this portfolio.">{t.overviewDates.to}</th>
+                  title={leonteq ? 'Latest portfolio valuation date supplied by Leonteq.' : 'Latest AIRS valuation date available for this portfolio.'}>{t.overviewDates.to}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1070,7 +1113,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
                       <td className="px-2 py-2.5 whitespace-nowrap">
                         <div className="flex flex-wrap items-stretch gap-1.5">
-                          {canAnalyse(r) && (
+                          {canOpen(r) && (
                             <button
                               // A click can follow a hover by less than one animation frame, and a
                               // touch screen has no hover at all. Start the shared request at
@@ -1097,7 +1140,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
                           )}
-                          {SHOW_SECONDARY_ROW_ACTIONS && canAnalyse(r) && (
+                          {SHOW_SECONDARY_ROW_ACTIONS && canOpen(r) && (
                             <button type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1109,7 +1152,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               {opening === r.dynamic_portefeuille ? '…' : 'Fundamental'}
                             </button>
                           )}
-                          {SHOW_SECONDARY_ROW_ACTIONS && canAnalyse(r) && (
+                          {SHOW_SECONDARY_ROW_ACTIONS && canOpen(r) && (
                             <button type="button"
                               onClick={(e) => { e.stopPropagation(); void openModal(r, 'earnings'); }}
                               disabled={opening === r.dynamic_portefeuille}
@@ -1148,7 +1191,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                                   ? 'Cancelling — the account being downloaded finishes first.'
                                   : cancellable
                                     ? 'Cancel this re-scan. It stops at the next account boundary; everything already downloaded is kept, and the toast names the books left un-refreshed.'
-                                    : "Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."}
+                                    : leonteq ? 'Refresh this portfolio directly from Leonteq.'
+                                      : "Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."}
                                 aria-label={stopping ? 'Cancelling this refresh'
                                   : cancellable ? 'Cancel this refresh' : 'Refresh this portfolio'}
                                 className={`inline-flex items-center justify-center text-[13px] leading-none px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 disabled:cursor-wait ${
@@ -1191,7 +1235,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             name; before this the only way to give a book a readable name was to
                             rename a model it might not even have. stopPropagation so naming a row
                             does not also expand it. */}
-                        {isAdmin ? (
+                        {isAdmin && !leonteq ? (
                           <button type="button"
                             onClick={(e) => { e.stopPropagation(); void renameAccount(r); }}
                             title={`${r.name}\nAIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}\n\nClick to ${r.name_is_custom ? 'change or clear this name' : 'give this book a name'}.`}
@@ -1203,7 +1247,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           </button>
                         ) : (
                           <span className="min-w-0 cursor-help whitespace-normal break-words"
-                            title={`${r.name}\nAIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
+                            title={leonteq ? `${r.name}\nLeonteq LYNQS` : `${r.name}\nAIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
                             {r.name}
                           </span>
                         )}
@@ -1242,16 +1286,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             fetched string computed is the same mistake `formula` was making. The
                             name has no valuation date of its own, so `fetchedAt` alone is right:
                             the card badges it and prices its own freshness from it. */}
-                        <Provenance source={r.fixed_name ? 'airs_model' : 'airs_volk'} kind="copied"
+                        <Provenance source={leonteq ? 'leonteq' : r.fixed_name ? 'airs_model' : 'airs_volk'} kind="copied"
                           /* The paired model supplies a structural display name, but its catalogue
                              scan is not a prerequisite for a current account. Tie freshness to the
                              book scan that Refresh all actually performs; otherwise a stale fixed-
                              model catalogue leaves a freshly refreshed account orange. */
                           fetchedAt={r.fetched_at}
-                          what={r.fixed_name
+                          what={leonteq ? `Leonteq portfolio: ${r.name}.` : r.fixed_name
                             ? `AIRS model portfolio: ${r.fixed_name}. AIRS account: ${r.dynamic_portefeuille}.`
                             : `AIRS account: ${r.dynamic_portefeuille}.`}
-                          note={r.fixed_name
+                          note={leonteq ? 'Reviewed TopSelectie name.' : r.fixed_name
                             ? (r.link_source === 'guess'
                               ? 'name — from the Fixed portfolio matched to this book by name'
                               : 'name — from the Fixed portfolio this book is linked to')
@@ -1260,23 +1304,24 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                       </td>
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(monthToDate(r))}`}>
                         {pct(monthToDate(r))}
-                        <Provenance source="airs_att" asOf={r.periode} fetchedAt={r.fetched_at} kind="copied"
+                        <Provenance source={leonteq ? 'leonteq' : 'airs_att'} asOf={leonteq ? undefined : r.periode}
+                          fetchedAt={leonteq ? r.month_fetched_at : r.fetched_at} kind="copied"
                           onRefresh={async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
-                          what="This month's return, as AIRS reports it."
-                          staleReason={r.periode?.slice(0, 7) !== currentMonth ? 'AIRS has not reported a return for this month yet'
+                          what={leonteq ? "This month's return, as Leonteq reports it." : "This month's return, as AIRS reports it."}
+                          staleReason={r.periode?.slice(0, 7) !== currentMonth ? `${leonteq ? 'Leonteq' : 'AIRS'} has not reported a return for this month yet`
                             : r.missing_reports?.includes('att') ? 'Rendement was missing from the latest AIRS scan' : undefined} />
                       </td>
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
-                        <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
+                        <Provenance source={leonteq ? 'leonteq' : 'airs_att'} asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           onRefresh={async () => {
                             await refreshOne(r.dynamic_portefeuille, r.name, false);
                             return null;
                           }}
                           staleReason={r.missing_reports?.includes('att')
                             ? 'Rendement was missing from the latest AIRS scan' : undefined}
-                          what="This account's return so far this year, as AIRS itself reports it."
-                          note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
+                          what={leonteq ? "This portfolio's year-to-date return, as Leonteq reports it." : "This account's return so far this year, as AIRS itself reports it."}
+                          note={leonteq ? undefined : "cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing"} />
                       </td>
                       <td className="px-2 py-2.5 text-right text-[13px] text-fg-muted">
                         {r.ytd_from ? new Intl.DateTimeFormat('en-GB', {
@@ -1334,6 +1379,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         // only when there is no AIRS book behind the modal to re-scan), and `refreshSeq` bumps
         // when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
+          leonteqPortfolio={analyse.leonteqPortfolio}
           name={analyse.name}
           reportAccount={analyse.pf}
           onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!, analyse.name) : undefined}

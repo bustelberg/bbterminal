@@ -121,3 +121,32 @@ class TestTheFillStopsInsteadOfWalkingTheWholeIndex:
         #  And the limit is a handful, not a hundred: a few genuinely empty companies are ordinary,
         # ten in a row across regions are not.
         assert 3 <= VENDOR_EMPTY_LIMIT <= 25
+
+
+@pytest.mark.parametrize('recovery', [True, False])
+def test_manual_refresh_retries_empty_http_200_once_and_preserves_valid_cache(fin, monkeypatch, recovery):
+    from types import SimpleNamespace
+    calls, uploads, stamps = [], [], []
+    def request(*_args, **_kwargs):
+        calls.append(True)
+        return SimpleNamespace(data=GOOD if recovery and len(calls) == 2 else EMPTY,
+                               log='OK', is_forbidden=False, status_code=200)
+    monkeypatch.setattr(fin, '_api_request', request)
+    monkeypatch.setattr(fin, '_upload_to_storage', lambda _db, _path, data: uploads.append(data))
+    monkeypatch.setattr(fin, '_stamp_fetched', lambda *_: stamps.append(True))
+    result = fin.fetch_financials(None, 1, 'BESI', 'XAMS', force_refresh=True, retry_empty=True)
+    assert len(calls) == result.api_calls == 2
+    assert result.http_status == 200
+    assert uploads == ([GOOD] if recovery else [])
+    assert bool(stamps) is recovery
+    assert result.cache_status == ('api_fresh' if recovery else 'api_empty')
+
+
+def test_manual_refresh_does_not_retry_a_rate_limit(fin, monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    monkeypatch.setattr(fin, '_api_request', lambda *_: calls.append(True) or SimpleNamespace(
+        data=None, log='Rate limited', is_forbidden=False, status_code=429))
+    result = fin.fetch_financials(None, 1, 'BESI', 'XAMS', force_refresh=True, retry_empty=True)
+    assert len(calls) == 1
+    assert result.http_status == 429

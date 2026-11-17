@@ -1,41 +1,39 @@
-"""Daily database-only valuation publication, with per-portfolio atomic saves."""
+"""08:00 Amsterdam source preparation for single-request valuation reads."""
 from scheduler_runtime.context import LogContext
 from scheduler_runtime.execution import Cancelled, cancel_requested, require_complete
 
 
 def run(ctx=None, *, report=None):
-    from services.portfolio_valuation import portfolios, publish
-
-    def stop():
-        return cancel_requested(ctx)
-
-    context = LogContext(cancelled=stop, step=report, label='Portfolio valuation')
-    roster = portfolios()
-    # Several dashboard accounts can share one Fixed model. Publish it once.
-    by_model = {}
-    for row in roster:
-        if row['id'] is not None:
-            by_model.setdefault(row['id'], row)
-    selected = list(by_model.values())
-    if not selected:
-        require_complete('No linked dashboard Fixed models found; refresh the dashboard roster and connect its accounts to AIRS Fixed models first.',
-                         {'errors': {'roster': 'no linked models'}, 'unavailable_portfolios': roster})
-    summary = {'saved': [], 'errors': {}, 'unavailable_portfolios': [
-        {'name': row['name'], 'account': row.get('account'), 'reason': row.get('unavailable_reason')}
-        for row in roster if row['id'] is None]}
-    inputs = {}
-    for index, portfolio in enumerate(selected):
+    from services import portfolio_valuation as V, portfolio_membership as M, valuation_dashboard as D
+    context = LogContext(cancelled=lambda: cancel_requested(ctx), step=report, label='Portfolio valuation')
+    summary = {'saved': [], 'errors': {}}
+    try:
+        M.refresh_holdings(context, source='all')
+    except Cancelled:
+        raise
+    except Exception as exc:
+        summary['errors']['holdings'] = str(exc)
+    roster = V.portfolios()
+    selected = {row['id']: row for row in roster if row.get('id') is not None}
+    summary['unavailable_portfolios'] = [{'name': row['name'], 'account': row.get('account'), 'reason': row.get('unavailable_reason')} for row in roster if row.get('id') is None]
+    source_cache = {}
+    for index, (portfolio_id, portfolio) in enumerate(selected.items()):
         context.check()
         if report:
-            report(index, len(selected), f"Preparing valuation: {portfolio['name']}")
+            report(index, len(selected), f"Preparing portfolio: {portfolio['name']}")
         try:
-            payload = publish(portfolio['id'], check_cancel=context.check, input_cache=inputs)
-            summary['saved'].append({'portfolio_id': portfolio['id'], 'companies': len(payload['rows']),
-                                     'calculated': sum(row['status'] == 'ok' for row in payload['rows'])})
+            payload = D.refresh(portfolio_id,
+                lambda event: context.progress(event.get('done', 0), event.get('total', 0), event.get('message', '')),
+                context.check, refresh_holdings=False, source_cache=source_cache)
+            summary['saved'].append(portfolio_id)
+            if payload.get('errors'):
+                summary['errors'][str(portfolio_id)] = payload['errors']
         except Cancelled:
             raise
         except Exception as exc:
-            summary['errors'][str(portfolio['id'])] = f"{portfolio['name']}: {type(exc).__name__}: {exc}"
+            summary['errors'][str(portfolio_id)] = type(exc).__name__
+    if not selected:
+        summary['errors']['roster'] = 'No linked dashboard portfolios found.'
     if summary['errors']:
-        require_complete(f"Daily valuation incomplete: {summary['errors']}. Completed portfolio publications remain saved; retry portfolio_valuation_daily.", summary)
-    return f"Valuation saved for {len(summary['saved'])} portfolios", summary
+        require_complete('Daily portfolio preparation incomplete; completed data was retained.', summary)
+    return f"Prepared {len(summary['saved'])} portfolios", summary

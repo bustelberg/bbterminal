@@ -44,6 +44,11 @@ _log = logging.getLogger(__name__)
 
 def _positions_of(portfolio_id: int, datum: str | None) -> list[dict]:
     """One model's stored composition, at its own effective date."""
+    from leonteq.management import positions_for_identity
+    model = ref_model(portfolio_id)
+    leonteq = positions_for_identity((model or {}).get('name'))
+    if leonteq is not None:
+        return leonteq
     rows = ref_positions_for(portfolio_id)      # one shared read — see `_airs_ref`
     if datum:
         rows = [r for r in rows if r.get("datum") == datum]

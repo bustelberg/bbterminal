@@ -149,9 +149,11 @@ def test_scheduled_job_keeps_completed_portfolios_and_error_evidence(monkeypatch
             raise RuntimeError('source unavailable')
         saved.append(pid)
         return {'rows': [{'status': 'ok'}]}
-    monkeypatch.setattr(V, 'publish', publish)
+    from services import valuation_dashboard as D, portfolio_membership as M
+    monkeypatch.setattr(D, 'refresh', lambda pid, *_args, **kwargs: publish(pid, **kwargs))
+    monkeypatch.setattr(M, 'refresh_holdings', lambda *_args, **_kwargs: None)
     from dashboard_daily import IncompleteRefresh
-    with pytest.raises(IncompleteRefresh, match='Two.*source unavailable'):
+    with pytest.raises(IncompleteRefresh, match='preparation incomplete'):
         J.run()
     assert saved == [1]
 
@@ -251,7 +253,9 @@ def test_daily_job_publishes_shared_model_once_and_reports_unlinked_portfolio(mo
     def publish(pid, **_kwargs):
         calls.append(pid)
         return {'rows': []}
-    monkeypatch.setattr(V, 'publish', publish)
+    from services import valuation_dashboard as D, portfolio_membership as M
+    monkeypatch.setattr(D, 'refresh', lambda pid, *_args, **kwargs: publish(pid, **kwargs))
+    monkeypatch.setattr(M, 'refresh_holdings', lambda *_args, **_kwargs: None)
     _, summary = J.run()
     assert calls == [7]
     assert summary['unavailable_portfolios'] == [{'name': 'Unlinked', 'account': 'UNLINKED', 'reason': 'Connect model'}]
@@ -331,3 +335,86 @@ def test_genuine_eps_conflict_retains_price_and_does_not_fail_other_portfolio_ro
     assert by_isin['CONFLICT']['price'] == 60
     assert 'Conflicting EPS' in by_isin['CONFLICT']['reason']
     assert len(saved) == 1
+
+
+def test_row_refresh_preserves_other_rows_and_retains_saved_results_on_failure(monkeypatch):
+    monkeypatch.setattr(V, 'refresh_row_sources', lambda *_: None)
+    saved = fake_store(monkeypatch)
+    old = {'isin': 'OTHER', 'name': 'Other', 'weight_pct': 2, 'status': 'ok', 'price': 42}
+    monkeypatch.setattr(V, 'read', lambda _pid: {'rows': [old]})
+    monkeypatch.setattr(V, 'company_holdings', lambda _pid: ([
+        {'isin': 'EXACT', 'name': 'Company', 'weight_pct': 5}, old], {}))
+    monkeypatch.setattr(V, 'load_inputs', lambda *_: (None, [], [], 'Missing source'))
+    result = V.refresh_row(7, 'EXACT')
+    assert result['rows'][1] == old
+    assert result['rows'][0]['reason'] == 'Missing source'
+    assert len(saved) == 1
+    def failure(*_):
+        raise RuntimeError('source unavailable')
+    monkeypatch.setattr(V, 'load_inputs', failure)
+    with pytest.raises(RuntimeError):
+        V.refresh_row(7, 'EXACT')
+    assert len(saved) == 1
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        V.refresh_row(7, 'FOREIGN')
+    assert exc.value.status_code == 404
+
+
+def test_partial_row_refresh_does_not_mark_old_portfolio_current(monkeypatch):
+    monkeypatch.setattr(V, 'refresh_row_sources', lambda *_: None)
+    fake_store(monkeypatch)
+    holdings = [{'isin': 'ONE', 'name': 'One', 'weight_pct': 5},
+                {'isin': 'TWO', 'name': 'Two', 'weight_pct': 6}]
+    existing = {'rows': [{**row, 'status': 'ok'} for row in holdings], 'calculation_date': '2020-01-01'}
+    monkeypatch.setattr(V, 'read', lambda _pid: existing)
+    monkeypatch.setattr(V, 'company_holdings', lambda _pid: (holdings, {}))
+    monkeypatch.setattr(V, 'load_inputs', lambda *_: (None, [], [], 'Missing source'))
+    first = V.refresh_row(7, 'ONE')
+    assert first['calculation_date'] == '2020-01-01'
+    existing.update(first)
+    second = V.refresh_row(7, 'TWO')
+    assert second['calculation_date'] == date.today().isoformat()
+
+
+def test_row_source_refresh_forces_only_valuation_metrics_and_overlaps_providers(monkeypatch):
+    from threading import Barrier
+    from routers import _fundamental_ingest as ingest
+    from asset_pipeline import company_prices
+    from ingest import earnings
+    from services.valuation_workbook import FORECAST_CODES
+    from tests._fake_supabase import FakeSupabase
+    calls = []
+    barrier = Barrier(3)
+    monkeypatch.setattr(V, 'supabase', FakeSupabase({'company': [
+        {'company_id': 3223, 'isin': 'TW0002330008', 'gurufocus_ticker': '2330',
+         'gurufocus_exchange': {'exchange_code': 'TPE'}}]}))
+    def financials(db, cid, ticker, exchange, *, force_refresh, metric_codes, retry_empty):
+        assert retry_empty is True
+        calls.append(('financials', cid, ticker, exchange, force_refresh, metric_codes))
+        barrier.wait(timeout=5)
+        return SimpleNamespace(error=None, is_forbidden=False, rows_loaded=0, rows_unchanged=80, metrics_found=1)
+    def prices(cid, *, force_refresh):
+        calls.append(('prices', cid, force_refresh))
+        barrier.wait(timeout=5)
+        return SimpleNamespace(error=None)
+    def estimates(db, cid, ticker, exchange, *, force_refresh, metric_codes, include_history):
+        calls.append(('estimates', cid, ticker, exchange, force_refresh, metric_codes, include_history))
+        barrier.wait(timeout=5)
+        return SimpleNamespace(error=None, is_forbidden=False, rows_loaded=0, rows_unchanged=12, metrics_found=0)
+    monkeypatch.setattr(ingest, 'ingest_fundamentals_for_isin', lambda *_args, **_kwargs: pytest.fail('Known mappings need no resolver/second fetch'))
+    monkeypatch.setattr(earnings, 'fetch_financials', financials)
+    monkeypatch.setattr(company_prices, 'refresh_company_prices', prices)
+    monkeypatch.setattr(earnings, 'fetch_analyst_estimates', estimates)
+    V.refresh_row_sources('US8740391003', 'TSMC')
+    assert ('financials', 3223, '2330', 'TPE', True, set(V.EPS_CODES)) in calls
+    assert ('prices', 3223, True) in calls
+    assert ('estimates', 3223, '2330', 'TPE', True, set(FORECAST_CODES), False) in calls
+    def failed_prices(*_args, **_kwargs):
+        barrier.wait(timeout=5)
+        return SimpleNamespace(error='provider error')
+    monkeypatch.setattr(company_prices, 'refresh_company_prices', failed_prices)
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        V.refresh_row_sources('US8740391003', 'TSMC')
+    assert exc.value.status_code == 502

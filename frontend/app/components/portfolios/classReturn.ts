@@ -18,6 +18,9 @@
  */
 
 export type ClassReturnRow = {
+  own_return_source?: string | null;
+  avg_capital_eur?: number | null;
+  result_eur?: number | null;
   /** AIRS's `Beginwaarde`, restated to today's quantity. Null where the row cannot be valued. */
   start_value_eur?: number | null;
   /** The same AIRS return rendered on the position row, in percent. */
@@ -60,6 +63,16 @@ export function classWeightedReturn(
    */
   zeroWhenNoOpening = false,
 ): ClassReturn {
+  if (rows.length && rows.every(row => row.own_return_source === 'leonteq_transactions')) {
+    const measured = rows.filter(row => (row.avg_capital_eur ?? 0) > 0 && row.result_eur != null);
+    const capital = measured.reduce((sum, row) => sum + row.avg_capital_eur!, 0);
+    const totalCapital = rows.reduce((sum, row) => sum + Math.max(0, row.avg_capital_eur ?? 0), 0);
+    const profit = measured.reduce((sum, row) => sum + row.result_eur!, 0);
+    return { pct: capital > 0 ? profit / capital * 100 : zeroWhenNoOpening ? 0 : null,
+      legs: measured.length, rows: rows.length, missing: rows.length - measured.length,
+      coveredPct: totalCapital > 0 ? capital / totalCapital * 100 : zeroWhenNoOpening ? 100 : 0,
+      returnEur: capital > 0 ? profit : null, startEur: capital > 0 ? capital : null };
+  }
   const eligible = rows.filter((r) => r.start_value_eur != null && r.start_value_eur > 0);
   const priced = eligible.filter((r) => r.own_return_pct != null);
   const totalStart = eligible.reduce((s, r) => s + r.start_value_eur!, 0);

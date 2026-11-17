@@ -210,11 +210,22 @@ def company_holdings(portfolio_id):
         entry = companies.setdefault(key, {'isin': isin, 'name': name or isin or 'Unnamed holding', 'weight_pct': 0})
         entry['weight_pct'] += number(row.get('percentage')) or 0
     return list(companies.values()), {'composition_date': portfolio.get('positions_datum'),
+                                     'retrieved_at': portfolio.get('positions_scanned_at'),
                                      'excluded_funds_cash_bonds': excluded, 'lookthrough': evidence}
 
 
+# Reviewed valuation reference: BOTH prices and EPS use the ordinary Taiwan share.
+# This is not an ADR-price conversion and must never be combined with a TSM USD quote.
+VALUATION_REFERENCE_ISINS = {'US8740391003': 'TW0002330008'}
+
+
+def reference_isin(isin):
+    return VALUATION_REFERENCE_ISINS.get(isin, isin)
+
+
 def load_inputs(isin, today):
-    # Exact ISIN only. An issuer/ADR match sufficient for notes or overlap is not sufficient for EPS.
+    # Only explicitly reviewed references may differ from the held security.
+    isin = reference_isin(isin)
     companies = (supabase.table('company').select('company_id,isin,gurufocus_exchange:gurufocus_exchange(currency_code)')
                  .eq('isin', isin).is_('out_of_scope_at', 'null').execute().data or [])
     if len(companies) != 1:
@@ -320,5 +331,109 @@ def read(portfolio_id):
                          for holding in holdings], 'method': METHOD, 'evidence': evidence}
     row = rows[0]
     return {**row['payload'], 'ready': True, 'prepared_at': row['prepared_at'],
-            'stale': (row['payload'].get('calculation_date') != date.today().isoformat()
+            'stale': (any(item.get('status') == 'pending' for item in row['payload'].get('rows', []))
+                      or row['payload'].get('calculation_date') != date.today().isoformat()
                       or row['payload'].get('evidence', {}).get('composition_date') != selected.get('composition_date'))}
+
+
+def refresh_row_sources(isin, name):
+    """Refresh only valuation inputs, overlapping independent provider requests."""
+    from concurrent.futures import ThreadPoolExecutor
+    from time import perf_counter
+    import logging
+    from fastapi import HTTPException
+    from routers._fundamental_ingest import ingest_fundamentals_for_isin
+    from asset_pipeline.company_prices import refresh_company_prices
+    from ingest.earnings import fetch_analyst_estimates, fetch_financials
+    from ingest.earnings._common import failure_message
+    from services.valuation_workbook import FORECAST_CODES
+
+    started = perf_counter()
+    reference = reference_isin(isin)
+    def mapped_companies():
+        return (supabase.table('company').select('company_id,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(exchange_code)')
+                .eq('isin', reference).is_('out_of_scope_at', 'null').execute().data or [])
+    companies = mapped_companies()
+    already_fetched = False
+    if not companies or (len(companies) == 1 and (not companies[0].get('gurufocus_ticker') or
+                         not (companies[0].get('gurufocus_exchange') or {}).get('exchange_code'))):
+        resolved = ingest_fundamentals_for_isin(reference, name, force=True, metric_codes=set(EPS_CODES))
+        status = resolved.get('status')
+        if status not in ('ingested', 'no_data'):
+            explanations = {
+                'not_found': 'GuruFocus could not resolve this ISIN. Review its listing mapping.',
+                'unsubscribed': 'The GuruFocus listing is outside the current subscription.',
+                'not_equity': 'The resolved GuruFocus listing is not an equity.',
+                'fund': 'The resolved GuruFocus listing is a fund, not a company.',
+            }
+            raise HTTPException(422 if status in explanations else 502,
+                (resolved.get('failure_reason') or explanations.get(status, 'GuruFocus mapping or financials request failed. Try again.')) +
+                ' Saved valuation retained.')
+        already_fetched = True
+        companies = mapped_companies()
+    if len(companies) != 1:
+        raise HTTPException(422, 'Review the exact company mapping before refreshing valuation.')
+    company = companies[0]
+    cid, ticker = company['company_id'], company['gurufocus_ticker']
+    exchange = (company.get('gurufocus_exchange') or {}).get('exchange_code')
+
+    # Rows remain sequential. Inside a row, Yahoo and the two GuruFocus feeds
+    # are independent. The shared provider rate limiter still governs requests.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        prices_future = pool.submit(refresh_company_prices, cid, force_refresh=True)
+        forecasts_future = pool.submit(fetch_analyst_estimates, supabase, cid, ticker, exchange,
+            force_refresh=True, metric_codes=set(FORECAST_CODES), include_history=False)
+        financials_future = None if already_fetched else pool.submit(fetch_financials, supabase, cid, ticker, exchange,
+            force_refresh=True, metric_codes=set(EPS_CODES), retry_empty=True)
+        prices = prices_future.result()
+        forecasts = forecasts_future.result()
+        financials = financials_future.result() if financials_future else None
+    if prices.error:
+        raise HTTPException(502, 'Yahoo prices could not be refreshed. Saved valuation retained.')
+    if forecasts.error or forecasts.is_forbidden or not (forecasts.rows_loaded or forecasts.rows_unchanged or forecasts.metrics_found):
+        raise HTTPException(502, failure_message(forecasts, 'annual EPS forecasts'))
+    # A valid statements response with no quarterly EPS is an unavailable
+    # historical P/E, not an outage; current prices/forecasts remain usable.
+    if financials is not None and (financials.error or financials.is_forbidden):
+        raise HTTPException(502, failure_message(financials))
+    logging.getLogger(__name__).info('Valuation source refresh %s completed in %.3fs', reference, perf_counter() - started)
+
+
+def refresh_row(portfolio_id, isin, *, existing=None, current_holdings=None, source_cache=None):
+    """Recalculate and save one current holding; retain every other saved row."""
+    from fastapi import HTTPException
+    with _publication_lock(portfolio_id):
+        existing = read(portfolio_id) if existing is None else existing
+        holdings, evidence = company_holdings(portfolio_id) if current_holdings is None else current_holdings
+        holding = next((row for row in holdings if row.get('isin') == isin), None)
+        if holding is None:
+            raise HTTPException(404, 'Company is not in this portfolio.')
+        source_key = reference_isin(isin)
+        if source_cache is None:
+            refresh_row_sources(isin, holding['name'])
+        elif source_key not in source_cache:
+            try:
+                refresh_row_sources(isin, holding['name'])
+            except Exception as exc:
+                source_cache[source_key] = exc
+                raise
+            source_cache[source_key] = None
+        elif source_cache[source_key] is not None:
+            raise source_cache[source_key]
+        today = date.today()
+        company, prices, earnings, reason = load_inputs(isin, today)
+        calculated = ({'status': 'unavailable', 'reason': reason} if reason else
+                      estimate(prices, earnings, (company.get('gurufocus_exchange') or {}).get('currency_code'), today))
+        previous = {row.get('isin'): row for row in existing['rows']}
+        rows = [{**row, **(calculated if row.get('isin') == isin else previous.get(row.get('isin'),
+                 {'status': 'pending', 'reason': 'Valuation has not been prepared yet.'}))} for row in holdings]
+        stamp = datetime.now(timezone.utc).isoformat()
+        refreshed = {**existing.get('row_refresh_dates', {}), isin: today.isoformat()}
+        complete = all(refreshed.get(row.get('isin')) == today.isoformat() for row in holdings if row.get('isin'))
+        payload = {'portfolio_id': portfolio_id,
+                   'calculation_date': today.isoformat() if complete else existing.get('calculation_date'),
+                   'method': METHOD, 'row_refresh_dates': refreshed,
+                   'rows': rows, 'evidence': evidence, 'errors': {}}
+        supabase.table(TABLE).upsert({'portfolio_id': portfolio_id, 'prepared_at': stamp,
+                                     'payload': payload}, on_conflict='portfolio_id').execute()
+        return {**payload, 'prepared_at': stamp, 'ready': True, 'stale': not complete}

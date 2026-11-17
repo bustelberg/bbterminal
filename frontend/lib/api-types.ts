@@ -2507,6 +2507,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/valuation/holdings/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Valuation Holdings */
+        post: operations["refresh_valuation_holdings_api_airs_valuation_holdings_refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/valuation/portfolios": {
         parameters: {
             query?: never;
@@ -2541,6 +2558,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/valuation/portfolios/{portfolio_id}/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valuation Dashboard */
+        get: operations["valuation_dashboard_api_airs_valuation_portfolios__portfolio_id__dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/{portfolio_id}/dashboard/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Valuation Dashboard */
+        post: operations["refresh_valuation_dashboard_api_airs_valuation_portfolios__portfolio_id__dashboard_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/valuation/portfolios/{portfolio_id}/refresh": {
         parameters: {
             query?: never;
@@ -2552,6 +2603,58 @@ export interface paths {
         put?: never;
         /** Refresh Valuation */
         post: operations["refresh_valuation_api_airs_valuation_portfolios__portfolio_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/{portfolio_id}/rows/{isin}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Valuation Row */
+        post: operations["refresh_valuation_row_api_airs_valuation_portfolios__portfolio_id__rows__isin__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/{portfolio_id}/workbook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valuation Workbook */
+        get: operations["valuation_workbook_api_airs_valuation_portfolios__portfolio_id__workbook_get"];
+        /** Save Valuation Workbook */
+        put: operations["save_valuation_workbook_api_airs_valuation_portfolios__portfolio_id__workbook_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/{portfolio_id}/workbook/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valuation Workbook Memberships */
+        get: operations["valuation_workbook_memberships_api_airs_valuation_portfolios__portfolio_id__workbook_memberships_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7445,6 +7548,91 @@ export interface paths {
         get: operations["frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/management/topselecties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Management Topselecties */
+        get: operations["management_topselecties_api_leonteq_management_topselecties_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/management/topselecties/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Management Dashboard Topselecties */
+        get: operations["management_dashboard_topselecties_api_leonteq_management_topselecties_dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/management/topselecties/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Management Topselectie */
+        get: operations["management_topselectie_api_leonteq_management_topselecties__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/management/topselecties/{name}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Management Topselectie Analysis */
+        get: operations["management_topselectie_analysis_api_leonteq_management_topselecties__name__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/management/topselecties/{name}/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Management Topselectie */
+        post: operations["refresh_management_topselectie_api_leonteq_management_topselecties__name__refresh_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -16608,6 +16796,10 @@ export interface components {
              * @default false
              */
             stale?: boolean;
+            /** Workbook */
+            workbook?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** ValuationPortfolio */
         ValuationPortfolio: {
@@ -16728,6 +16920,101 @@ export interface components {
             ticker?: string | null;
             /** Weight Pct */
             weight_pct: number;
+        };
+        /** WorkbookAssumptions */
+        WorkbookAssumptions: {
+            /** Companies */
+            companies?: {
+                [key: string]: components["schemas"]["WorkbookCompanyAssumption"];
+            };
+            parameters: components["schemas"]["WorkbookParameters"];
+        };
+        /** WorkbookCompanyAssumption */
+        WorkbookCompanyAssumption: {
+            /** Basis Currency */
+            basis_currency?: string | null;
+            /** Basis Date */
+            basis_date?: string | null;
+            /** Basis Fx */
+            basis_fx?: number | null;
+            /**
+             * Basis Kind
+             * @default forward_eps
+             * @enum {string}
+             */
+            basis_kind?: "forward_eps" | "manual";
+            /**
+             * Basis Label
+             * @default
+             */
+            basis_label?: string;
+            /** Basis Source */
+            basis_source?: string | null;
+            /** Exit Multiple */
+            exit_multiple?: number | null;
+            /** Fair Multiple */
+            fair_multiple?: number | null;
+            /** Growth */
+            growth?: number | null;
+            /** Manual Basis */
+            manual_basis?: number | null;
+            /** Months Fy1 */
+            months_fy1?: number | null;
+            /**
+             * Review Required
+             * @default false
+             */
+            review_required?: boolean;
+            /**
+             * Risk Note
+             * @default
+             */
+            risk_note?: string;
+        };
+        /** WorkbookParameters */
+        WorkbookParameters: {
+            /**
+             * Bear Growth Delta
+             * @default -0.05
+             */
+            bear_growth_delta?: number;
+            /**
+             * Bear Multiple Delta
+             * @default -0.25
+             */
+            bear_multiple_delta?: number;
+            /**
+             * Bull Growth Delta
+             * @default 0.05
+             */
+            bull_growth_delta?: number;
+            /**
+             * Bull Multiple Delta
+             * @default 0.25
+             */
+            bull_multiple_delta?: number;
+            /**
+             * Safety Margin
+             * @default 0.2
+             */
+            safety_margin?: number;
+            /**
+             * Years
+             * @default 3
+             */
+            years?: number;
+        };
+        /** WorkbookSaveResult */
+        WorkbookSaveResult: {
+            /** Companies */
+            companies?: {
+                [key: string]: components["schemas"]["WorkbookCompanyAssumption"];
+            };
+            parameters: components["schemas"]["WorkbookParameters"];
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Updated At */
+            updated_at: string;
         };
         /** YearStat */
         YearStat: {
@@ -20089,6 +20376,37 @@ export interface operations {
             };
         };
     };
+    refresh_valuation_holdings_api_airs_valuation_holdings_refresh_job_post: {
+        parameters: {
+            query?: {
+                source?: "all" | "airs" | "leonteq";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     valuation_portfolios_api_airs_valuation_portfolios_get: {
         parameters: {
             query?: never;
@@ -20140,6 +20458,68 @@ export interface operations {
             };
         };
     };
+    valuation_dashboard_api_airs_valuation_portfolios__portfolio_id__dashboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_valuation_dashboard_api_airs_valuation_portfolios__portfolio_id__dashboard_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     refresh_valuation_api_airs_valuation_portfolios__portfolio_id__refresh_post: {
         parameters: {
             query?: {
@@ -20160,6 +20540,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValuationBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_valuation_row_api_airs_valuation_portfolios__portfolio_id__rows__isin__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationBundle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    valuation_workbook_api_airs_valuation_portfolios__portfolio_id__workbook_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_valuation_workbook_api_airs_valuation_portfolios__portfolio_id__workbook_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkbookAssumptions"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbookSaveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    valuation_workbook_memberships_api_airs_valuation_portfolios__portfolio_id__workbook_memberships_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -26394,6 +26903,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    management_topselecties_api_leonteq_management_topselecties_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    management_dashboard_topselecties_api_leonteq_management_topselecties_dashboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    management_topselectie_api_leonteq_management_topselecties__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    management_topselectie_analysis_api_leonteq_management_topselecties__name__analysis_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                include_holding_risk?: boolean;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_management_topselectie_api_leonteq_management_topselecties__name__refresh_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

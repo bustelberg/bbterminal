@@ -3,6 +3,8 @@ import asyncio
 
 from fastapi import APIRouter, Path
 from pydantic import BaseModel, Field
+from pydantic import ConfigDict
+from typing import Literal
 
 from services import portfolio_valuation as service
 
@@ -47,8 +49,47 @@ class ValuationBundle(BaseModel):
     calculation_date: str | None = None
     detail: str | None = None
     method: dict
+    workbook: dict | None = None
     evidence: dict = Field(default_factory=dict)
     rows: list[ValuationRow]
+
+
+class WorkbookParameters(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    years: int = Field(default=3, ge=1, le=30)
+    safety_margin: float = Field(default=.2, ge=0, lt=1)
+    bear_growth_delta: float = Field(default=-.05, ge=-2, le=2)
+    bear_multiple_delta: float = Field(default=-.25, gt=-1, le=10)
+    bull_growth_delta: float = Field(default=.05, ge=-2, le=2)
+    bull_multiple_delta: float = Field(default=.25, gt=-1, le=10)
+
+
+class WorkbookCompanyAssumption(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    growth: float | None = Field(default=None, gt=-1, le=10)
+    fair_multiple: float | None = Field(default=None, gt=0)
+    exit_multiple: float | None = Field(default=None, gt=0)
+    risk_note: str = Field(default='', max_length=2000)
+    review_required: bool = False
+    basis_kind: Literal['forward_eps', 'manual'] = 'forward_eps'
+    basis_label: str = Field(default='', max_length=200)
+    manual_basis: float | None = None
+    basis_currency: str | None = Field(default=None, max_length=10)
+    basis_date: str | None = Field(default=None, max_length=100)
+    basis_source: str | None = Field(default=None, max_length=1000)
+    basis_fx: float | None = Field(default=None, gt=0)
+    months_fy1: float | None = Field(default=None, ge=0, le=12)
+
+
+class WorkbookAssumptions(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    parameters: WorkbookParameters
+    companies: dict[str, WorkbookCompanyAssumption] = Field(default_factory=dict, max_length=500)
+
+
+class WorkbookSaveResult(WorkbookAssumptions):
+    portfolio_id: int
+    updated_at: str
 
 
 @router.get('/api/airs/valuation/portfolios', response_model=list[ValuationPortfolio])
@@ -64,3 +105,90 @@ async def valuation_bundle(portfolio_id: int = Path(ge=1)):
 @router.post('/api/airs/valuation/portfolios/{portfolio_id}/refresh', response_model=ValuationBundle)
 async def refresh_valuation(portfolio_id: int = Path(ge=1), force: bool = False):
     return await asyncio.to_thread(service.refresh, portfolio_id, force=force)
+
+
+@router.get('/api/airs/valuation/portfolios/{portfolio_id}/workbook')
+async def valuation_workbook(portfolio_id: int = Path(ge=1)):
+    from services import valuation_workbook
+    return await asyncio.to_thread(valuation_workbook.read, portfolio_id, include_membership=False)
+
+
+@router.put('/api/airs/valuation/portfolios/{portfolio_id}/workbook', response_model=WorkbookSaveResult)
+async def save_valuation_workbook(body: WorkbookAssumptions, portfolio_id: int = Path(ge=1)):
+    from services import valuation_dashboard as dashboard
+    return await asyncio.to_thread(dashboard.save_settings, portfolio_id, body.model_dump())
+
+
+@router.post('/api/airs/valuation/portfolios/{portfolio_id}/rows/{isin}/refresh', response_model=ValuationBundle)
+async def refresh_valuation_row(isin: str, portfolio_id: int = Path(ge=1)):
+    from services import valuation_workbook
+    def refresh():
+        bundle = service.refresh_row(portfolio_id, isin)
+        return {**bundle, 'workbook': valuation_workbook.read(portfolio_id, only_isin=isin, prepared_bundle=bundle)}
+    return await asyncio.to_thread(refresh)
+
+
+@router.get('/api/airs/valuation/portfolios/{portfolio_id}/workbook/memberships')
+async def valuation_workbook_memberships(portfolio_id: int = Path(ge=1)):
+    from services.portfolio_membership import read
+    def memberships():
+        service.read(portfolio_id)  # Enforce the same dashboard scope as the table.
+        return read()
+    return await asyncio.to_thread(memberships)
+
+
+@router.post('/api/airs/valuation/holdings/refresh/job')
+async def refresh_valuation_holdings(source: Literal['all', 'airs', 'leonteq'] = 'all'):
+    import jobs
+    from services.portfolio_membership import refresh_holdings
+    job, reused = jobs.start('valuation.holdings.refresh', source, lambda ctx: refresh_holdings(ctx, source=source))
+    return {'job_id': job.id, 'label': source, 'already_running': reused}
+
+
+@router.get('/api/airs/valuation/portfolios/{portfolio_id}/dashboard', response_model=ValuationBundle)
+async def valuation_dashboard(portfolio_id: int = Path(ge=1)):
+    from services import valuation_dashboard as dashboard
+    return await asyncio.to_thread(dashboard.read, portfolio_id)
+
+
+@router.post('/api/airs/valuation/portfolios/{portfolio_id}/dashboard/refresh')
+async def refresh_valuation_dashboard(portfolio_id: int = Path(ge=1)):
+    import queue
+    import threading
+    from fastapi import HTTPException
+    from fastapi.responses import StreamingResponse
+    from jobs import JobCancelled
+    from routers._sse import sse_event, sse_keepalive
+    from services import valuation_dashboard as dashboard
+
+    events = queue.Queue()
+    cancelled = threading.Event()
+    def check():
+        if cancelled.is_set():
+            raise JobCancelled()
+    def run():
+        try:
+            dashboard.refresh(portfolio_id, events.put, check)
+        except JobCancelled:
+            events.put({'type': 'cancelled'})
+        except Exception as exc:
+            message = exc.detail if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else 'Portfolio refresh failed. Completed data was saved.'
+            events.put({'type': 'error', 'message': message})
+        finally:
+            events.put(None)
+    async def stream():
+        threading.Thread(target=run, daemon=True).start()
+        try:
+            while True:
+                try:
+                    event = await asyncio.to_thread(events.get, True, 15)
+                except queue.Empty:
+                    yield sse_keepalive()
+                    continue
+                if event is None:
+                    break
+                yield sse_event(event)
+        finally:
+            cancelled.set()
+    return StreamingResponse(stream(), media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})

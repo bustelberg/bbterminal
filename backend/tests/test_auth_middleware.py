@@ -259,6 +259,7 @@ class TestManagementDashboardRefreshesAreOpen:
 
     # Exactly what the three tabs fire, by the button that fires it.
     REFRESHES = (
+        ("POST", "/api/leonteq/management/topselecties/AITopSelectie/refresh/job"),
         # Overview → "Refresh all from AIRS", both halves.
         ("POST", "/api/airs/vermogen/refresh/job"),
         ("POST", "/api/airs/portfolio/risk-correlation/repair/job"),
@@ -329,6 +330,8 @@ class TestExpandingAnAccountIsUserAccessible:
     """Every authenticated dashboard user can inspect a book, not just its summary."""
 
     EXPANDED = ("/api/airs/accounts/BUS_X/holdings",
+                "/api/leonteq/management/topselecties",
+                "/api/leonteq/management/topselecties/AITopSelectie",
                 "/api/airs/accounts/BUS_X/transactions",
                 "/api/airs/accounts/BUS_X/return-reconciliation",
                 "/api/airs/accounts/BUS_X/linkable")
@@ -644,3 +647,11 @@ def test_isin_notes_keep_the_same_private_user_access_as_company_notes(monkeypat
     assert _run(monkeypatch, 'GET', path, 'user') == (200, True)
     assert _run(monkeypatch, 'DELETE', path, 'user') == (403, False)
     assert _run(monkeypatch, 'PUT', path + '/other', 'user') == (403, False)
+
+
+def test_valuation_workbook_assumptions_are_an_exact_authenticated_user_write(monkeypatch):
+    path = '/api/airs/valuation/portfolios/7/workbook'
+    assert _run(monkeypatch, 'PUT', path, 'user') == (200, True)
+    assert _run(monkeypatch, 'PUT', path, None) == (401, False)
+    assert _run(monkeypatch, 'PUT', path + '/other', 'user') == (403, False)
+    assert _run(monkeypatch, 'DELETE', path, 'user') == (403, False)

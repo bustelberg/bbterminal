@@ -2,12 +2,24 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it, vi } from 'vitest';
 import HoldingReturnExplanation from './HoldingReturnExplanation';
+import { HoldingsColumnSource } from './HoldingsColumnExplanation';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 
 vi.mock('../../../lib/i18n', () => ({ useLang: () => ['en'] }));
 type Holding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 const base: Holding = { bucket: 'Equity', name: 'Alphabet - C', own_return_pct: 6.38, own_return_source: 'airs',
   own_return_from: '2026-01-01', own_return_as_of: '2026-10-23', own_return_book: 'Child portfolio' };
+
+it('identifies source AVG Performance without calling it YTD or EUR performance', () => {
+  const html = renderToStaticMarkup(<HoldingsColumnSource.Provider value="Leonteq">
+    <HoldingReturnExplanation holding={{ bucket: 'Equity', name: 'Stock', own_return_pct: -12.34, own_return_source: 'leonteq_average' }} />
+  </HoldingsColumnSource.Provider>);
+  expect(html).toContain('AVG Performance reported by Leonteq');
+  expect(html).toContain('different period');
+  expect(html).toContain('-12.34%');
+  expect(html).not.toContain('· EUR');
+  expect(html).not.toContain('Based on AIRS');
+});
 
 it('uses the holding’s own valuation date and book instead of the newer parent snapshot', () => {
   const html = renderToStaticMarkup(<HoldingReturnExplanation holding={base} asOf="2026-10-30" />);

@@ -1,7 +1,7 @@
 'use client';
 
 import BenchmarkMembershipMark from './BenchmarkMembershipMark';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
@@ -15,7 +15,7 @@ import InfoTip from '../InfoTip';
 import { benchmarkPriceEur } from './benchmarkPrice';
 import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
 import HoldingReturnExplanation from './HoldingReturnExplanation';
-import HoldingsColumnExplanation from './HoldingsColumnExplanation';
+import HoldingsColumnExplanation, { HoldingsColumnSource, HoldingsAccountingContext, useHoldingReturnLabel } from './HoldingsColumnExplanation';
 import { formatPct, visibleBuckets } from './composition';
 import {
   allocColor, ALWAYS_SHOWN_BUCKETS, bucketLabel, CASH_BUCKET, EQUITY_BUCKET,
@@ -283,7 +283,8 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
   const r2 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100) / 100);
   const p = r2(r?.portfolio_ytd_pct);
   const b = r2(r?.benchmark_ytd_pct);
-  const excess = p == null || b == null ? r?.ytd_excess_pct : p - b;
+  const comparisonUnavailable = r?.source === 'leonteq' && r.ytd_excess_pct == null;
+  const excess = comparisonUnavailable ? null : p == null || b == null ? r?.ytd_excess_pct : p - b;
   //  Which benchmark this is. The tile reads the index ETF's own price series where one exists;
   // the Attribution panel below still decomposes the constituent reconstruction, because an ETF
   // price has no constituents in it. The two differ by ~2.8pp on ACWI YTD, so the ⓘ card names
@@ -300,7 +301,8 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
   }, copy.lang as 'en' | 'nl');
   // The portfolio leg's own source follows the Book/Strategy toggle — AIRS's flow-aware account
   // return, or our yfinance reconstruction of the model.
-  const pSrc: SourceKey = r?.source === 'book' ? 'airs_att' : 'yfinance';
+  const pSrc: SourceKey = r?.source === 'leonteq' ? 'leonteq' : r?.source === 'book' ? 'airs_att' : 'yfinance';
+  const reportedReturn = r?.source === 'book' || r?.source === 'leonteq';
   // Chips stretch to equal height; operators keep their own vertical centre.
   const op = 'text-base font-mono text-fg-faint shrink-0 self-center';
   return (
@@ -323,9 +325,10 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
           yfinance closes), so the two cannot share a tag. */}
       <Chip label={`${name} (YTD) €`} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
         prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of}
-          kind={r?.source === 'book' ? undefined : 'formula'}
-          what={copy.score.portfolioWhat} note={copy.score.portfolioNote}
-          how={r?.source === 'book' ? undefined : copy.score.portfolioHowModel} />} />
+          kind={reportedReturn ? undefined : 'formula'}
+          what={r?.source === 'leonteq' ? 'Year-to-date return reported by Leonteq LYNQS.' : copy.score.portfolioWhat}
+          note={r?.source === 'leonteq' ? undefined : copy.score.portfolioNote}
+          how={reportedReturn ? undefined : copy.score.portfolioHowModel} />} />
       <span className={op} aria-hidden>−</span>
       {/*  `at={undefined}` SO THIS BADGE DOES NOT INHERIT THE HOLDINGS' SCAN TIME. The subtree is
           wrapped in `ProvenanceFetchedAt at={holdings_fetched_at}` — which is when we last read
@@ -337,14 +340,15 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
           valueClass={tone(r?.benchmark_ytd_pct)}
           prov={<Provenance source={blocks.length ? 'derived' : bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind={blocks.length ? undefined : 'formula'}
             what={blocks.length ? 'Weighted stock-and-bond benchmark return for this risk profile.' : bp.what}
-            note={blocks.length ? 'Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation.' : bp.note}
+            note={blocks.length ? 'Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation.'
+              : r?.source === 'leonteq' && r.book_reason ? r.book_reason : bp.note}
             how={blocks.length ? 'ACWI and the bond proxy are combined at the configured risk-profile weights; alternatives and cash are excluded.' : bp.how}
             calculation={blockCalculation} onRefresh={refreshBenchmark}
             fetchedAt={r?.benchmark_fetched_at} />} />
       </ProvenanceFetchedAt>
       <span className={op} aria-hidden>=</span>
       <Chip label={copy.score.excess} value={spp(excess)} valueClass={tone(excess)}
-        hint={copy.score.excessHint} />
+        hint={r?.source === 'leonteq' && r.book_reason ? r.book_reason : copy.score.excessHint} />
     </div>
   );
 }
@@ -2112,6 +2116,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    *  behind a certificate, and this is the only thing that tells the two apart. */
   bookName?: string | null;
 }) {
+  const instrumentReturnLabel = useHoldingReturnLabel();
+  const portfolioSource = useContext(HoldingsColumnSource);
+  const bookSource: SourceKey = portfolioSource === 'Leonteq' ? 'leonteq' : 'airs_volk';
   const [sortKey, setSortKey] = useState<HoldingSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   /**
@@ -2532,7 +2539,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {copy.holdings.moneyWeighted}
               </th>}
               <th className={`text-right w-32 pr-4 ${th}`} onClick={() => click('return')}>
-                {copy.holdings.instrumentReturn}{caret('return')}
+                {instrumentReturnLabel}{caret('return')}
               </th>
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
                 {copy.holdings.contribution}{caret('contribution')}
@@ -2584,7 +2591,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {num2(g.weightNowPct)}%
                   <InfoTip className="ml-1" content={<SimpleExplanation details={<>
                     <p>{eur0n(g.sum.valuenow)} / {eur0n(grand.valuenow)} · {num2(g.weightNowPct)}%</p>
-                    <p>{facts.dated('AIRS', asOf)}</p>
+                    <p>{facts.dated(portfolioSource, asOf)}</p>
                   </>}>{copy.classRow.weightExplanation}</SimpleExplanation>} />
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
@@ -2601,7 +2608,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('unsplit') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.unsplit)}`}>{eur0n(g.sum.unsplit)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.unsplit, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
                 {show('moneyweighted') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
                   {fmtRet(g.sum.mwr)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                  <Provenance source={bookSource} asOf={asOf} kind="formula"
                     what={copy.classRow.moneyWhat(copy.bucket(bucketLabel(g.bucket)))}
                     note={copy.info.moneyAggregateNote}
                     how={copy.classRow.moneyHow(eur0n(g.sum.mwrResult), eur0n(g.sum.avgcapital), fmtRet(g.sum.mwr), g.sum.mwrRows, g.rows.length)} />
@@ -2624,13 +2631,16 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     {g.ret.pct != null && <p>{g.ret.startEur != null && g.ret.startEur > 0 && g.ret.returnEur != null
                       ? <>{eur0n(g.ret.returnEur)} / {eur0n(g.ret.startEur)} = {fmtRet(g.ret.pct)}</>
                       : fmtRet(g.ret.pct)}</p>}
-                    <p>{facts.dated('AIRS', asOf)}</p>
+                    <p>{facts.dated(portfolioSource, asOf)}</p>
                     {g.ret.pct != null && g.ret.coveredPct < 99.5 && <p>{copy.classRow.coverageTitle(
                       num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.missing)}</p>}
                   </>}>{g.ret.pct == null
                     ? copy.classRow.noReturn(copy.bucket(bucketLabel(g.bucket)))
                     : g.bucket === CASH_BUCKET && g.ret.startEur == null ? copy.classRow.cashReturnExplanation
-                      : copy.classRow.returnExplanation}</SimpleExplanation>} />
+                      : portfolioSource === 'Leonteq'
+                        ? (copy.lang === 'nl' ? 'Netto Leonteq-resultaat gedeeld door openingswaarde plus aankopen; geen tijdgewogen klasserendement.'
+                          : 'Net Leonteq profit divided by opening value plus purchases; not a time-weighted class return.')
+                        : copy.classRow.returnExplanation}</SimpleExplanation>} />
                 </td>
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
                   {ppt(g.sum.contribution)}
@@ -2873,7 +2883,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {show('valuenow') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.current_value_eur)}</td>}
                   {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>
                     {eur0n(h.avg_capital_eur)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    <Provenance source={bookSource} asOf={asOf} kind="formula"
                       what={copy.info.avgCapitalWhat(h.name ?? copy.row.thisPosition)}
                       note={copy.info.avgCapitalNote}
                       how={copy.info.avgCapitalHow(eur0n(h.avg_capital_eur))} />
@@ -2883,7 +2893,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>
                     {eur0n(h.result_eur)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    <Provenance source={bookSource} asOf={asOf} kind="formula"
                       what={copy.info.resultWhat(h.name ?? copy.row.thisPosition)}
                       note={copy.info.resultNote}
                       how={copy.info.resultHow(eur0n(h.unrealised_eur), eur0n(h.realised_result_eur), eur0n(h.income_eur), eur0n(h.result_eur))} />
@@ -2896,7 +2906,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {show('unsplit') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unsplit_result_eur)}`}>{eur0n(h.unsplit_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.unsplit_result_eur, h.avg_capital_eur))}</span>}</td>}
                   {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    <Provenance source={bookSource} asOf={asOf} kind="formula"
                       what={h.capital_source === 'lookthrough'
                         ? copy.row.moneyLookthroughWhat(h.capital_book ?? copy.row.strategyBehindCertificate, h.name ?? copy.row.thisPosition)
                         : h.money_weighted_return_pct != null
@@ -3077,7 +3087,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('unsplit') && <td />}
                 {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
                   {fmtRet(soldSum.mwr)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                  <Provenance source={bookSource} asOf={asOf} kind="formula"
                     what={copy.info.soldMoneyWhat}
                     note={copy.info.moneyAggregateNote}
                     how={copy.info.moneyAggregateHow(eur0n(soldSum.mwrResult), eur0n(soldCap), fmtRet(soldSum.mwr))} />
@@ -3209,7 +3219,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {show('unsplit') && <td />}
                   {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
                     {fmtRet(p.return_pct)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    <Provenance source={bookSource} asOf={asOf} kind="formula"
                       what={copy.sold.moneyWhat(p.name ?? copy.row.thisPosition)}
                       note={copy.info.moneyNote}
                       worked={moneyWeightedWorked(p.money_weighted_cashflows, p.return_pct)}
@@ -3283,7 +3293,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('unsplit') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.unsplit)}`}>{eur0n(grand.unsplit)}</td>}
                 {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
                   {fmtRet(grand.mwr)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                  <Provenance source={bookSource} asOf={asOf} kind="formula"
                     what={copy.info.bookMoneyWhat}
                     note={copy.info.moneyAggregateNote}
                     how={copy.info.moneyAggregateHow(eur0n(grand.mwrResult), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
@@ -3291,19 +3301,19 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
                   <InfoTip className="ml-1" content={<SimpleExplanation details={<>
-                    <p>{fmtRet(realised?.book_ytd_pct)} · {facts.dated('AIRS', realised?.book_as_of)}</p>
+                    <p>{fmtRet(realised?.book_ytd_pct)} · {facts.dated(portfolioSource, realised?.book_as_of)}</p>
                     {!reconciliationKnown && <p>{copy.lang === 'nl'
                       ? 'De aansluiting met de berekende bijdragen is nog niet gecontroleerd.'
                       : 'The match with calculated contributions has not yet been verified.'}</p>}
-                  </>}>{copy.lang === 'nl' ? 'Het totale portefeuillerendement zoals gerapporteerd door AIRS.'
-                    : 'The total portfolio return reported by AIRS.'}</SimpleExplanation>} />
+                  </>}>{copy.lang === 'nl' ? `Het totale portefeuillerendement zoals gerapporteerd door ${portfolioSource}.`
+                    : `The total portfolio return reported by ${portfolioSource}.`}</SimpleExplanation>} />
                 </td>
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(displayedReconciliation?.reported ?? grand.contribution)}`}>
                   {ppt(displayedReconciliation?.reported ?? grand.contribution)}
                   <InfoTip className="ml-1" content={displayedReconciliation
                     ? <SimpleExplanation details={<>
                         <p>{ppt(displayedReconciliation.calculated)} + ({ppt(displayedReconciliation.missing)}) = {ppt(displayedReconciliation.reported)}</p>
-                        <p>{facts.dated('AIRS', realised?.book_as_of)}</p>
+                        <p>{facts.dated(portfolioSource, realised?.book_as_of)}</p>
                       </>}>{copy.lang === 'nl'
                         ? 'Berekende bijdragen plus het apart getoonde, nog niet verklaarde verschil met AIRS.'
                         : 'Calculated contributions plus the separately shown unexplained difference from AIRS.'}</SimpleExplanation>
@@ -3354,6 +3364,7 @@ function SleeveTile({ bucket, slices, asOf }: {
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
 function SleeveBreakdown({ holdings, bucket, groupCash }: { holdings: BookHolding[]; bucket: string; groupCash: boolean }) {
+  const instrumentReturnLabel = useHoldingReturnLabel();
   const copy = useAnalyseCopy();
   // Sortable table — click a header to toggle direction. Default: weight, largest first.
   const [sortKey, setSortKey] = useState<SleeveSortKey>('weight');
@@ -3427,7 +3438,7 @@ function SleeveBreakdown({ holdings, bucket, groupCash }: { holdings: BookHoldin
                 <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>{copy.holdings.name}{caret('name')}</th>
                 <th className="py-1 px-2 text-left font-medium whitespace-nowrap">{copy.sleeve.currency}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.holdings.weightNow}{caret('weight')}</th>
-                <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{copy.holdings.instrumentReturn}{caret('return')}</th>
+                <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{instrumentReturnLabel}{caret('return')}</th>
                 <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}
                   <Provenance source="airs_volk" kind="formula"
                     what={copy.lang === 'nl' ? 'Bijdrage aan het gehele portefeuillerendement, in procentpunten.' : 'Contribution to the whole portfolio return, in percentage points.'} />
@@ -3522,10 +3533,12 @@ const HEADER_CTL_BASE = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border bg
 const HEADER_CTL = `${HEADER_CTL_BASE} border-neutral-700 text-fg-soft `
   + 'hover:text-accent-300 hover:border-accent-500/50';
 export default function PortfolioAnalysisModal({
-  id, name, basket, reportAccount, onRefresh, refreshing = false, refreshTick = null,
+  id, name, basket, leonteqPortfolio, reportAccount, onRefresh, refreshing = false, refreshTick = null,
   refreshSeq = 0, onClose,
 }: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
+  /** Authoritative Leonteq portfolio, with source-valued holdings and reported returns. */
+  leonteqPortfolio?: string;
   /** Exact dashboard account, including accounts without a linked model. */
   reportAccount?: string;
   /**
@@ -3561,7 +3574,7 @@ export default function PortfolioAnalysisModal({
   // A basket (a single stock, a group) is treated as a portfolio-of-N: same view, but yfinance-only
   // (no AIRS book) and no id-based drill-downs (attribution / bucket detail are portfolio-only).
   const isBasket = !!basket;
-  const reqKey = isBasket ? basket!.holdings.map((h) => `${h.isin}:${h.weight}`).join(',') : `id:${id}`;
+  const reqKey = leonteqPortfolio ? `leonteq:aligned-returns:${leonteqPortfolio}` : isBasket ? basket!.holdings.map((h) => `${h.isin}:${h.weight}`).join(',') : `id:${id}`;
   const benchmark = DEFAULT_BENCHMARK;
   // Where the PORTFOLIO numbers come from — FIXED, no toggle. A model portfolio uses the paired
   // AIRS book (its ACTUAL holdings, EUR weights and returns); a basket has no book, so it uses the
@@ -3729,9 +3742,9 @@ export default function PortfolioAnalysisModal({
     setError(null);
     const analysisKey = viewKey;
     const revision = detailsRevision;
-    const chartsOnly = assetFilter === EQUITY_BUCKET && data?.benchmark === benchmark
+    const chartsOnly = !leonteqPortfolio && assetFilter === EQUITY_BUCKET && data?.benchmark === benchmark
       && loadedRevision.current === revision;
-    const preparedOverview = !isBasket && !assetFilter && benchmark === 'ACWI'
+    const preparedOverview = !leonteqPortfolio && !isBasket && !assetFilter && benchmark === 'ACWI'
       && source === 'book' && !includeHoldingRisk;
     const cachedDetails = !preparedOverview && assetFilter !== EQUITY_BUCKET && holdingDetails.current?.revision === revision
       ? holdingDetails.current.value : null;
@@ -3740,7 +3753,9 @@ export default function PortfolioAnalysisModal({
     void (async () => {
       try {
         const analysis = cachedDetails ? Promise.resolve(cachedDetails) : loadPrefetchedAnalysis(requestKey, async () => {
-          const r = isBasket
+          const r = leonteqPortfolio
+            ? await apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}/analysis?benchmark=${benchmark}&include_holding_risk=${includeHoldingRisk}`)
+            : isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
             : preparedOverview
             ? await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/overview-bundle?look_through=${lookThrough}`)
@@ -3806,7 +3821,7 @@ export default function PortfolioAnalysisModal({
     // rebuilds the composition, prices and FX this payload is derived from, so without it the
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk]);
+  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk, leonteqPortfolio]);
 
   // Receiving the payload and displaying it are different moments. Keep the sector job running
   // through the commit and the next paint, so its completed state cannot precede the changed row.
@@ -3914,7 +3929,7 @@ export default function PortfolioAnalysisModal({
   // button. Retry the read a few times while the single background Yahoo worker stores metadata
   // and history, then leave the explicit pending state visible instead of spinning forever.
   useEffect(() => {
-    if (isBasket || !data?.asset_data_missing_isins?.length) return;
+    if (leonteqPortfolio || isBasket || !data?.asset_data_missing_isins?.length) return;
     const missing = [...new Set(data.asset_data_missing_isins)].sort();
     const key = `${id ?? ''}|${missing.join(',')}`;
     const attempt = assetRetryCount.current.get(key) ?? 0;
@@ -3939,7 +3954,7 @@ export default function PortfolioAnalysisModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [data, id, isBasket]);
+  }, [data, id, isBasket, leonteqPortfolio]);
 
   // The selected class (null = nothing selected = the whole portfolio). A basket is never a
   // portfolio-of-classes, so it stays on the whole-basket view.
@@ -3970,6 +3985,8 @@ export default function PortfolioAnalysisModal({
         ABSENT FOR A BASKET, which has no AIRS portfolio behind it — `onRefresh` is undefined
        there, so the provider supplies nothing and no button appears. A control that cannot work is
        worse than none. */
+    <HoldingsColumnSource.Provider value={leonteqPortfolio ? 'Leonteq' : 'AIRS'}>
+    <HoldingsAccountingContext.Provider value={leonteqPortfolio ? { available: !!data?.realised?.available, note: data?.book_note } : null}>
     <ProvenanceRefresh action={onRefresh ? {
       run: async () => {
         onRefresh();
@@ -4106,7 +4123,7 @@ export default function PortfolioAnalysisModal({
                       onReload={() => setReloadSeq((n) => n + 1)} fillWidth />
                         <nav aria-label={copy.lang === 'nl' ? 'Verdieping' : 'Further analysis'}
                           className="col-start-1 row-start-2 flex w-max max-w-full min-h-11 items-stretch justify-self-end self-stretch gap-2 sm:col-span-5 @[44rem]/overview:col-span-1 @[44rem]/overview:col-start-6 @[44rem]/overview:row-start-1">
-                          {(reportAccount || (!isBasket && id != null)) && (
+                          {(leonteqPortfolio || reportAccount || (!isBasket && id != null)) && (
                             <button type="button" onClick={() => { setRisk(false); setReportOpen(true); }}
                               title={copy.score.attributionTitle}
                               className="flex w-auto flex-none items-center justify-center whitespace-nowrap rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
@@ -4395,7 +4412,7 @@ export default function PortfolioAnalysisModal({
             //  The two AIRS scans are different sources, and this modal is the only place that
             // knows which one it opened — a model portfolio's composition or an account's own
             // Vermogensoverzicht. Same distinction `source` already draws for the return.
-            portfolioSource={source === 'model' ? 'airs_model' : 'airs_volk'}
+            portfolioSource={leonteqPortfolio ? 'leonteq' : source === 'model' ? 'airs_model' : 'airs_volk'}
             onClose={() => setRisk(false)} />}
           </div>
         </div>
@@ -4407,7 +4424,9 @@ export default function PortfolioAnalysisModal({
             ← Back to analysis
           </button>
           <div className="min-h-0 flex-1 overflow-auto">
-          <MonthlyReportPanel portefeuille={reportAccount ?? data.book_portefeuille} name={name} variant={data.variant} />
+          <MonthlyReportPanel portefeuille={leonteqPortfolio ? undefined : reportAccount ?? data.book_portefeuille}
+            leonteqPortfolio={leonteqPortfolio} leonteqReturns={leonteqPortfolio ? data.returns ?? undefined : undefined}
+            benchmarkName={data.benchmark ?? benchmark} name={name} variant={data.variant} />
           </div>
         </div>
       )}
@@ -4424,5 +4443,7 @@ export default function PortfolioAnalysisModal({
     </div>
     </ProvenanceFetchedAt>
     </ProvenanceRefresh>
+    </HoldingsAccountingContext.Provider>
+    </HoldingsColumnSource.Provider>
   );
 }

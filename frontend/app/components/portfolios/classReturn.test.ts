@@ -5,6 +5,15 @@ const row = (start_value_eur: number | null, own_return_pct: number | null): Cla
   ({ start_value_eur, own_return_pct });
 
 describe('classWeightedReturn', () => {
+  it('aggregates Leonteq cash-flow returns on committed capital instead of AIRS opening weights', () => {
+    const result = classWeightedReturn([
+      { own_return_source: 'leonteq_transactions', start_value_eur: 100, avg_capital_eur: 200, own_return_pct: 10, result_eur: 20 },
+      { own_return_source: 'leonteq_transactions', start_value_eur: 100, avg_capital_eur: 100, own_return_pct: 0, result_eur: 0 },
+    ]);
+    expect(result.pct).toBeCloseTo(20 / 300 * 100);
+    expect(result.startEur).toBe(300);
+    expect(result.returnEur).toBe(20);
+  });
   it('opening-value weights the same AIRS returns printed on the child rows', () => {
     const r = classWeightedReturn([row(900, 10), row(100, -10)]);
     expect(r.pct).toBeCloseTo(8, 10);

@@ -1157,6 +1157,10 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
     strategy map used for the nickname and certificate link. Express its latest EUR values as
     percentages so the normal expansion path can consume it without special cases.
     """
+    from leonteq.management import positions_for_identity
+    leonteq = positions_for_identity(holding_name)
+    if leonteq is not None:
+        return leonteq
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
 
@@ -1713,6 +1717,11 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
     out: dict[int, dict[str, dict]] = {}
     for mid in sorted(model_ids):
         pf = by_model.get(mid)
+        from leonteq.management import entry_for_identity
+        if entry_for_identity(pf):
+            # Leonteq has no equivalent year-opening ledger in this adapter. Never attach
+            # AIRS valuations/income to Leonteq constituents.
+            continue
         if not pf:
             _log.warning("[analysis] wrapped model %s has no paired AIRS account — its legs fall "
                          "back to the price series", mid)
@@ -2065,17 +2074,10 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         net_income = _net_income(r)
         own_book = None
         routes = _weigh_sources(r.get("sources"), total_w)
-        # A certificate's linked model is the right identity for valuing that route, but not always
-        # the reviewed TopSelectie shown as its own row on /management-dashboard. Keep both. The
-        # Fundamental action must open the latter so direct and folded views use one composition.
-        from ._management_topselecties import topselectie_for_display_name  # noqa: PLC0415
+        # Keep the basket's source membership. A legacy direct AIRS model must not
+        # replace Leonteq constituents when opening Fundamental from a certificate.
         for rt in routes:
-            reviewed = topselectie_for_display_name(rt.get("label"))
-            reviewed_account = (reviewed or {}).get("dynamic_portefeuille")
-            reviewed_link = next((a for a in account_links
-                                  if a.get("portefeuille") == reviewed_account), None)
-            rt["fundamental_model_id"] = (
-                reviewed_link.get("model_portfolio_id") if reviewed_link else None)
+            rt["fundamental_model_id"] = None
         direct = direct_marks.get(isin or "") if via else None
         for rt in routes:
             if rt["model_id"] is None:
@@ -2374,6 +2376,10 @@ def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
                 books.add(str(s["book"]))
     out: dict[str, dict] = {}
     for b in sorted(books):
+        from leonteq.management import entry_for_identity
+        if entry_for_identity(b):
+            out[b] = {}
+            continue
         try:
             rec = account_return_reconciliation(b)
             # No transactions for the child means no flows, so no Modified Dietz — the same gap
@@ -3918,6 +3924,10 @@ def _with_sold_lookthrough(realised: dict, portfolio_id: int) -> None:
         if not target or target == portfolio_id:
             continue
         exit_date = p.get('last_sale')
+        from leonteq.management import entry_for_identity
+        if entry_for_identity((ref_model(target) or {}).get('name')):
+            p['lookthrough_note'] = 'Historical Leonteq composition unavailable on the sale date.'
+            continue
         positions = ref_positions_for(target)
         dates = [str(r['datum']) for r in positions
                  if r.get('datum') and exit_date and str(r['datum']) <= exit_date]
@@ -4537,7 +4547,8 @@ def _classify_items(holdings, codes):
     return items, labels, classified, total, foreign, count
 
 
-def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: str | None = None) -> dict:
+def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: str | None = None,
+                            *, portfolio_returns: dict | None = None) -> dict:
     """Composition + return of an ARBITRARY basket (a single stock, a group, an ad-hoc set) beside
     the benchmark — the same shape `compute_portfolio_analysis` returns, so ONE Analyse view serves
     a stock (a basket of one) and a portfolio alike. yfinance only: a basket has no AIRS book."""
@@ -4623,7 +4634,7 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         #   Empty means "could not work it out", which the copy renders as no sentence rather than
         #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.
         "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
-        "returns": _basket_returns(holdings, benchmark_label),
+        "returns": portfolio_returns if portfolio_returns is not None else _basket_returns(holdings, benchmark_label),
         "axes": axes,
         # A basket has no AIRS book, so no per-holding book returns — the non-equity sleeve view is
         # a portfolio-only feature.

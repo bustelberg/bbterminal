@@ -1,0 +1,1977 @@
+{
+  "source_file": "test.xlsx",
+  "parameters": {
+    "years": 3,
+    "safety_margin": 0.2,
+    "bear_growth_delta": -0.05,
+    "bear_multiple_delta": -0.25,
+    "bull_growth_delta": 0.05,
+    "bull_multiple_delta": 0.25
+  },
+  "companies": [
+    {
+      "name": "Addtech B",
+      "ticker": "OSTO:ADDT B",
+      "growth": 0.11,
+      "fair_multiple": 26.0,
+      "exit_multiple": 23.3,
+      "risk_note": "Overnameprijzen, conjunctuur en cash conversion",
+      "review_required": false,
+      "selections": [
+        "ETS",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Adobe",
+      "ticker": "ADBE",
+      "growth": 0.09,
+      "fair_multiple": 15.0,
+      "exit_multiple": 15.0,
+      "risk_note": "Risico AI-disruptie; hoge onzekerheid op multiple.",
+      "review_required": true,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "ADP",
+      "ticker": "ADP",
+      "growth": 0.08,
+      "fair_multiple": 25.0,
+      "exit_multiple": 23.1,
+      "risk_note": "",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Adyen",
+      "ticker": "XAMS:ADYEN",
+      "growth": 0.15,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.0,
+      "risk_note": "Koers 28 okt na publicatie; consensus laatst 23 okt, mogelijk nog niet aangepast. | Lagere marge en opgelopen capex; Q3-update op 28 oktober",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "FTS",
+        "ETS",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Alphabet",
+      "ticker": "GOOG",
+      "growth": 0.1,
+      "fair_multiple": 23.0,
+      "exit_multiple": 22.0,
+      "risk_note": "AI Search en capex.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "FTS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Amazon",
+      "ticker": "AMZN",
+      "growth": 0.1,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.3,
+      "risk_note": "Hoge growth capex.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "FTS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Apple",
+      "ticker": "AAPL",
+      "growth": 0.09,
+      "fair_multiple": 25.0,
+      "exit_multiple": 23.0,
+      "risk_note": "FY2026 is afgelopen, daarom NTM=FY2027.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "argenx",
+      "ticker": "XBRU:ARGX",
+      "growth": 0.16,
+      "fair_multiple": 28.0,
+      "exit_multiple": 23.5,
+      "risk_note": "Pijplijn-/reguleringrisico en concentratie op Vyvgart",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Arista Networks",
+      "ticker": "ANET",
+      "growth": 0.14,
+      "fair_multiple": 28.0,
+      "exit_multiple": 24.5,
+      "risk_note": "Hyperscaler- en klantconcentratie.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "FTS",
+        "AI",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "ASML",
+      "ticker": "XAMS:ASML",
+      "growth": 0.14,
+      "fair_multiple": 26.0,
+      "exit_multiple": 24.1,
+      "risk_note": "28 okt intraday; cyclische chipcapex.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "ETS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "BE Semiconductor (BESI)",
+      "ticker": "XAMS:BESI",
+      "growth": 0.15,
+      "fair_multiple": 22.0,
+      "exit_multiple": 18.6,
+      "risk_note": "Grote EPS-sprong; halfgeleider-cycliciteit en klantconcentratie",
+      "review_required": false,
+      "selections": [
+        "ETS",
+        "AI",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Berkshire Hathaway",
+      "ticker": "BRK.B",
+      "growth": 0.06,
+      "fair_multiple": 1.55,
+      "exit_multiple": 1.5,
+      "risk_note": "$761.368 mld eigen vermogen / (481.584 A×1.500 + 1.405.974.025 B) = $357,73 per B. Boekwaarde is niet intrinsieke waarde; 1,55× opslag op operationele franchises is analytisch, niet geverifieerd.",
+      "review_required": true,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "FTS"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "P/boekwaarde (proxy)",
+      "manual_basis": 357.7268734262824,
+      "basis_currency": "USD",
+      "basis_date": "30-09-2026",
+      "basis_source": "https://www.sec.gov/Archives/edgar/data/1067983/000119312526452412/brka-20260930.htm"
+    },
+    {
+      "name": "Broadcom",
+      "ticker": "AVGO",
+      "growth": 0.12,
+      "fair_multiple": 24.0,
+      "exit_multiple": 21.1,
+      "risk_note": "Winst versus FCF/SBC en AI-concentratie.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS",
+        "FTS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Brookfield Corporation",
+      "ticker": "BN",
+      "growth": 0.09,
+      "fair_multiple": 16.0,
+      "exit_multiple": 14.1,
+      "risk_note": "Structuurcomplexiteit en schulden; EPS geen zuivere maat",
+      "review_required": true,
+      "selections": [
+        "FTS",
+        "STAR"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "Management SOTP controle",
+      "manual_basis": 67.0,
+      "basis_currency": "USD",
+      "basis_date": "17-09-2026",
+      "basis_source": "https://bn.brookfield.com/events/2026-brookfield-corporation-investor-day-presentation"
+    },
+    {
+      "name": "Constellation Software",
+      "ticker": "CNSWF",
+      "growth": 0.1,
+      "fair_multiple": 24.0,
+      "exit_multiple": 21.1,
+      "risk_note": "EPS in USD, aandeel in CAD. Modelconversie impliciet uit bron forward PE (19,97x); check FX voor gebruik. | SBC, acquisitiekosten en AI-disruptie onderschat in EPS",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Dino Polska",
+      "ticker": "WAR:DNP",
+      "growth": 0.11,
+      "fair_multiple": 22.0,
+      "exit_multiple": 19.9,
+      "risk_note": "Poolse consument, looninflatie, margedruk",
+      "review_required": false,
+      "selections": [
+        "FTS",
+        "ETS",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Diploma",
+      "ticker": "DPMAY",
+      "growth": 0.1,
+      "fair_multiple": 26.0,
+      "exit_multiple": 23.2,
+      "risk_note": "Acquisitieprijzen, werkkapitaal en afhankelijkheid nichemarkten",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Eli Lilly",
+      "ticker": "LLY",
+      "growth": 0.14,
+      "fair_multiple": 28.0,
+      "exit_multiple": 25.4,
+      "risk_note": "GLP-1, concurrentie en patenten.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Fair Isaac (FICO)",
+      "ticker": "FICO",
+      "growth": 0.1,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.4,
+      "risk_note": "Regulering, distributieverandering, Bill Pulte/GSE-risico",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Ferrari",
+      "ticker": "MIL:RACE",
+      "growth": 0.09,
+      "fair_multiple": 29.0,
+      "exit_multiple": 26.4,
+      "risk_note": "EPS EUR versus NYSE-notering USD; impliciete valutafactor via bron forward PE (35,58x).",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS",
+        "FTS",
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "HEICO",
+      "ticker": "HEI",
+      "growth": 0.13,
+      "fair_multiple": 30.0,
+      "exit_multiple": 25.6,
+      "risk_note": "Overname-/leverage-afhankelijkheid, premie in multiple",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Hermès",
+      "ticker": "XPAR:RMS",
+      "growth": 0.09,
+      "fair_multiple": 29.0,
+      "exit_multiple": 27.1,
+      "risk_note": "Koers 28 okt intraday; luxecyclus.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "FTS",
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "IDEXX Laboratories",
+      "ticker": "IDXX",
+      "growth": 0.11,
+      "fair_multiple": 29.0,
+      "exit_multiple": 27.1,
+      "risk_note": "",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Investor AB B",
+      "ticker": "OSTO:INVE B",
+      "growth": 0.06,
+      "fair_multiple": 1.0,
+      "exit_multiple": 0.95,
+      "risk_note": "Investor AB aangepaste NAV 411 SEK/aandeel; gerapporteerde NAV is 359 SEK. Patricia Industries private waarderingen bevatten schattingen. Huidige waarde 1,0× adjusted NAV; exit 0,95×.",
+      "review_required": true,
+      "selections": [
+        "BB",
+        "FTS",
+        "ETS"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "P/aangepaste NAV",
+      "manual_basis": 411.0,
+      "basis_currency": "SEK",
+      "basis_date": "30-09-2026",
+      "basis_source": "https://view.news.eu.nasdaq.com/view?id=b04f20afaec9cd39828c3e26290ffa022&lang=en&src=listed"
+    },
+    {
+      "name": "JPMorgan Chase",
+      "ticker": "JPM",
+      "growth": 0.05,
+      "fair_multiple": 13.0,
+      "exit_multiple": 12.1,
+      "risk_note": "Bank: normaliseer ROE en toets P/TBV; K/W slechts indicatief.",
+      "review_required": true,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Kinsale Capital",
+      "ticker": "KNSL",
+      "growth": 0.09,
+      "fair_multiple": 22.0,
+      "exit_multiple": 19.1,
+      "risk_note": "Premiecyclus, cat-risico, prijsdiscipline",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "KLA",
+      "ticker": "KLAC",
+      "growth": 0.13,
+      "fair_multiple": 23.0,
+      "exit_multiple": 20.4,
+      "risk_note": "Gesplitste koers en winst per aandeel zijn consistent; chipcyclus.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "AI",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "L'Oréal",
+      "ticker": "XPAR:OR",
+      "growth": 0.08,
+      "fair_multiple": 25.0,
+      "exit_multiple": 23.1,
+      "risk_note": "Koers 28 okt intraday.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "FTS",
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Linde",
+      "ticker": "LIN",
+      "growth": 0.08,
+      "fair_multiple": 25.0,
+      "exit_multiple": 23.0,
+      "risk_note": "",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Mastercard",
+      "ticker": "MA",
+      "growth": 0.12,
+      "fair_multiple": 30.0,
+      "exit_multiple": 28.1,
+      "risk_note": "",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Medpace",
+      "ticker": "MEDP",
+      "growth": 0.09,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.2,
+      "risk_note": "Biotech financiering, contractvertraging en klantenconcentratie",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "MercadoLibre",
+      "ticker": "MELI",
+      "growth": 0.15,
+      "fair_multiple": 30.0,
+      "exit_multiple": 27.4,
+      "risk_note": "Kredietrisico, valutarisico en grote kapitaalbehoefte",
+      "review_required": false,
+      "selections": [
+        "STAR",
+        "ATS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Meta Platforms",
+      "ticker": "META",
+      "growth": 0.1,
+      "fair_multiple": 22.0,
+      "exit_multiple": 20.1,
+      "risk_note": "AI-capex kan FCF sterk drukken.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "FTS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Mettler-Toledo",
+      "ticker": "MTD",
+      "growth": 0.08,
+      "fair_multiple": 27.0,
+      "exit_multiple": 25.1,
+      "risk_note": "",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Microsoft",
+      "ticker": "MSFT",
+      "growth": 0.13,
+      "fair_multiple": 28.0,
+      "exit_multiple": 27.1,
+      "risk_note": "FY2027 eindigt juni 2027.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Moody's",
+      "ticker": "MCO",
+      "growth": 0.09,
+      "fair_multiple": 27.0,
+      "exit_multiple": 25.1,
+      "risk_note": "Gevoelig voor schuldemissies.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "MSCI",
+      "ticker": "MSCI",
+      "growth": 0.1,
+      "fair_multiple": 28.0,
+      "exit_multiple": 26.1,
+      "risk_note": "",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Nestlé",
+      "ticker": "XSWX:NESN",
+      "growth": 0.05,
+      "fair_multiple": 18.0,
+      "exit_multiple": 17.1,
+      "risk_note": "Koers 28 okt intraday.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "ETS",
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Nu Holdings",
+      "ticker": "NU",
+      "growth": 0.14,
+      "fair_multiple": 17.0,
+      "exit_multiple": 17.1,
+      "risk_note": "Kredietcyclus Brazilië, kapitaaleisen en valutarisico",
+      "review_required": true,
+      "selections": [
+        "STAR",
+        "ATS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "NVIDIA",
+      "ticker": "NVDA",
+      "growth": 0.15,
+      "fair_multiple": 24.0,
+      "exit_multiple": 19.2,
+      "risk_note": "FY2027 eindigt januari 2027. AI-cyclus en winstnormalisatie.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "FTS",
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Pro Medicus",
+      "ticker": "PMCUF",
+      "growth": 0.16,
+      "fair_multiple": 38.0,
+      "exit_multiple": 32.1,
+      "risk_note": "Hoge K/W, implementatieconcentratie en lange sales cycles",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Procter & Gamble",
+      "ticker": "PG",
+      "growth": 0.05,
+      "fair_multiple": 21.0,
+      "exit_multiple": 20.0,
+      "risk_note": "FY2027 eindigt juni 2027.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS",
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Röko B",
+      "ticker": "OSTO:ROKO B",
+      "growth": 0.09,
+      "fair_multiple": 24.0,
+      "exit_multiple": 21.3,
+      "risk_note": "Korte beursgeschiedenis; earnings basis afgeleid uit P/E",
+      "review_required": true,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "S&P Global",
+      "ticker": "SPGI",
+      "growth": 0.09,
+      "fair_multiple": 27.0,
+      "exit_multiple": 25.0,
+      "risk_note": "Mogelijke strategische portefeuilleverandering.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "ServiceNow",
+      "ticker": "NOW",
+      "growth": 0.15,
+      "fair_multiple": 27.0,
+      "exit_multiple": 26.3,
+      "risk_note": "SBC-verwatering en GAAP versus aangepast winstniveau",
+      "review_required": true,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Shopify",
+      "ticker": "SHOP",
+      "growth": 0.13,
+      "fair_multiple": 28.0,
+      "exit_multiple": 23.4,
+      "risk_note": "Hoge verwachting, aandelenbeloningen en merchant cycliciteit",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Tesla",
+      "ticker": "TSLA",
+      "growth": 0.08,
+      "fair_multiple": null,
+      "exit_multiple": null,
+      "risk_note": "Autonomie/robotica niet objectief in huidige EPS; prijsdruk",
+      "review_required": true,
+      "selections": [
+        "FTS",
+        "STAR"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "SOTP / optie-scenario vereist",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": "https://www.sec.gov/Archives/edgar/data/1318605/000162828026066775/tsla-20260930.htm"
+    },
+    {
+      "name": "Topicus.com",
+      "ticker": "TOITF",
+      "growth": 0.11,
+      "fair_multiple": 23.0,
+      "exit_multiple": 20.3,
+      "risk_note": "Concurrerend AI-risico, consolidatieboekhouding en SBC",
+      "review_required": false,
+      "selections": [
+        "ETS",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "TransDigm",
+      "ticker": "TDG",
+      "growth": 0.1,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.2,
+      "risk_note": "Hoge schuld, acquisities en cyclus luchtvaart",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "TSMC",
+      "ticker": "TPE:2330",
+      "growth": 0.12,
+      "fair_multiple": 23.0,
+      "exit_multiple": 20.1,
+      "risk_note": "Broneps in TWD lokale aandelen. Implied ADS-valutafactor uit gepubliceerde forward P/E 25,63x; valutarisico.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS",
+        "AI",
+        "ATS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Visa",
+      "ticker": "V",
+      "growth": 0.1,
+      "fair_multiple": 29.0,
+      "exit_multiple": 27.1,
+      "risk_note": "FY2027 eindigt september 2027.",
+      "review_required": false,
+      "selections": [
+        "BB",
+        "BB2",
+        "MTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Alibaba Group",
+      "ticker": "HKSE:09988",
+      "growth": 0.09,
+      "fair_multiple": 17.0,
+      "exit_multiple": 15.2,
+      "risk_note": "Chinese regulering, cloud/AI-capex, ADS-valuta en onduidelijke winstnormalisatie",
+      "review_required": true,
+      "selections": [
+        "FTS",
+        "ATS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Alimentation Couche-Tard",
+      "ticker": "ANCTF",
+      "growth": 0.08,
+      "fair_multiple": 20.0,
+      "exit_multiple": 18.9,
+      "risk_note": "Brandstofmarges, accijnzen/regulering, schulden en acquisitie-integratie",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Cintas",
+      "ticker": "CTAS",
+      "growth": 0.09,
+      "fair_multiple": 27.0,
+      "exit_multiple": 24.2,
+      "risk_note": "Hoge instapwaardering, lonen en concurrentie zakelijke diensten",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Copart",
+      "ticker": "CPRT",
+      "growth": 0.08,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.2,
+      "risk_note": "Volumes total-loss voertuigen, verzekeringscyclus, geopolitiek en supply",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Fairfax Financial",
+      "ticker": "FRFHF",
+      "growth": 0.07,
+      "fair_multiple": 1.35,
+      "exit_multiple": 1.3,
+      "risk_note": "Fairfax book value per basic share US$1.349,15; USD→CAD op ECB 05-11-2026. Waardering 1,35× boekwaarde is indicatief en dient te worden getoetst aan combined ratio, ROE, reserves en niet-geboekte meerwaarde van belangen.",
+      "review_required": true,
+      "selections": [
+        "FTS",
+        "STAR"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "P/boekwaarde (verzekeraar)",
+      "manual_basis": 1349.15,
+      "basis_currency": "USD",
+      "basis_date": "30-09-2026",
+      "basis_source": "https://www.fairfax.ca/press-releases/fairfax-financial-holdings-limited-financial-results-for-the-third-quarter/"
+    },
+    {
+      "name": "Inditex",
+      "ticker": "XMAD:ITX",
+      "growth": 0.07,
+      "fair_multiple": 25.0,
+      "exit_multiple": 23.1,
+      "risk_note": "Fast-fashioncyclus, importtarieven, arbeidskosten en valuta",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "LVMH",
+      "ticker": "XPAR:MC",
+      "growth": 0.07,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.1,
+      "risk_note": "Chinese luxevraag, winstmix, valuta en normalisatie marges",
+      "review_required": false,
+      "selections": [
+        "FTS",
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Roche Holding",
+      "ticker": "XSWX:ROP",
+      "growth": 0.05,
+      "fair_multiple": 20.0,
+      "exit_multiple": 18.0,
+      "risk_note": "Pipeline, patenten en wisselwerking farma/diagnostiek",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Rollins",
+      "ticker": "ROL",
+      "growth": 0.07,
+      "fair_multiple": 26.0,
+      "exit_multiple": 24.1,
+      "risk_note": "Overnameintegratie, lonen, margedruk en verhouding GAAP/non-GAAP",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Straumann Holding",
+      "ticker": "XSWX:STMN",
+      "growth": 0.09,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.2,
+      "risk_note": "Chinese tandzorg, prijsdruk, hersteltempo implantaten",
+      "review_required": false,
+      "selections": [
+        "FTS",
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Stryker",
+      "ticker": "SYK",
+      "growth": 0.09,
+      "fair_multiple": 27.0,
+      "exit_multiple": 25.0,
+      "risk_note": "Productmix, ziekenhuisbudgetten, acquisities, GAAP versus aangepast",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Walmart",
+      "ticker": "WMT",
+      "growth": 0.07,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.4,
+      "risk_note": "Lage winkelmarge, personeelskosten en importheffingen",
+      "review_required": false,
+      "selections": [
+        "FTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Fortinet",
+      "ticker": "FTNT",
+      "growth": 0.1,
+      "fair_multiple": 24.0,
+      "exit_multiple": 22.3,
+      "risk_note": "SASE/secure-networking concurrentie, productcyclus FortiGate, SBC en duurzaamheid marges",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Advanced Micro Devices",
+      "ticker": "AMD",
+      "growth": 0.15,
+      "fair_multiple": 24.0,
+      "exit_multiple": 21.6,
+      "risk_note": "Sterke AI-verwachtingen, concurrentie NVIDIA, exportcontrole en winstnormalisatie",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "AMETEK",
+      "ticker": "AME",
+      "growth": 0.09,
+      "fair_multiple": 26.0,
+      "exit_multiple": 23.2,
+      "risk_note": "Overnameprijzen, industriële cyclus, waardering vs organische groei",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Amphenol",
+      "ticker": "APH",
+      "growth": 0.11,
+      "fair_multiple": 27.0,
+      "exit_multiple": 24.1,
+      "risk_note": "AI/datacentervraag, integratie overnames, hoge investeringen en cycliciteit",
+      "review_required": false,
+      "selections": [
+        "AI",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Applied Materials",
+      "ticker": "AMAT",
+      "growth": 0.09,
+      "fair_multiple": 22.0,
+      "exit_multiple": 19.4,
+      "risk_note": "Geopolitiek China, chipcapex-cyclus, exportbeperkingen",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Cadence Design Systems",
+      "ticker": "CDNS",
+      "growth": 0.12,
+      "fair_multiple": 29.0,
+      "exit_multiple": 25.5,
+      "risk_note": "SBC/GAAP-verschil, EDA-concurrentie en exportrestricities",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Lam Research",
+      "ticker": "LRCX",
+      "growth": 0.1,
+      "fair_multiple": 22.0,
+      "exit_multiple": 19.4,
+      "risk_note": "Semiconductor equipment cyclus, China-blootstelling, hoge capex-concentratie",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Palo Alto Networks",
+      "ticker": "PANW",
+      "growth": 0.13,
+      "fair_multiple": 26.0,
+      "exit_multiple": 22.4,
+      "risk_note": "Grote afwijking GAAP/non-GAAP, stock-based compensation, acquisities en integratie",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Synopsys",
+      "ticker": "SNPS",
+      "growth": 0.11,
+      "fair_multiple": 28.0,
+      "exit_multiple": 25.2,
+      "risk_note": "SBC, integratie Ansys, schulden en EDA-exportbeperkingen",
+      "review_required": false,
+      "selections": [
+        "AI"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "ASM International",
+      "ticker": "XAMS:ASM",
+      "growth": 0.1,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.2,
+      "risk_note": "ASMI is cyclical; FY27 EPS assumes capex acceleration and should be cross-checked with FCF.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "ASSA ABLOY B",
+      "ticker": "OSTO:ASSA B",
+      "growth": 0.08,
+      "fair_multiple": 24.0,
+      "exit_multiple": 22.1,
+      "risk_note": "Acquisition integration and manufacturing demand; maintenance capex and cash conversion.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Atlas Copco A",
+      "ticker": "OSTO:ATCO A",
+      "growth": 0.08,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.2,
+      "risk_note": "Capital spending cycle; high EPS growth in FY27 may be non-repeatable.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "EssilorLuxottica",
+      "ticker": "XPAR:EL",
+      "growth": 0.08,
+      "fair_multiple": 26.0,
+      "exit_multiple": 24.1,
+      "risk_note": "Concentration in eyewear, margin and integration; adjusted earnings not equal FCF.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Euronext",
+      "ticker": "XPAR:ENX",
+      "growth": 0.08,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.1,
+      "risk_note": "Exchange volumes and regulatory environment; adjusted earnings.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Ferrovial",
+      "ticker": "XMAD:FER",
+      "growth": 0.07,
+      "fair_multiple": null,
+      "exit_multiple": null,
+      "risk_note": "Concessions: P/E incomplete; supplement with toll-road/airport DCF, debt and concession expiry.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "Concessie-SOTP / DCF vereist",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": "https://www.sec.gov/Archives/edgar/data/1468522/000162828026067625/a9m2026-ferrovialoperati.htm"
+    },
+    {
+      "name": "GTT",
+      "ticker": "XPAR:GTT",
+      "growth": 0.05,
+      "fair_multiple": 20.0,
+      "exit_multiple": 19.0,
+      "risk_note": "LNG shipbuilding order cycle, shipyard exposure, long lead times; margin normalization.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Lifco B",
+      "ticker": "OSTO:LIFCO B",
+      "growth": 0.09,
+      "fair_multiple": 25.0,
+      "exit_multiple": 22.3,
+      "risk_note": "Serial acquisition valuations, return on incremental capital and cash conversion.",
+      "review_required": false,
+      "selections": [
+        "ETS",
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Lotus Bakeries",
+      "ticker": "XBRU:LOTB",
+      "growth": 0.1,
+      "fair_multiple": 31.0,
+      "exit_multiple": 27.4,
+      "risk_note": "Premium multiple; capacity expansion, distribution investment and international growth execution.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Nemetschek",
+      "ticker": "XTER:NEM",
+      "growth": 0.11,
+      "fair_multiple": 27.0,
+      "exit_multiple": 24.2,
+      "risk_note": "Software subscriptions and AI disruption; acquisition amortization and SBC.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "RELX",
+      "ticker": "XAMS:REN",
+      "growth": 0.09,
+      "fair_multiple": 25.0,
+      "exit_multiple": 23.1,
+      "risk_note": "AI search/substitution, publishing transition; UK GBP earnings converted to EUR share price at same-day implied FX.",
+      "review_required": false,
+      "selections": [
+        "ETS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "3i Group",
+      "ticker": "TGOPY",
+      "growth": 0.07,
+      "fair_multiple": 1.0,
+      "exit_multiple": 0.95,
+      "risk_note": "Gerapporteerde NAV 3.131 GBp per 30-06-2026, na uitkering 48 GBp dividend: 3.083 GBp. Fair 1,00× NAV; exit 0,95×. Geen K/W; private ondernemingswaarderingen kunnen wijzigen.",
+      "review_required": true,
+      "selections": [
+        "ETS",
+        "STAR"
+      ],
+      "basis_kind": "manual",
+      "basis_label": "P/NAV (post-dividend)",
+      "manual_basis": 3083.0,
+      "basis_currency": "GBp",
+      "basis_date": "30-06-2026 (ex 48p dividend)",
+      "basis_source": "https://www.3i.com/media/news/2026/q1-performance-update/"
+    },
+    {
+      "name": "AbbVie",
+      "ticker": "ABBV",
+      "growth": 0.05,
+      "fair_multiple": 17.0,
+      "exit_multiple": 16.1,
+      "risk_note": "Patentverval, pipeline-risico, overnames en aangepaste EPS",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Aena",
+      "ticker": "XMAD:AENA",
+      "growth": 0.06,
+      "fair_multiple": 18.0,
+      "exit_multiple": 17.5,
+      "risk_note": "Regulering, tarieven, passagiersvolume en kapitaaluitgaven",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Allianz",
+      "ticker": "XTER:ALV",
+      "growth": 0.05,
+      "fair_multiple": 12.0,
+      "exit_multiple": 11.1,
+      "risk_note": "Catastrofeclaims, beleggingen, Solvency II, kapitaalbuffer",
+      "review_required": true,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "CME Group",
+      "ticker": "CME",
+      "growth": 0.06,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.2,
+      "risk_note": "Volatiliteitsafhankelijke handelsvolumes, clearingrisico, fees",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Coca-Cola",
+      "ticker": "KO",
+      "growth": 0.04,
+      "fair_multiple": 22.0,
+      "exit_multiple": 21.0,
+      "risk_note": "Valuta, suikerheffingen, grondstofkosten, volumegroei",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "ING Groep",
+      "ticker": "XAMS:INGA",
+      "growth": 0.04,
+      "fair_multiple": 10.0,
+      "exit_multiple": 9.2,
+      "risk_note": "Kredietkosten, CET1, rentegevoeligheid, kapitaaluitkering",
+      "review_required": true,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Johnson & Johnson",
+      "ticker": "JNJ",
+      "growth": 0.05,
+      "fair_multiple": 20.0,
+      "exit_multiple": 19.1,
+      "risk_note": "Patentverval, rechtszaken, productontwikkeling",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Ahold Delhaize",
+      "ticker": "XAMS:AD",
+      "growth": 0.04,
+      "fair_multiple": 15.0,
+      "exit_multiple": 14.0,
+      "risk_note": "Looninflatie, prijsconcurrentie, marges, VS-blootstelling",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "NN Group",
+      "ticker": "XAMS:NN",
+      "growth": 0.04,
+      "fair_multiple": 10.5,
+      "exit_multiple": 9.6,
+      "risk_note": "Solvency II, rentecurve, kapitaalverdeling, marktrisico",
+      "review_required": true,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Novartis",
+      "ticker": "XSWX:NOVN",
+      "growth": 0.05,
+      "fair_multiple": 19.0,
+      "exit_multiple": 18.0,
+      "risk_note": "Pipeline, patent cliffs, US prijsregulering, CHF/USD",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "PepsiCo",
+      "ticker": "PEP",
+      "growth": 0.04,
+      "fair_multiple": 19.0,
+      "exit_multiple": 18.0,
+      "risk_note": "Volume, prijszetting, grondstoffen, schulden",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Shell",
+      "ticker": "XAMS:SHELL",
+      "growth": 0.02,
+      "fair_multiple": 11.5,
+      "exit_multiple": 10.6,
+      "risk_note": "Olie-/gasprijzen, CAPEX, cyclische EPS, energietransitie",
+      "review_required": true,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "TotalEnergies",
+      "ticker": "XPAR:TTE",
+      "growth": 0.01,
+      "fair_multiple": 10.0,
+      "exit_multiple": 9.5,
+      "risk_note": "Grondstofprijzen, geopolitiek, capex, cash dividenddekking",
+      "review_required": true,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Verizon",
+      "ticker": "VZ",
+      "growth": 0.02,
+      "fair_multiple": 10.0,
+      "exit_multiple": 9.5,
+      "risk_note": "Capex, spectrum, schuld, concurrentie, dividenddekking",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Vinci",
+      "ticker": "XPAR:DG",
+      "growth": 0.06,
+      "fair_multiple": 17.0,
+      "exit_multiple": 16.0,
+      "risk_note": "Concessies, verkeer, rente, schuld en gereguleerde tarieven",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Wolters Kluwer",
+      "ticker": "XAMS:WKL",
+      "growth": 0.08,
+      "fair_multiple": 23.0,
+      "exit_multiple": 22.0,
+      "risk_note": "AI-disruptie, klantenretentie, kapitaalallocatie en SBC",
+      "review_required": false,
+      "selections": [
+        "DTS"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Games Workshop",
+      "ticker": "GWKSY",
+      "growth": 0.07,
+      "fair_multiple": 26.0,
+      "exit_multiple": 24.0,
+      "risk_note": "Licentie- en kernbusiness-mix; 2026 recordwinst maar FY27 consensus zwakker. Fair 26x, groei 7%, exit 24x: eigen aannames; SBC en uitzonderingen vóór beleggingsgebruik controleren.",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Harvia",
+      "ticker": "OHEL:HARVIA",
+      "growth": 0.1,
+      "fair_multiple": 23.0,
+      "exit_multiple": 21.0,
+      "risk_note": "Sterke niche in sauna/wellness maar VS-investeringen, seizoenswerkkapitaal en margedruk. Fair 23x / exit 21x; controleer FY-resultaten en SBC.",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "Lagercrantz Group B",
+      "ticker": "OSTO:LAGR B",
+      "growth": 0.11,
+      "fair_multiple": 29.0,
+      "exit_multiple": 26.0,
+      "risk_note": "Acquisitiediscipline, goodwill en terugkerende overnamebehoefte. Fair 29x, exit 26x. EPS betreft reported estimate (niet onafhankelijk genormaliseerd).",
+      "review_required": false,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    },
+    {
+      "name": "CHAPTERS Group",
+      "ticker": "XTER:CHG",
+      "growth": 0.12,
+      "fair_multiple": 23.0,
+      "exit_multiple": 20.0,
+      "risk_note": "GAAP-winst negatief: waardering op P/FCF-proxy, niet K/W. Buffer voor niet-vrije kas, acquisities en SBC niet geverifieerd. Fair 23x P/FCF / exit 20x; koopzone uitsluitend indicatief.",
+      "review_required": true,
+      "selections": [
+        "STAR"
+      ],
+      "basis_kind": "forward_eps",
+      "basis_label": "",
+      "manual_basis": null,
+      "basis_currency": null,
+      "basis_date": null,
+      "basis_source": null
+    }
+  ]
+}

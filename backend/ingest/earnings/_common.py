@@ -47,6 +47,37 @@ class EarningsResult:
     error: str | None = None
     is_forbidden: bool = False  # True if 403 / unsubscribed region
     api_calls: int = 0  # Number of GuruFocus API requests made
+    http_status: int | None = None
+
+
+def failure_message(result, feed='financial statements'):
+    """Reader-safe provider diagnostics: never expose request URLs/API credentials."""
+    status = getattr(result, 'http_status', None)
+    http = f' (HTTP {status})' if isinstance(status, int) else ''
+    cache_status = getattr(result, 'cache_status', '')
+    if cache_status == 'api_empty':
+        message = f'GuruFocus returned an empty {feed} response{http}: no usable reporting periods.'
+    elif cache_status == 'api_fresh' and not (getattr(result, 'rows_loaded', 0) or getattr(result, 'rows_unchanged', 0) or getattr(result, 'metrics_found', 0)):
+        message = f'GuruFocus returned reporting periods but no usable {feed} values for this listing.'
+    elif status == 429:
+        message = 'GuruFocus rate limit reached (HTTP 429). Wait before retrying.'
+    elif status == 401:
+        message = 'GuruFocus rejected the API credentials (HTTP 401). Check the server configuration.'
+    elif status == 403 or getattr(result, 'is_forbidden', False):
+        message = 'GuruFocus denied access (HTTP 403). Check exchange coverage or provider access restrictions.'
+    elif status == 404:
+        message = f'GuruFocus could not find this listing’s {feed} (HTTP 404). Review its ticker and exchange.'
+    elif isinstance(status, int) and status >= 500:
+        message = f'GuruFocus reported a server error{http}. Try again later.'
+    elif status == 200:
+        message = f'GuruFocus returned no usable JSON for {feed} (HTTP 200). The response may be empty or malformed.'
+    elif status is None:
+        message = f'The GuruFocus {feed} request failed before a usable HTTP response was received (connection or timeout).'
+    else:
+        message = f'GuruFocus could not provide {feed}{http}.'
+    if getattr(result, 'api_calls', 0) > 1 and cache_status == 'api_empty':
+        message += ' Retried once with the same result.'
+    return message + ' Previous saved data was kept.'
 
 
 # ---------------------------------------------------------------------------

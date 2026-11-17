@@ -108,6 +108,8 @@ _log = logging.getLogger(__name__)
 
 # Every table the Analyse endpoint reads, directly or through a view. See the module note.
 _WATCHED = (
+    'leonteq_accounting_snapshot',
+    'leonteq_portfolio_snapshot', 'leonteq_composition_snapshot', 'leonteq_performance_snapshot',
     "airs_model_portfolio", "airs_model_portfolio_position", "airs_model_portfolio_link",
     "airs_holding", "airs_holding_isin_override", "airs_mutatie", "airs_model_weight",
     "airs_allocation_band", "airs_account_model_link", "airs_account_display_name",

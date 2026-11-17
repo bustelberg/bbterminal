@@ -14,6 +14,11 @@ from deps import supabase
 log = logging.getLogger(__name__)
 _ROOT = Path(__file__).resolve().parent.parent
 _FILES = tuple(sorted({
+    _ROOT / 'leonteq' / 'return_windows.py',
+    _ROOT / 'leonteq' / 'accounting.py',
+    _ROOT / 'leonteq' / 'opening.py',
+    _ROOT / 'leonteq' / 'management.py',
+    _ROOT / 'config' / 'management_topselecties.json',
     *(_ROOT / 'routers').glob('_airs*.py'),
     *(_ROOT / 'index_universe' / 'acwi').glob('*.py'),
     _ROOT / 'services' / 'company_notes_identity.py',

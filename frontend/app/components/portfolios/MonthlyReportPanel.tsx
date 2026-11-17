@@ -10,17 +10,22 @@ import { profileBenchmarkLabel } from './analyseCopy';
 import ViaChips from './ViaChips';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { invalidatePerformanceBundle, loadPerformanceBundle, readPerformanceBundle } from './monthlyReportPrefetch';
+import { apiFetch } from '../../../lib/apiFetch';
+import { leonteqPerformanceBundle, type LeonteqPerformanceReturns } from './leonteqPerformanceBundle';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
 const ctl = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-xs text-fg-muted hover:border-accent-500/50 disabled:opacity-50';
 const tone = (value?: number | null) => value == null ? 'text-fg-subtle' : value < 0 ? 'text-neg-400' : value > 0 ? 'text-pos-400' : 'text-fg-strong';
 
-export default function MonthlyReportPanel({ portefeuille, name, variant }: { portefeuille?: string | null; name: string; variant?: string | null }) {
+export default function MonthlyReportPanel({ portefeuille, name, variant, leonteqPortfolio, leonteqReturns, benchmarkName }: {
+  portefeuille?: string | null; name: string; variant?: string | null;
+  leonteqPortfolio?: string; leonteqReturns?: LeonteqPerformanceReturns; benchmarkName?: string;
+}) {
   const [lang] = useLang();
-  const benchmarkLabel = profileBenchmarkLabel(lang, variant);
+  const benchmarkLabel = leonteqPortfolio ? benchmarkName ?? 'ACWI' : profileBenchmarkLabel(lang, variant);
   const nl = lang === 'nl', locale = nl ? 'nl-NL' : 'en-GB';
   const text = (en: string, dutch: string) => nl ? dutch : en;
-  const [bundle, setBundle] = useState<PerformanceBundle | null>(() => portefeuille ? readPerformanceBundle(portefeuille) : null);
+  const [bundle, setBundle] = useState<PerformanceBundle | null>(() => !leonteqPortfolio && portefeuille ? readPerformanceBundle(portefeuille) : null);
   const [yearSelection, setYearSelection] = useState<string | null>(null);
   const [monthSelection, setMonthSelection] = useState<string | null>(null);
   const [lookThrough, setLookThrough] = useState(() => defaultLookThroughCertificates(name, portefeuille));
@@ -35,18 +40,27 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
-    if (!portefeuille) return;
+    if (!portefeuille && !leonteqPortfolio) return;
     let active = true;
     setError(null);
     setPending(true);
-    void loadPerformanceBundle(portefeuille)
+    const request = leonteqPortfolio
+      ? apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}`)
+        .then(async response => {
+          if (!response.ok) throw new Error('Leonteq performance could not be loaded.');
+          const source = await response.json();
+          if (!source.success) throw new Error('Leonteq performance is unavailable. Refresh this portfolio.');
+          return leonteqPerformanceBundle(leonteqPortfolio, source, leonteqReturns);
+        })
+      : loadPerformanceBundle(portefeuille!);
+    void request
       .then((data) => { if (active) setBundle(data); })
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-  }, [portefeuille, reload]);
+  }, [portefeuille, leonteqPortfolio, leonteqReturns, reload]);
 
-  const data = bundle?.portefeuille === portefeuille ? bundle : null;
+  const data = bundle?.portefeuille === (leonteqPortfolio ?? portefeuille) ? bundle : null;
   const today = data?.current_month ?? '';
   const year = yearSelection && data?.years[yearSelection] ? yearSelection : today.slice(0, 4);
   const report = data?.years[year];
@@ -67,7 +81,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   };
 
   const refreshMonth = async (kind: 'monthly-report' | 'monthly-benchmark') => {
-    if (!portefeuille || !month || busy) return;
+    if (leonteqPortfolio || !portefeuille || !month || busy) return;
     setBusy(true);
     setJobError(null);
     try {
@@ -131,6 +145,9 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
   };
   const benchmarkDetails = (key: string) => {
     const benchmark = report?.weighted_benchmark[key];
+    if (leonteqPortfolio) return <p className="text-xs">{text(
+      'Monthly benchmark details are not available in this saved Leonteq report. The YTD comparison uses the aligned dates shown above.',
+      'Maandelijkse benchmarkdetails zijn niet beschikbaar in dit opgeslagen Leonteq-rapport. De YTD-vergelijking gebruikt de hierboven getoonde gelijke datums.')}</p>;
     return <div className="space-y-3 text-xs">
     <p className="font-medium text-fg-strong">{monthLabel(key)} · {benchmarkLabel}</p>
     <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>
@@ -162,7 +179,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
 
   return <section className="space-y-5 pb-6">
     <header className="flex flex-wrap items-start justify-between gap-4"><div>
-      <p className="mb-1 text-[10px] uppercase tracking-[0.2em] text-accent-400">AIRS · Performance</p>
+      <p className="mb-1 text-[10px] uppercase tracking-[0.2em] text-accent-400">{leonteqPortfolio ? 'Leonteq' : 'AIRS'} · Performance</p>
       <h2 className="text-xl font-semibold text-fg-strong">{name}</h2>
       <p className="mt-1 text-xs text-fg-subtle">{text('Choose a month to see its return and individual positions.', 'Kies een maand voor het rendement en de individuele posities.')}</p>
     </div><label className="flex items-center gap-2 text-xs text-fg-muted">{text('Year', 'Jaar')}
@@ -173,11 +190,12 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
           setJobError(null);
         }}>{data?.available_years.map((option) => <option key={option} value={option}>{option}</option>)}</select>
     </label></header>
-    {!portefeuille && <p className="text-sm text-warn-400">{text('Link an AIRS account to view monthly positions.', 'Koppel een AIRS-rekening om de maandposities te bekijken.')}</p>}
+    {!portefeuille && !leonteqPortfolio && <p className="text-sm text-warn-400">{text('Link an AIRS account to view monthly positions.', 'Koppel een AIRS-rekening om de maandposities te bekijken.')}</p>}
+    {leonteqPortfolio && !pending && !error && !report && <p className="text-sm text-fg-subtle">{text('No saved Leonteq monthly returns. Refresh this portfolio.', 'Geen opgeslagen maandrendementen van Leonteq. Ververs deze portefeuille.')}</p>}
     {error && <p role="alert" className="rounded-lg bg-neg-500/10 p-3 text-xs text-neg-300">{error}</p>}
     {jobError && <p role="alert" className="rounded-lg bg-neg-500/10 p-3 text-xs text-neg-300">{jobError}</p>}
     {pending && !report && <p className="text-sm text-fg-subtle">{text('Loading…', 'Laden…')}</p>}
-    {historical && report && !summary?.complete && <p className="text-xs text-warn-300">{text('Year-end report incomplete. Figures below run through the dates shown; finalisation will retry during the daily refresh.', 'Jaareindrapport onvolledig. De cijfers lopen tot de getoonde datums; afronding wordt bij de dagelijkse verversing opnieuw geprobeerd.')}</p>}
+    {!leonteqPortfolio && historical && report && !summary?.complete && <p className="text-xs text-warn-300">{text('Year-end report incomplete. Figures below run through the dates shown; finalisation will retry during the daily refresh.', 'Jaareindrapport onvolledig. De cijfers lopen tot de getoonde datums; afronding wordt bij de dagelijkse verversing opnieuw geprobeerd.')}</p>}
     {report && <>
       <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-3" aria-label={text('Compounded returns', 'Samengestelde rendementen')}>
         {[
@@ -207,9 +225,9 @@ export default function MonthlyReportPanel({ portefeuille, name, variant }: { po
       {detailsOpen && <div ref={detailsElement} id="monthly-report-details" aria-busy={pending || busy} className="min-h-80 space-y-4 border-t border-neutral-800/40 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-3"><div>
           <h3 className="text-lg font-medium capitalize text-fg-strong">{monthLabel(month)}</h3>
-          <p className="mt-1 text-xs text-fg-subtle">{perf?.periode ? `${text('Through', 'T/m')} ${shortDate(perf.periode)}` : text('Return unavailable', 'Rendement ontbreekt')}{month === today ? ` · ${text('Month to date', 'Lopende maand')}` : ''}</p>
+          <p className="mt-1 text-xs text-fg-subtle">{perf?.periode ? `${text('Through', 'T/m')} ${shortDate(perf.periode)}` : leonteqPortfolio ? text('Leonteq monthly return', 'Maandrendement van Leonteq') : text('Return unavailable', 'Rendement ontbreekt')}{month === today ? ` · ${text('Month to date', 'Lopende maand')}` : ''}</p>
         </div><div className="flex gap-2">
-          <button type="button" className={ctl} onClick={() => void refreshMonth('monthly-report')} disabled={busy || pending || !!report.warning}>{busy ? text('Reading AIRS…', 'AIRS ophalen…') : selectedReport?.snapshot ? text('Refresh month', 'Maand verversen') : text('Load month from AIRS', 'Maand ophalen uit AIRS')}</button>
+          {!leonteqPortfolio && <button type="button" className={ctl} onClick={() => void refreshMonth('monthly-report')} disabled={busy || pending || !!report.warning}>{busy ? text('Reading AIRS…', 'AIRS ophalen…') : selectedReport?.snapshot ? text('Refresh month', 'Maand verversen') : text('Load month from AIRS', 'Maand ophalen uit AIRS')}</button>}
         </div></div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{name}</span>

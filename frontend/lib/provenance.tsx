@@ -29,6 +29,7 @@ import {
 } from './snapshotAge';
 
 export type SourceKey =
+  | 'leonteq'
   | 'airs_volk'      // AIRS Vermogensoverzicht — the book's own EUR position values
   | 'airs_att'       // AIRS Rendementen — the account's flow-aware return (cumulatief_rendement)
   | 'airs_model'     // AIRS Model-portefeuille scan — composition (ISIN, fund, weight, sector)
@@ -64,6 +65,7 @@ const isAirsSource = (source: SourceKey) => AIRS_SOURCES.has(source);
  * exposed so a sentence can use one of them instead of the whole thing.
  */
 const SOURCE: Record<SourceKey, { vendor: string; field: string; qualifier?: string }> = {
+  leonteq: { vendor: 'Leonteq', field: 'LYNQS portfolio' },
   airs_volk: { vendor: 'AIRS', field: 'Vermogensoverzicht' },
   airs_att: { vendor: 'AIRS', field: 'Rendementen', qualifier: 'ATT' },
   airs_model: { vendor: 'AIRS', field: 'Model-portefeuille' },

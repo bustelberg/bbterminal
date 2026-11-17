@@ -230,12 +230,12 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     ),
     JobSpec(
         id='portfolio_valuation_daily', label='Daily portfolio valuation',
-        fills='Saved historical P/E valuation tables for dashboard model portfolios',
-        cadence='Daily, 23:15 UTC',
-        trigger={'hour': 23, 'minute': 15, 'timezone': 'UTC'},
+        fills='Fresh source holdings, Yahoo prices, GuruFocus valuation inputs and complete dashboard payloads',
+        cadence='Daily, 08:00 Europe/Amsterdam',
+        trigger={'hour': 8, 'minute': 0, 'timezone': 'Europe/Amsterdam'},
         options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
         max_age_hours=30,
-        note='Reads saved Yahoo closes and reported quarterly EPS. No provider requests. Missing inputs remain explicitly unavailable; failed publications retain prior results.',
+        note='Refreshes AIRS holdings and Leonteq-only Topselecties, then Yahoo prices and GuruFocus inputs once per company. Prepares portfolio valuations for single-request reads. Amsterdam timezone follows daylight saving; partial failures retain completed data.',
     ),
     JobSpec(
         id='benchmark_factsheet_daily', label='Daily benchmark factsheet',

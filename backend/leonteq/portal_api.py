@@ -69,6 +69,8 @@ def catalogue(payload):
         result.append({
             'name': row['name'].strip(), 'sponsor': (row.get('indexSponsor') or '').strip() or None,
             'start_date': date.fromisoformat(row['inceptionDate'][:10]).strftime('%d %b %Y'),
+            'inception_date': date.fromisoformat(row['inceptionDate'][:10]).isoformat(),
+            'as_of': _source_date({'date': row.get('valuationDate')}) or _source_date(row.get('currentValuation')),
             'value': _text(row['currentValuation']), 'aum': _text(row['assetsUnderManagement'], 0),
             'change': f'{_text(absolute)} ({change})' if absolute is not None and change is not None else None,
             'itd': _percent(row.get('performanceInception')), 'ytd': _percent(row.get('performanceYTD')),
@@ -77,6 +79,14 @@ def catalogue(payload):
     if len({row['name'] for row in result}) != len(result):
         raise ApiUnavailable('Ambiguous portfolio names')
     return result
+
+
+def _source_date(value):
+    stamp = value.get('date') if isinstance(value, dict) else None
+    try:
+        return date.fromisoformat(stamp[:10]).isoformat() if isinstance(stamp, str) else None
+    except ValueError:
+        return None
 
 
 def composition(payload, name):
@@ -118,7 +128,8 @@ def composition(payload, name):
         group['weight'] = _text(group.pop('_weight')) + '%'
     return {'portfolio_name': name, 'groups': list(groups.values()),
             'total_value': f'{_text(totals["totalValueAmcCcy"])} {currency}',
-            'total_weight': _text(totals['weightPercentAmcCcy']) + '%'}
+            'total_weight': _text(totals['weightPercentAmcCcy']) + '%',
+            'as_of': _source_date({'date': payload.get('closingPriceDate')})}
 
 
 def monthly(payload, name):
@@ -140,9 +151,14 @@ def monthly(payload, name):
     return {'portfolio_name': name, 'months': months, 'yearly_totals': totals}
 
 
-def read(page, ids, name=None, performance=False, transactions=False):
+def read(page, ids, name=None, performance=False, transactions=False, *, accounting=False,
+         valuation_date=None, history=False, end=None, instructions=False):
     def get(path):
-        response = page.request.get(f'{BASE}/{path}', headers={'Cache-Control': 'no-cache'}, timeout=10000)
+        try:
+            response = page.request.get(f'{BASE}/{path}', headers={'Cache-Control': 'no-cache'}, timeout=10000)
+        except Exception:
+            # Browser transport errors can contain authenticated request headers.
+            raise ApiUnavailable('The authenticated source API request failed; retry the refresh') from None
         if not response.ok:
             raise ApiUnavailable('The authenticated source API is unavailable')
         return response.json()
@@ -158,7 +174,26 @@ def read(page, ids, name=None, performance=False, transactions=False):
     if name not in ids:
         raise ApiUnavailable('Portfolio not found in the current catalogue')
     path = f'amc/{quote(ids[name], safe="")}'
-    if transactions:
+    if instructions:
+        rows, total, seen = [], None, set()
+        while total is None or len(rows) < total:
+            data = get(path + f'/rebalancing-orders?offset={len(rows)}&limit=100&sort=-orderDate')
+            if (not isinstance(data, dict) or not isinstance(data.get('rows'), list)
+                    or type(data.get('totalRows')) is not int or not 0 <= data['totalRows'] <= 20000
+                    or total is not None and data['totalRows'] != total):
+                raise ApiUnavailable('Incomplete or changing Leonteq instructions feed')
+            total = data['totalRows']
+            batch = data['rows']
+            for row in batch:
+                identity = row.get('id') if isinstance(row, dict) else None
+                if not identity or identity in seen:
+                    raise ApiUnavailable('Missing or overlapping Leonteq instruction identities')
+                seen.add(identity)
+            rows.extend(batch)
+            if len(rows) > total or not batch and len(rows) < total:
+                raise ApiUnavailable('Incomplete Leonteq instruction pagination')
+        return {'success': True, 'instructions': rows, 'complete': True}
+    if transactions or accounting:
         from leonteq.recent_transactions import parse_transactions
         from leonteq.progress import report
         rows, total, seen = [], None, set()
@@ -182,8 +217,19 @@ def read(page, ids, name=None, performance=False, transactions=False):
                 break
             if not batch:
                 raise ApiUnavailable('Incomplete transaction pagination')
-        return {'success': True, 'transactions': parse_transactions({'rows': rows, 'totalRows': total}),
+        if accounting:
+            from leonteq.accounting import transactions as parse_accounting
+            parsed = parse_accounting({'rows': rows, 'totalRows': total})
+        else:
+            parsed = parse_transactions({'rows': rows, 'totalRows': total})
+        return {'success': True, 'transactions': parsed, 'complete': True,
                 'retrieved_at': datetime.now(timezone.utc).isoformat()}
+    if history:
+        suffix = '/performance' + (f'?to={date.fromisoformat(end).isoformat()}' if end else '')
+        return {'success': True, 'history': get(path + suffix), 'details': get(path + '/index-details')}
+    if valuation_date:
+        stamp = date.fromisoformat(valuation_date).isoformat()
+        return {'success': True, 'accounting_valuation': get(path + f'/composition?sort=%2Bname&date={stamp}')}
     result = monthly(get(path + '/monthly-performance'), name) if performance else composition(get(path + '/composition?sort=%2Bname'), name)
     return {'success': True, 'status': 'success', 'source': 'lynqs_api',
             'retrieved_at': datetime.now(timezone.utc).isoformat(), **result}
