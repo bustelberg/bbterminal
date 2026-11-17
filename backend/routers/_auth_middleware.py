@@ -258,6 +258,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     "/api/airs/portfolio/tracking-error/repair/job",
     "/api/airs/model-portfolios/scan/job",
     "/api/airs/model-portfolios/refresh/job",
+    "/api/airs/valuation/holdings/refresh/job",
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).
     "/api/airs/basket/fundamentals/ingest/job",
     # The Analyse modal's input tables → fetch ONE `no_data` holding's financials.
@@ -281,6 +282,8 @@ _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/leonteq/management/topselecties/[^/]+/refresh/job$"),
     re.compile(r"^/api/airs/valuation/portfolios/\d+/refresh$"),
+    re.compile(r"^/api/airs/valuation/portfolios/\d+/dashboard/refresh$"),
+    re.compile(r"^/api/airs/valuation/portfolios/\d+/rows/[^/]+/refresh$"),
     # Analyse → fetch exactly one month's AIRS reports, with progress/cancel.
     re.compile(r"^/api/airs/accounts/[^/]+/monthly-report/job$"),
     re.compile(r"^/api/airs/accounts/[^/]+/monthly-benchmark/job$"),

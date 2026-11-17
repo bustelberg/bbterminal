@@ -655,3 +655,19 @@ def test_valuation_workbook_assumptions_are_an_exact_authenticated_user_write(mo
     assert _run(monkeypatch, 'PUT', path, None) == (401, False)
     assert _run(monkeypatch, 'PUT', path + '/other', 'user') == (403, False)
     assert _run(monkeypatch, 'DELETE', path, 'user') == (403, False)
+
+
+@pytest.mark.parametrize('method,path', [
+    ('GET', '/api/airs/valuation/portfolios'),
+    ('GET', '/api/airs/valuation/portfolios/7/dashboard'),
+    ('POST', '/api/airs/valuation/portfolios/7/dashboard/refresh'),
+    ('POST', '/api/airs/valuation/portfolios/7/rows/US0534841012/refresh'),
+    ('POST', '/api/airs/valuation/holdings/refresh/job'),
+    ('PUT', '/api/airs/valuation/portfolios/7/workbook'),
+])
+def test_valuation_is_fully_available_to_authenticated_users(monkeypatch, method, path):
+    assert _run(monkeypatch, method, path, 'user') == (200, True)
+    assert _run(monkeypatch, method, path, None) == (401, False)
+    if method != 'GET':
+        assert _run(monkeypatch, method, path + '/other', 'user') == (403, False)
+        assert _run(monkeypatch, 'DELETE', path, 'user') == (403, False)
