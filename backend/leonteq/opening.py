@@ -9,7 +9,7 @@ from decimal import Decimal as D
 from leonteq.portal_api import ApiUnavailable, _number
 
 
-def initial_records(records, orders, composition, start, end):
+def initial_records(records, orders, composition, start, end, *, prefer_transactions=False):
     identities = {r.get('instrumentRic'): r.get('instrumentIsin') for r in composition['rows']
                   if r.get('instrumentRic') and r.get('instrumentIsin')}
     combined = list(records)
@@ -35,6 +35,9 @@ def initial_records(records, orders, composition, start, end):
         if matches:
             exact = [(i, r) for i, r in matches if r['cash_eur'] is not None and abs(D(r['cash_eur']) - cash) <= D('.02')]
             if len(exact) != 1:
+                if prefer_transactions and len(matches) == 1:
+                    consumed.add(matches[0][0])
+                    continue
                 raise ApiUnavailable('Initial Leonteq instruction and transaction amounts conflict')
             consumed.add(exact[0][0])
             continue
@@ -49,7 +52,7 @@ def initial_records(records, orders, composition, start, end):
     return combined
 
 
-def reconstruct(first, records, start, points):
+def reconstruct(first, records, start, points, *, opening_cash=None):
     """Reverse all initial fills and cash, then independently verify index return.
 
     This is limited to an all-cash launch: zero residual securities, every initial
@@ -71,6 +74,8 @@ def reconstruct(first, records, start, points):
         if abs(first['positions'].get(identity, {}).get('quantity', D(0)) - quantities[identity]) > D('.000001'):
             raise ApiUnavailable('Leonteq initial executions do not explain every opening holding')
     cash = first['positions'].get('cash:EUR', {}).get('value', D(0)) - sum(D(r['cash_eur']) for r in trades)
+    if opening_cash is not None:
+        cash = D(str(opening_cash))
     if cash <= 0:
         raise ApiUnavailable('Leonteq reconstructed opening cash is invalid')
     tolerance = D('.01') * (len(first['positions']) + len(trades))

@@ -926,8 +926,8 @@
         "FTS",
         "STAR"
       ],
-      "basis_kind": "manual",
-      "basis_label": "SOTP / optie-scenario vereist",
+      "basis_kind": "forward_eps",
+      "basis_label": "",
       "manual_basis": null,
       "basis_currency": null,
       "basis_date": null,

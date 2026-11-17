@@ -45,7 +45,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
     setError(null);
     setPending(true);
     const request = leonteqPortfolio
-      ? apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}`)
+      ? apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}?benchmark=${encodeURIComponent(benchmarkLabel)}`)
         .then(async response => {
           if (!response.ok) throw new Error('Leonteq performance could not be loaded.');
           const source = await response.json();
@@ -58,7 +58,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-  }, [portefeuille, leonteqPortfolio, leonteqReturns, reload]);
+  }, [portefeuille, leonteqPortfolio, leonteqReturns, benchmarkLabel, reload]);
 
   const data = bundle?.portefeuille === (leonteqPortfolio ?? portefeuille) ? bundle : null;
   const today = data?.current_month ?? '';
@@ -145,7 +145,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   };
   const benchmarkDetails = (key: string) => {
     const benchmark = report?.weighted_benchmark[key];
-    if (leonteqPortfolio) return <p className="text-xs">{text(
+    if (leonteqPortfolio && !benchmark) return <p className="text-xs">{text(
       'Monthly benchmark details are not available in this saved Leonteq report. The YTD comparison uses the aligned dates shown above.',
       'Maandelijkse benchmarkdetails zijn niet beschikbaar in dit opgeslagen Leonteq-rapport. De YTD-vergelijking gebruikt de hierboven getoonde gelijke datums.')}</p>;
     return <div className="space-y-3 text-xs">
@@ -159,7 +159,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
       <td className="px-2 py-2"><span className="block tabular-nums">{component.end_price_eur != null ? eurPrice(component.end_price_eur) : '—'}</span><span className="text-fg-subtle">{holdingDate(component.end_date)}</span></td>
       <td className={`px-2 py-2 tabular-nums ${tone(component.return_pct)}`}>{pct(component.return_pct)}</td>
     </tr>)}</tbody></table></div>
-    <p>{text('Each ETF return = (closing price in EUR ÷ opening price in EUR − 1) × 100. The opening price is the last available close on or before the previous month-end; the closing price matches the AIRS observation date for this month.', 'Elk ETF-rendement = (eindkoers in EUR ÷ beginkoers in EUR − 1) × 100. De beginkoers is de laatst beschikbare slotkoers op of vóór het vorige maandeinde; de eindkoers sluit aan op de AIRS-waarnemingsdatum van deze maand.')}</p>
+    <p>{text('Each ETF return = (closing price in EUR ÷ opening price in EUR − 1) × 100. Opening and closing prices use the last available close on or before the portfolio dates; a partial first month starts at the portfolio opening.', 'Elk ETF-rendement = (eindkoers in EUR ÷ beginkoers in EUR − 1) × 100. Begin- en eindkoersen gebruiken de laatste beschikbare slotkoers op of vóór de portefeuilledatums; een gedeeltelijke eerste maand begint bij de start van de portefeuille.')}</p>
     <p className="text-fg-subtle">{text('Weighted return = sum of each ETF return × its policy weight ÷ 100. Prices per unit in EUR, including currency movements. Source: stored Yahoo Finance ETF prices.', 'Gewogen rendement = som van elk ETF-rendement × het beleidsgewicht ÷ 100. Prijzen per stuk in EUR, inclusief valuta-effecten. Bron: opgeslagen Yahoo Finance ETF-prijzen.')}</p>
     <p className="text-fg-subtle">{text('Foreign-currency prices are converted using stored exchange rates at each endpoint. Calculations use full precision; the displayed prices and returns are rounded.', 'Koersen in vreemde valuta worden omgerekend met opgeslagen wisselkoersen aan het begin en einde van de periode. De berekening gebruikt volledige precisie; getoonde koersen en rendementen zijn afgerond.')}</p>
     {!!benchmark?.components?.length && <p className="font-mono">{benchmark.components.map((component) => `(${pct(component.return_pct)} × ${component.weight_pct} / 100)`).join(' + ')} = {pct(benchmark.return_pct)}</p>}

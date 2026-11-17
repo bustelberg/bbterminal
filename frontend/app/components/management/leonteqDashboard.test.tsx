@@ -55,7 +55,8 @@ it('uses the identical overview table and Analyse control with Leonteq data and 
     const table = host.querySelector('table')!;
     const headers = [...table.querySelectorAll('thead th')].map(cell => cell.textContent);
     const tableClass = table.className;
-    expect(headers).toEqual(['#', '', 'Name▲', 'Month-to-date▾', 'Year-to-date▾', 'Since', 'To']);
+    expect(headers).toEqual(['#', '', 'Name▲', 'Month-to-date▾', 'Year-to-date▾', 'Since', 'To', 'Source']);
+    expect(table.querySelector('tbody tr td:last-child')?.textContent).toBe('Leonteq');
     const findButton = (text: string) => [...host.querySelectorAll('button')].find(button => button.textContent?.trim() === text)!;
     await act(async () => findButton('Analyse').click());
     const modal = host.querySelector('[data-testid="analysis"]')!;

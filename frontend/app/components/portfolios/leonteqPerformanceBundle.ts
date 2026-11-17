@@ -7,6 +7,7 @@ export type LeonteqPerformanceReturns = {
 
 export type LeonteqPerformanceSource = {
   success?: boolean;
+  monthly_benchmark?: PerformanceBundle['years'][string]['weighted_benchmark'];
   performance?: { months?: { month: string; return_pct: number | null }[]; yearly_totals?: Record<string, number> };
 };
 
@@ -25,6 +26,8 @@ export function leonteqPerformanceBundle(name: string, source: LeonteqPerformanc
         benchmark_pct: null, excess_pp: null, start: null, end: null },
     };
     report.months.push(row.month);
+    const benchmark = source.monthly_benchmark?.[row.month];
+    if (benchmark) report.weighted_benchmark[row.month] = benchmark;
     report.rows[row.month] = { rendement: row.return_pct,
       periode: row.month === currentMonth ? returns?.portfolio_as_of ?? '' : '' };
     report.details[row.month] = { needs_refresh: false, benchmark_needs_refresh: false, snapshot: null };

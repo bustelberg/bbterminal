@@ -362,6 +362,10 @@ def _grid(isins: list[str]) -> dict[str, dict]:
 
 
 def _grid_uncached(isins: list[str]) -> dict[str, dict]:
+    from asset_pipeline.security_reference import ORDINARY_SHARE_REFERENCES, ISSUER_METADATA
+    requested = set(isins)
+    isins = sorted(requested | {ORDINARY_SHARE_REFERENCES[isin] for isin in requested
+                               if isin in ORDINARY_SHARE_REFERENCES})
     # One copy instead of ceil(len/200) round trips — see `load_rows_via_copy`. The chunked
     # PostgREST loop below is the fallback and is what runs when the direct connection is
     # unavailable; both return the same rows (verified field for field, types included).
@@ -421,7 +425,14 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
                 r["sector_default"] = default_sector
                 r["sector_overridden"] = False
             out[r["isin"]] = r
-    return out
+    # Receipt and ordinary-share prices/units are not interchangeable. Only
+    # issuer metadata is inherited, and the held security keeps its own ISIN.
+    for isin in requested - out.keys():
+        reference = ORDINARY_SHARE_REFERENCES.get(isin)
+        if reference in out:
+            out[isin] = {key: out[reference].get(key) for key in ISSUER_METADATA}
+            out[isin].update(isin=isin, metadata_reference_isin=reference)
+    return {isin: out[isin] for isin in requested if isin in out}
 
 
 def _fill_annotation_company_ids(rows):
@@ -563,7 +574,7 @@ def _buckets(row: dict | None, is_cash: bool, isin: str | None = None,
         return FUND_BUCKET, FUND_BUCKET, FUND_BUCKET
     return (
         _sector(row.get("sector")),
-        _region(row, isin, codes or {}),
+        _region(row, row.get('metadata_reference_isin') or isin, codes or {}),
         #  `market_cap_currency`, NOT the listing currency. Same disease as the region above: the
         # listing is OUR choice of venue, and where that choice is wrong it invents exposure the
         # company does not have — pricing Corning off Stuttgart does not make it a euro asset. On

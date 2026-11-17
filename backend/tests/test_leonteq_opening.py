@@ -82,6 +82,8 @@ def test_collector_recovers_only_actual_inception_and_retains_execution_evidence
     def read(_page, _ids, name, **options):
         if options.get('accounting'):
             return {'transactions': []}
+        if options.get('cash_history'):
+            return {'complete': False}
         if options.get('instructions'):
             return {'instructions': [order()]}
         if options.get('history'):

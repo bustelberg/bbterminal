@@ -51,6 +51,13 @@ def transactions(payload):
             record['cash_eur'] = str(-Decimal(net) * Decimal(fx)) if (
                 net is not None and fx is not None and Decimal(fx) > 0
                 and record['booking_currency'] == 'EUR') else None
+            # Corporate-action pairs may settle in the instrument currency.
+            # Use the source's native-to-AMC rate, never today's market FX.
+            if (record['cash_eur'] is None and net is not None
+                    and record['booking_currency'] not in (None, 'EUR')
+                    and record['booking_currency'] == record['currency']
+                    and record['base_fx'] is not None and Decimal(record['base_fx']) > 0):
+                record['cash_eur'] = str(-Decimal(net) * Decimal(record['base_fx']))
         except (KeyError, TypeError, ValueError) as exc:
             raise ApiUnavailable('Incomplete Leonteq accounting transaction') from exc
         if identity in seen and seen[identity] != record:
@@ -73,11 +80,9 @@ def valuation(payload, expected_date):
             raise ApiUnavailable('Leonteq accounting requires EUR base valuations')
         isin = (row.get('instrumentIsin') or '').strip().upper() or None
         cash = row.get('instrumentCategory') == 'Cash'
-        if cash and row.get('currency') != 'EUR':
-            raise ApiUnavailable('Non-EUR cash needs a complete Leonteq FX cash ledger')
         if not cash and not isin:
             raise ApiUnavailable('Leonteq security has no accounting identity')
-        identity = 'cash:EUR' if cash else isin
+        identity = 'cash:' + row['currency'] if cash else isin
         if identity in positions:
             raise ApiUnavailable('Duplicate Leonteq accounting position identity')
         value = _number(row['totalValueAmcCcy'])
@@ -93,7 +98,7 @@ def valuation(payload, expected_date):
     return {'date': stamp, 'nav': nav, 'positions': positions}
 
 
-def calculate(boundaries, records, points, reported_ytd):
+def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=False, cash_flows=None):
     """Daily source P&L, checked capital-flow timing, then forward-link contributions.
 
     Trading net cash already includes transaction charges/taxes. AMC fees are a
@@ -107,6 +112,8 @@ def calculate(boundaries, records, points, reported_ytd):
     linked = defaultdict(lambda: ZERO)
     total_return = ZERO
     has_external_flows = False
+    estimated = False
+    cash_differences = []
     for before, after, (start, start_index), (end, end_index) in zip(boundaries, boundaries[1:], points, points[1:]):
         if before['date'] != start or after['date'] != end or start_index <= 0:
             raise ApiUnavailable('Leonteq valuation and return windows differ')
@@ -118,7 +125,8 @@ def calculate(boundaries, records, points, reported_ytd):
             if record['cash_eur'] is None:
                 raise ApiUnavailable('Leonteq transaction is missing net cash or booking FX')
             amount = Decimal(record['cash_eur'])
-            cash_total += amount
+            if record.get('booking_currency') == 'EUR':
+                cash_total += amount
             event = record['event']
             if event == 'AMC Fees':
                 if amount > 0:
@@ -136,6 +144,21 @@ def calculate(boundaries, records, points, reported_ytd):
             old = before['positions'].get(identity)
             new = after['positions'].get(identity)
             trades = by_security[identity]
+            foreign_cash = identity.startswith('cash:')
+            if foreign_cash:
+                currency = identity.split(':', 1)[1]
+                settled = [r for r in interval if r.get('booking_currency') == currency]
+                native_change = sum((-Decimal(r['net_amount']) * Decimal(r['booking_fx'])
+                    for r in settled if r.get('net_amount') is not None and r.get('booking_fx') is not None), ZERO)
+                if abs((new or {}).get('quantity', ZERO) - (old or {}).get('quantity', ZERO) - native_change) > Decimal('.02'):
+                    raise ApiUnavailable('Foreign cash quantities need complete source settlement movements')
+                profit = ((new or {}).get('value', ZERO) - (old or {}).get('value', ZERO)
+                          - sum((Decimal(r['cash_eur']) for r in settled), ZERO))
+                day[identity] = profit
+                item = ledger.setdefault(identity, {'name': (new or old)['name'], 'isin': None,
+                    'opening': ZERO, 'profit': ZERO, 'buys': ZERO, 'dividends': ZERO})
+                item['profit'] += profit
+                continue
             quantity_change = ZERO
             for trade in trades:
                 if trade['event'] in ('Buy', 'Sell'):
@@ -161,9 +184,18 @@ def calculate(boundaries, records, points, reported_ytd):
         old_cash = before['positions'].get('cash:EUR', {}).get('value', ZERO)
         new_cash = after['positions'].get('cash:EUR', {}).get('value', ZERO)
         external = new_cash - old_cash - cash_total
+        if cash_flows is not None:
+            observed = sum((Decimal(r['cash_eur']) for r in cash_flows if start < r['date'] <= end), ZERO)
+            difference = external - observed
+            if abs(difference) > Decimal('.02'):
+                if not allow_estimates:
+                    raise ApiUnavailable(f'Leonteq cash movements and position ledger differ ({start} to {end})')
+                estimated = True
+                cash_differences.append({'from': start, 'to': end, 'difference_eur': float(difference)})
+            external = observed
         has_external_flows = has_external_flows or abs(external) > Decimal('.02')
         pnl = sum(day.values(), ZERO)
-        if abs(after['nav'] - before['nav'] - pnl - external) > Decimal('.02'):
+        if abs(after['nav'] - before['nav'] - pnl - external) > Decimal('.02') and not allow_estimates:
             raise ApiUnavailable('Leonteq NAV and cash ledger do not reconcile')
         rate = end_index / start_index - 1
         # Source amounts round to cents and index marks have finite precision.
@@ -173,16 +205,22 @@ def calculate(boundaries, records, points, reported_ytd):
             candidates.append(before['nav'] + external)
         valid = [basis for basis in candidates if basis > 0 and abs(pnl / basis - rate) <= money_tolerance / basis + Decimal('.000001')]
         if not valid:
-            raise ApiUnavailable(f'Leonteq daily P&L does not reconcile to its reported return/flow timing ({start} to {end})')
+            if not allow_estimates:
+                raise ApiUnavailable(f'Leonteq daily P&L does not reconcile to its reported return/flow timing ({start} to {end})')
+            valid = [before['nav']]
+            estimated = True
         if len(valid) > 1 and any(abs(value / valid[0] - value / valid[1]) > Decimal('.00001') for value in day.values()):
-            raise ApiUnavailable('Leonteq external cash-flow timing is ambiguous')
+            if not allow_estimates:
+                raise ApiUnavailable('Leonteq external cash-flow timing is ambiguous')
+            valid = [before['nav']]
+            estimated = True
         basis = valid[0]
         for identity in set(linked) | set(day):
             linked[identity] = linked[identity] * (1 + rate) + day.get(identity, ZERO) / basis
         total_return = (1 + total_return) * (1 + rate) - 1
     if reported_ytd is None or abs(total_return * HUNDRED - Decimal(str(reported_ytd))) > Decimal('.0051'):
         raise ApiUnavailable('Leonteq contribution window does not match its reported YTD')
-    if abs(sum(linked.values(), ZERO) - total_return) > Decimal('.00005'):
+    if not estimated and abs(sum(linked.values(), ZERO) - total_return) > Decimal('.00005'):
         raise ApiUnavailable('Linked Leonteq contributions do not reconcile to reported YTD')
     first, last = boundaries[0], boundaries[-1]
     for identity, item in ledger.items():
@@ -191,7 +229,10 @@ def calculate(boundaries, records, points, reported_ytd):
         capital = item['opening'] + item['buys']
         item['return_pct'] = item['profit'] / capital * HUNDRED if capital > 0 else None
         item['contribution_pct'] = linked[identity] * HUNDRED
-    return {'available': True, 'from': first['date'], 'to': last['date'],
+    return {'available': True, 'estimated': estimated, 'from': first['date'], 'to': last['date'],
+            'calculated_contribution_pct': float(sum(linked.values(), ZERO) * HUNDRED),
+            'difference_pct': float((total_return - sum(linked.values(), ZERO)) * HUNDRED),
+            'source_cash_flows_available': cash_flows is not None, 'cash_differences': cash_differences,
             'reported_ytd_pct': float(reported_ytd), 'basis_eur': float(first['nav']),
             'has_external_flows': has_external_flows,
             'cash': {'opening': float(first['positions'].get('cash:EUR', {}).get('value', ZERO)),
@@ -214,14 +255,22 @@ def saved(name):
         return None
 
 
-def _collect(page, ids, name, as_of, progress):
+def _collect(page, ids, name, as_of, progress, previous=None):
     from leonteq.portal_api import read
+    previous = previous or {}
     records = read(page, ids, name, accounting=True)
-    history_source = read(page, ids, name, history=True, end=as_of)
+    # The source's performanceYTD is always current, even when ?to= truncates
+    # its curve. Fetch both without a historical cutoff so they share one end.
+    history_source = read(page, ids, name, history=True)
     history = history_source['history']
     payload = {'version': VERSION, 'source': 'Leonteq', 'transactions': records['transactions'],
                'history': history, 'index_details': history_source['details'],
                'valuations': {}, 'retrieved_at': datetime.now(timezone.utc).isoformat()}
+    try:
+        payload['certificate_cash_history'] = read(page, ids, name, cash_history=True,
+            previous_cash_history=previous.get('certificate_cash_history'))
+    except ApiUnavailable as exc:
+        payload['certificate_cash_history'] = {'complete': False, 'reason': str(exc)}
     try:
         if history_source['details'].get('currency') != 'EUR':
             raise ApiUnavailable('Leonteq contribution requires an EUR-denominated index history')
@@ -234,7 +283,12 @@ def _collect(page, ids, name, as_of, progress):
             if stamp in marks:
                 raise ApiUnavailable('Duplicate dates in Leonteq return history')
             marks[stamp] = _number(value)
-        dates = sorted(d for d in marks if d <= as_of)
+        # Some source deployments ignore ?to=. Their published YTD then refers
+        # to the actual latest history point, not the requested composition date.
+        # Validate and collect that authoritative window as one coherent unit.
+        from leonteq.return_windows import parse as return_window
+        window = return_window(history, history_source['details'], name, payload['retrieved_at'])
+        dates = sorted(d for d in marks if window['from'] <= d <= window['to'])
         if len(dates) < 2:
             raise ApiUnavailable('Leonteq has no complete return window')
         year_start = f'{dates[-1][:4]}-01-01'
@@ -246,14 +300,22 @@ def _collect(page, ids, name, as_of, progress):
         dates = [d for d in dates if d >= anchor]
         if len(dates) > 400:
             raise ApiUnavailable('Leonteq valuation window is oversized')
-        source_return = next((r for r in history.get('performances') or [] if r.get('nameOrIsin') == name), None)
-        if not source_return:
-            raise ApiUnavailable('Leonteq has no matching portfolio YTD')
-        target = _number(source_return.get('performanceYTD'))
+        target = Decimal(str(window['ytd_pct']))
         boundaries = []
+        previous = previous or {}
+        previous_marks = dict((previous.get('history') or {}).get('series') or [])
+        previous_values = previous.get('valuations') or {}
+        previous_end = max(previous_values, default='')
+        cached_count = 0
         for index, stamp in enumerate(dates):
             progress(index, len(dates), f'Leonteq accounting · valuation {stamp}')
-            raw = read(page, ids, name, valuation_date=stamp)['accounting_valuation']
+            if (stamp < previous_end and stamp < dates[-1] and stamp in previous_values
+                    and previous_marks.get(stamp) is not None
+                    and _number(previous_marks[stamp]) == marks[stamp]):
+                raw = previous_values[stamp]
+                cached_count += 1
+            else:
+                raw = read(page, ids, name, valuation_date=stamp)['accounting_valuation']
             payload['valuations'][stamp] = raw
             if (index == 0 and not anchors and stamp == series[0][0][:10]
                     and raw.get('closingPriceDate') == stamp and raw.get('rows') == [] and raw.get('totals') == {}):
@@ -265,9 +327,14 @@ def _collect(page, ids, name, as_of, progress):
                 orders = read(page, ids, name, instructions=True)['instructions']
                 payload['initial_instructions'] = orders
                 payload['valuations'][dates[1]] = first_raw
-                records['transactions'] = initial_records(records['transactions'], orders, first_raw, stamp, dates[1])
+                records['transactions'] = initial_records(records['transactions'], orders, first_raw, stamp, dates[1],
+                    prefer_transactions=True)
                 payload['transactions'] = records['transactions']
-                opening = reconstruct(first, records['transactions'], stamp, [(d, marks[d]) for d in dates])
+                source_cash = payload.get('certificate_cash_history') or {}
+                funding = sum((_number(row['netFlows']) for certificate in source_cash.get('certificates') or []
+                    for row in certificate.get('cash_movements') or [] if row['dateTime'][:10] == dates[1]), ZERO)
+                opening = reconstruct(first, records['transactions'], stamp, [(d, marks[d]) for d in dates],
+                    opening_cash=funding if source_cash.get('complete') and funding > 0 else None)
                 payload['opening_reconstruction'] = {
                     'method': 'booked_initial_executions_and_cash', 'date': stamp,
                     'first_composition_date': dates[1], 'opening_cash_eur': str(opening['nav']),
@@ -275,8 +342,23 @@ def _collect(page, ids, name, as_of, progress):
                 boundaries.append(opening)
             else:
                 boundaries.append(valuation(raw, stamp))
-        result = calculate(boundaries, records['transactions'], [(d, marks[d]) for d in dates], target)
-        payload.update(success=True, status='reconciled', result=result)
+        cash_history = payload.get('certificate_cash_history') or {}
+        cash_flows = None
+        if cash_history.get('complete'):
+            cash_flows = [{'date': row['dateTime'][:10], 'cash_eur': str(_number(row['netFlows']))}
+                for certificate in cash_history.get('certificates', []) for row in certificate['cash_movements']]
+            reconstruction = payload.get('opening_reconstruction')
+            if reconstruction:
+                first_date = reconstruction['first_composition_date']
+                launch = sum((Decimal(r['cash_eur']) for r in cash_flows if r['date'] == first_date), ZERO)
+                if abs(launch - boundaries[0]['nav']) <= Decimal('.02'):
+                    # Initial funding is already the reconstructed opening capital.
+                    cash_flows = [r for r in cash_flows if r['date'] != first_date]
+                    payload['opening_reconstruction']['source_funding_verified'] = True
+        result = calculate(boundaries, records['transactions'], [(d, marks[d]) for d in dates], target,
+                           allow_estimates=True, cash_flows=cash_flows)
+        payload['cached_valuations'] = cached_count
+        payload.update(success=True, status='estimated' if result['estimated'] else 'reconciled', result=result)
     except ApiUnavailable as exc:
         payload.update(success=False, status='accounting_unavailable', reason=str(exc), result={'available': False})
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -299,9 +381,10 @@ def refresh(name, as_of, progress=None):
     if not _login_lock.acquire(blocking=False):
         return {'success': False, 'status': 'busy', 'reason': 'Another Leonteq read is running'}
     try:
+        previous = saved(name)
         try:
             payload = on_session_thread(lambda: _collect(session.resources[3], session.portfolio_ids, name, as_of,
-                                                         progress or (lambda *_: None)))
+                                                         progress or (lambda *_: None), previous))
         except ApiUnavailable as exc:
             payload = {'version': VERSION, 'source': 'Leonteq', 'success': False,
                        'status': 'accounting_unavailable', 'reason': str(exc),

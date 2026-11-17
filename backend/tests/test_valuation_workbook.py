@@ -25,6 +25,20 @@ def test_consensus_preserves_basis_and_does_not_splice_different_eps_series():
     assert 'Conflicting' in W.consensus(rows, date.today().isoformat())['reason']
 
 
+def test_tesla_defaults_to_saved_eps_and_repairs_only_the_empty_legacy_template():
+    seed = next(row for row in W.defaults()['companies'] if row['ticker'] == 'TSLA')
+    assert seed['basis_kind'] == 'forward_eps'
+    legacy = {'basis_kind': 'manual', 'basis_label': 'SOTP / optie-scenario vereist',
+        'manual_basis': None, 'fair_multiple': 11, 'review_required': True}
+    repaired = W.normalize_assumptions('TSLA', legacy)
+    assert repaired == {**legacy, 'basis_kind': 'forward_eps', 'basis_label': ''}
+    assert W.normalize_assumptions('OTHER', legacy) == legacy
+    entered = {**legacy, 'manual_basis': 10, 'basis_currency': 'USD'}
+    assert W.normalize_assumptions('TSLA', entered) == entered
+    intentional = {**legacy, 'basis_label': 'My manual scenario'}
+    assert W.normalize_assumptions('TSLA', intentional) == intentional
+
+
 def setup(monkeypatch):
     database = FakeSupabase({'company': [{'company_id': 1, 'isin': 'EXACT', 'gurufocus_ticker': 'ADBE',
         'gurufocus_exchange': {'is_us': True, 'exchange_code': 'NAS', 'currency_code': 'USD'}}],

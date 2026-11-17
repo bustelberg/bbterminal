@@ -34,15 +34,19 @@ def parse(history, details, name, retrieved_at):
         if not issue or issue[:10] < year_start:
             raise ApiUnavailable('Leonteq return history lacks the year-opening index mark')
         anchor = dates[0]
-    reported = next((row for row in history.get('performances') or [] if row.get('nameOrIsin') == name), None)
-    if not reported:
+    reports = [row for row in history.get('performances') or []
+               if str(row.get('nameOrIsin') or '').strip() == name.strip()]
+    if len(reports) != 1:
         raise ApiUnavailable('Leonteq has no matching published YTD return')
+    reported = reports[0]
     ytd = _number(reported.get('performanceYTD'))
     measured = (marks[dates[-1]] / marks[anchor] - 1) * 100
     if anchor >= dates[-1] or abs(measured - ytd) > Decimal('.0051'):
         raise ApiUnavailable('Leonteq return dates do not reconcile to its published YTD')
     return {'portfolio_name': name, 'currency': 'EUR', 'from': anchor, 'to': dates[-1],
-            'ytd_pct': float(ytd), 'retrieved_at': retrieved_at, 'source': 'lynqs_api'}
+            'ytd_pct': float(ytd), 'retrieved_at': retrieved_at, 'source': 'lynqs_api',
+            'returns': [{'date': stamp, 'cum_pct': float((marks[stamp] / marks[anchor] - 1) * 100)}
+                        for stamp in dates if stamp >= anchor]}
 
 
 def _fresh(window, name, catalogue_fetched_at):

@@ -17,6 +17,15 @@ def defaults():
     return json.loads(DEFAULTS.read_text(encoding='utf-8'))
 
 
+def normalize_assumptions(ticker, assumptions):
+    """Repair the old empty Tesla SOTP template; preserve entered manual bases."""
+    if (ticker == 'TSLA' and assumptions.get('basis_kind') == 'manual'
+            and assumptions.get('manual_basis') is None
+            and assumptions.get('basis_label') == 'SOTP / optie-scenario vereist'):
+        return {**assumptions, 'basis_kind': 'forward_eps', 'basis_label': ''}
+    return assumptions
+
+
 def attach_fx(workbook):
     """Bundle saved units-per-EUR observations; never fetch providers on a read."""
     dates = [row.get('quote', {}).get('price_date') for row in workbook['rows']]
@@ -127,6 +136,7 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
         initial = seed.get(ticker, {})
         assumptions = {k: v for k, v in initial.items() if k not in ('name', 'ticker', 'selections')}
         assumptions.update((settings.get('companies') or {}).get(holding.get('isin'), {}))
+        assumptions = normalize_assumptions(ticker, assumptions)
         forecast = consensus(by_company.get(company.get('company_id'), []), date.today().isoformat())
         if valuation.reference_isin(holding.get('isin')) != holding.get('isin'):
             forecast['basis_label'] = (forecast.get('basis_label') or 'EPS') + ' - ordinary-share reference valuation'

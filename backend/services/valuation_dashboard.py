@@ -152,6 +152,8 @@ def read(portfolio_id):
                 workbook = {**workbook, 'parameters': {**workbook['parameters'], **overrides.get('parameters', {})},
                     'updated_at': settings[0]['updated_at'], 'rows': [{**row, 'assumptions': {**row['assumptions'],
                         **overrides.get('companies', {}).get(row.get('isin'), {})}} for row in workbook['rows']]}
+            workbook = {**workbook, 'rows': [{**row, 'assumptions':
+                W.normalize_assumptions(row.get('ticker'), row.get('assumptions', {}))} for row in workbook['rows']]}
             return {**payload, 'workbook': W.attach_fx(workbook), 'ready': True, 'prepared_at': saved[0]['prepared_at'],
                 'stale': bool(payload.get('errors')) or payload.get('calculation_date') != date.today().isoformat()}
     try:
@@ -332,6 +334,11 @@ def _prepare_all(context):
         raise
     except Exception as exc:
         summary['errors']['holdings'] = str(exc)
+    from leonteq.management import prepare_contributions
+    contributions = prepare_contributions(context)
+    summary['leonteq_contributions'] = contributions
+    if contributions['errors']:
+        summary['errors']['leonteq_contributions'] = contributions['errors']
     roster = V.portfolios()
     selected = {row['id']: row for row in roster if row.get('id') is not None}
     summary['unavailable_portfolios'] = [row for row in roster if row.get('id') is None]

@@ -120,7 +120,7 @@ def overview():
     return rows
 
 
-def detail(display_name, refresh=False, progress=None):
+def detail(display_name, refresh=False, progress=None, benchmark=None):
     entry = next((row for row in entries() if row['display_name'] == display_name), None)
     if not entry:
         raise HTTPException(404, 'Unknown TopSelectie')
@@ -135,24 +135,63 @@ def detail(display_name, refresh=False, progress=None):
     ledger = accounting.refresh(name, holdings.get('as_of') or matched.get('as_of'), progress) if refresh and holdings.get('success') and not holdings.get('refresh_error') else accounting.saved(name)
     ledger = ledger or {}
     result = ledger.get('result') or {}
+    verified_window = return_windows.cached({'leonteq_name': name, 'accounting': ledger})
+    reference_ytd = verified_window['ytd_pct'] if verified_window else _number(matched.get('ytd'))
     # Do not blend a previous accounting run into newer holdings or returns. Only a
     # source-consistent reconciled ledger can replace the current display boundary.
     eligible = bool(ledger.get('success') and result.get('available')
         and (ledger.get('retrieved_at') or '') >= (holdings.get('retrieved_at') or '')
-        and _number(matched.get('ytd')) is not None
-        and abs(_number(matched['ytd']) - result['reported_ytd_pct']) <= .0051)
+        and (not verified_window or verified_window['to'] == result.get('to'))
+        and reference_ytd is not None and abs(reference_ytd - result['reported_ytd_pct']) <= .0051)
     if eligible:
         from leonteq.portal_api import composition as shape_composition
         closing = ledger['valuations'][result['to']]
         holdings = {**shape_composition(closing, name), 'success': True,
                     'retrieved_at': ledger['retrieved_at']}
-        matched = {**matched, 'as_of': result['to']}
+        matched = {**matched, 'as_of': result['to'], 'ytd': f"{result['reported_ytd_pct']}%"}
     elif result.get('available'):
         ledger = {**ledger, 'success': False, 'reason': 'Leonteq accounting predates the current holdings/return snapshot', 'result': {'available': False}}
-    return {'success': bool(holdings.get('success')), 'source': 'Leonteq', 'name': display_name,
+    response = {'success': bool(holdings.get('success')), 'source': 'Leonteq', 'name': display_name,
             'leonteq_name': name, 'summary': matched, 'catalogue_retrieved_at': catalogue.get('retrieved_at'),
             'catalogue_error': catalogue.get('refresh_error'), 'composition': holdings, 'performance': returns,
             'accounting': ledger}
+    if benchmark:
+        response['monthly_benchmark'] = _monthly_benchmark(response, benchmark)
+    return response
+
+
+def _monthly_benchmark(source, benchmark):
+    from routers._benchmark_etf import etf_return_series
+    window = return_windows.cached(source)
+    points = (window or {}).get('returns') or []
+    if len(points) < 2:
+        return {}
+    comparison = etf_return_series(benchmark, window['from'], [p['date'] for p in points], read_only=True)
+    observations = {row['date']: row for row in comparison.get('points') or []}
+    initial_price = comparison.get('start_price')
+    initial_fx = comparison.get('fx_start')
+    initial_eur = initial_price / initial_fx if initial_price is not None and initial_fx else None
+    result = {}
+    for row in (source.get('performance') or {}).get('months') or []:
+        month = row['month']
+        dates = sorted(p['date'] for p in points if p['date'][:7] == month)
+        if row.get('return_pct') is None or not dates:
+            continue
+        previous = sorted(p['date'] for p in points if p['date'] < month + '-01')
+        start = previous[-1] if previous else window['from']
+        opened, closed = observations.get(start), observations.get(dates[-1])
+        if not opened or not closed or opened['cum_pct'] <= -100 or start >= dates[-1]:
+            continue
+        value = ((1 + closed['cum_pct'] / 100) / (1 + opened['cum_pct'] / 100) - 1) * 100
+        component = {'ticker': comparison.get('ticker') or benchmark, 'weight_pct': 100,
+            'return_pct': value, 'start_date': opened.get('price_date') or start,
+            'end_date': closed.get('price_date') or dates[-1]}
+        if initial_eur is not None:
+            component.update(start_price_eur=initial_eur * (1 + opened['cum_pct'] / 100),
+                end_price_eur=initial_eur * (1 + closed['cum_pct'] / 100))
+        result[month] = {'return_pct': value, 'start_date': start, 'end_date': dates[-1],
+            'source': 'saved ETF prices, aligned to Leonteq', 'components': [component]}
+    return result
 
 
 def _number(value):
@@ -162,6 +201,93 @@ def _number(value):
         return result if math.isfinite(result) else None
     except ValueError:
         return None
+
+
+def _month_return(window, month):
+    """MTD from the source's flow-aware index curve, never from portfolio NAV."""
+    if not window:
+        return None
+    points = sorted(window.get('returns') or [], key=lambda point: point['date'])
+    current = [point for point in points if point['date'][:7] == month]
+    opening = [point for point in points if point['date'] < month + '-01']
+    if not current:
+        return None
+    if not opening:
+        # A portfolio launched this month starts at its verified inception mark.
+        if window.get('from') != current[0]['date'] or current[0]['cum_pct'] != 0:
+            return None
+        opening = current[:1]
+    basis = 1 + opening[-1]['cum_pct'] / 100
+    return ((1 + current[-1]['cum_pct'] / 100) / basis - 1) * 100 if basis > 0 else None
+
+
+def refresh_returns(context):
+    """Refresh source returns independently of expensive position accounting."""
+    from jobs import JobCancelled
+    from scheduler_runtime.execution import Cancelled
+    context.check()
+    catalogue = portfolio_cache.portfolios(refresh=True)
+    if not catalogue.get('success') or catalogue.get('refresh_error'):
+        return {'saved': [], 'errors': {'catalogue': 'Leonteq catalogue refresh failed.'}}
+    result = {'saved': [], 'errors': {}}
+    for index, entry in enumerate(entries()):
+        context.check()
+        label = entry['display_name']
+        context.progress(index, len(entries()), f'{label} — refreshing Leonteq MTD and YTD')
+        matched = resolve(entry, catalogue.get('portfolios') or [])
+        if not matched:
+            result['errors'][label] = 'Leonteq portfolio identity is unavailable.'
+            continue
+        try:
+            monthly = performance(matched['name'], refresh=True)
+            if not monthly.get('success') or monthly.get('refresh_error'):
+                result['errors'][label] = 'Leonteq monthly returns could not be refreshed and saved.'
+                continue
+            window, reason = return_windows.ensure({'leonteq_name': matched['name'],
+                'catalogue_retrieved_at': catalogue.get('retrieved_at'),
+                'performance': {**monthly, 'return_window': None}})
+            if not window:
+                result['errors'][label] = reason
+            else:
+                result['saved'].append(label)
+        except (JobCancelled, Cancelled):
+            raise
+        except Exception as exc:
+            result['errors'][label] = f'Leonteq return refresh failed ({type(exc).__name__}).'
+    return result
+
+
+def prepare_contributions(context):
+    """Prepare every reviewed Topselectie, retaining independent portfolio outcomes."""
+    from leonteq import accounting
+    from jobs import JobCancelled
+    from scheduler_runtime.execution import Cancelled
+    catalogue = portfolio_cache.saved_portfolios()
+    result = {'saved': [], 'estimated': [], 'errors': {}}
+    for entry in entries():
+        context.check()
+        label = entry['display_name']
+        matched = resolve(entry, catalogue.get('portfolios') or [])
+        if not matched:
+            result['errors'][label] = 'Leonteq portfolio identity is unavailable.'
+            continue
+        def progress(done, total, message):
+            context.check()
+            context.progress(done, total, f'{label} — {message}')
+        try:
+            progress(0, 0, 'preparing contributions from Leonteq')
+            payload = accounting.refresh(matched['name'], matched.get('as_of'), progress)
+            if payload.get('success') and payload.get('result', {}).get('available'):
+                result['saved'].append(label)
+                if payload['result'].get('estimated'):
+                    result['estimated'].append(label)
+            else:
+                result['errors'][label] = payload.get('reason') or 'Leonteq accounting could not be prepared.'
+        except (JobCancelled, Cancelled):
+            raise
+        except Exception as exc:
+            result['errors'][label] = f'Leonteq accounting failed ({type(exc).__name__}).'
+    return result
 
 
 def dashboard_overview():
@@ -176,6 +302,10 @@ def dashboard_overview():
         returns = source.get('performance') or {}
         positions = [p for g in composition.get('groups') or [] for p in g.get('positions') or []]
         month = next((r for r in returns.get('months') or [] if r['month'] == current_month), {})
+        month_pct = _month_return(return_window, current_month)
+        month_from_history = month_pct is not None
+        if month_pct is None:
+            month_pct = month.get('return_pct')
         inception = summary.get('inception_date')
         if not inception and summary.get('start_date'):
             try:
@@ -192,12 +322,26 @@ def dashboard_overview():
             'fixed_portfolio_id': None, 'holdings': len(positions),
             'isins': sum(bool(p.get('isin')) for p in positions),
             'ytd_pct': return_window['ytd_pct'] if return_window else _number(summary.get('ytd')), 'ytd_from': since,
-            'latest_month_pct': month.get('return_pct'),
-            'periode': f'{current_month}-01' if month.get('return_pct') is not None else None,
-            'as_of': as_of, 'fetched_at': fetched, 'missing_reports': [],
-            'month_fetched_at': returns.get('retrieved_at'),
+            'latest_month_pct': month_pct,
+            'periode': f'{current_month}-01' if month_pct is not None else None,
+            'as_of': as_of, 'fetched_at': return_window.get('retrieved_at') if return_window else fetched, 'missing_reports': [],
+            'month_as_of': as_of if month_from_history else None,
+            'month_fetched_at': return_window.get('retrieved_at') if month_from_history else returns.get('retrieved_at'),
         })
     return rows
+
+
+def _return_series(window, benchmark):
+    if not window or not window.get('returns'):
+        return None
+    from routers._benchmark_etf import etf_return_series
+    points = window['returns']
+    comparison = etf_return_series(benchmark, window['from'], [p['date'] for p in points], read_only=True)
+    return {'returns': points, 'return_from': window['from'], 'return_pct': points[-1]['cum_pct'],
+        'first_date': window['from'], 'last_date': window['to'], 'points': [], 'flows': [],
+        'benchmark': benchmark, 'benchmark_ticker': comparison.get('ticker'),
+        'benchmark_source': comparison.get('source'), 'benchmark_returns': comparison.get('points') or [],
+        'benchmark_return_pct': comparison.get('return_pct'), 'benchmark_as_of': comparison.get('as_of')}
 
 
 def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
@@ -256,7 +400,7 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
         # Keep non-EUR values unavailable in EUR columns rather than mislabelling them.
         value_eur = _number(value[:-4]) if value.endswith(' EUR') else None
         source_return = _number(position.get('performance'))
-        valued.append({'name': position['name'], 'isin': holding.isin, 'bucket': bucket,
+        valued.append({'name': instrument.get('name') or position['name'], 'isin': holding.isin, 'bucket': bucket,
                        'is_fund': fund, 'currency': position.get('currency'),
                        'sector': sector, 'region': region,
                        'weight_now_pct': holding.weight, 'weight_start_pct': None,
@@ -282,7 +426,8 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
         lines = measured['positions']
         held = {row['isin'] for row in valued if row.get('isin')}
         for row in valued:
-            item = lines.get(row.get('isin'))
+            identity = row.get('isin') or ('cash:' + str(row.get('currency')) if row['bucket'] == 'Cash' else None)
+            item = lines.get(identity) if identity != 'cash:EUR' else None
             if item:
                 capital = item['opening'] + item['buys']
                 row.update(start_value_eur=item['opening'], current_value_eur=item['closing'],
@@ -308,12 +453,15 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
         adjustments = [{'name': fee['name'], 'label': 'Leonteq AMC fees',
                         'unrealised_eur': 0, 'realised_result_eur': fee['profit'],
                         'result_eur': fee['profit'], 'contribution_pct': fee['contribution_pct']}] if fee else []
-        realised = {'available': True, 'source': 'Leonteq', 'positions': sold,
+        estimated = measured.get('estimated', False)
+        realised = {'available': True, 'estimated': estimated, 'source': 'Leonteq', 'positions': sold,
             'certificate_adjustments': adjustments, 'basis_eur': measured['basis_eur'],
             'book_ytd_pct': measured['reported_ytd_pct'], 'book_as_of': measured['to'],
-            'reconciles': True, 'comparable': True, 'dates_aligned': True,
+            'reconciles': not estimated, 'comparable': True, 'dates_aligned': True,
             'has_external_flows': measured.get('has_external_flows', False),
-            'note': 'Leonteq net transactions and daily valuations; contributions are geometrically linked.'
+            'note': ('Estimated contributions using daily opening capital where cash-flow timing is unresolved. '
+                     'The unallocated source difference is shown separately.' if estimated else
+                     'Leonteq net transactions and daily valuations; contributions are geometrically linked.')
                     + (f" AMC fees: EUR {abs(fee['profit']):.2f} ({fee['contribution_pct']:+.4f} pp), included separately." if fee else '')}
         for bucket, group in allocation.items():
             members = [row for row in valued if row['bucket'] == bucket]
@@ -323,4 +471,4 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
             'holdings_as_of': as_of, 'holdings_fetched_at': composition.get('retrieved_at'),
             'allocation': list(allocation.values()), 'book_holdings': valued,
             'book_note': accounting_note, 'realised': realised,
-            'returns': returns, 'details_pending': False}
+            'returns': returns, 'return_series': _return_series(return_window, benchmark), 'details_pending': False}

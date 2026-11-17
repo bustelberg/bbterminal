@@ -13,6 +13,7 @@ from statistics import median
 from threading import Lock, RLock
 
 from deps import paginate, supabase
+from asset_pipeline.security_reference import ORDINARY_SHARE_REFERENCES
 
 TABLE = 'portfolio_valuation_bundle'
 _locks = {}
@@ -219,11 +220,7 @@ def company_holdings(portfolio_id):
 # ordinary-share valuations, not converted depositary-receipt price targets.
 # Depositary identities: https://depositaryreceipts.citi.com/adr/guides/pgm_d.aspx?cusip=Y5217N118
 # and https://depositaryreceipts.citi.com/adr/guides/pgm_d.aspx?cusip=78392B206
-VALUATION_REFERENCE_ISINS = {
-    'US8740391003': 'TW0002330008',
-    'USY5217N1183': 'INE018A01030',
-    'US78392B2060': 'KR7000660001',
-}
+VALUATION_REFERENCE_ISINS = ORDINARY_SHARE_REFERENCES
 
 
 def reference_isin(isin):

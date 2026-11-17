@@ -54,6 +54,31 @@ def test_negative_eur_cash_is_a_cash_balance_not_a_short_security():
         a.valuation(raw, '2026-01-02')
 
 
+def test_native_currency_settlements_use_the_source_amc_fx():
+    sell = transaction('Sell', quantity=-10, amount=-100, instrumentCurrency='USD',
+        bookingCurrency='USD', bookingFx={'value': 1}, amcBaseCcyFx={'value': .9})
+    buy = transaction('Buy', quantity=100, amount=100, number=2, instrumentCurrency='USD',
+        bookingCurrency='USD', bookingFx={'value': 1}, amcBaseCcyFx={'value': .9})
+    parsed = records(sell, buy)
+    assert [r['cash_eur'] for r in parsed] == ['90.0', '-90.0']
+    assert sum(D(r['cash_eur']) for r in parsed) == 0
+
+
+def test_foreign_cash_dividend_and_fx_return_are_separate_from_external_funding():
+    opening = boundary('2025-12-31', 500, 500)
+    closing = boundary('2026-01-02', 500, 500)
+    closing['positions']['cash:USD'] = {'name': 'US dollar', 'isin': None, 'cash': True,
+        'value': D(9), 'quantity': D(10)}
+    closing['nav'] += D(9)
+    ledger = records(transaction('Dividend', quantity=5, amount=-10,
+        instrumentCurrency='USD', bookingCurrency='USD', amcBaseCcyFx={'value': .9}))
+    result = a.calculate([opening, closing], ledger,
+        [('2025-12-31', D(100)), ('2026-01-02', D('100.9'))], .9)
+    assert result['positions']['STOCK']['profit'] == 9
+    assert result['positions']['cash:USD']['profit'] == 0
+    assert result['has_external_flows'] is False
+
+
 def test_conflicting_duplicates_or_truncated_feeds_fail_closed():
     with pytest.raises(a.ApiUnavailable, match='Incomplete'):
         a.transactions({'rows': [transaction()], 'totalRows': 2})
@@ -136,6 +161,8 @@ def test_missing_opening_snapshot_is_recorded_without_substituting_later_date(mo
         calls.append(options)
         if options.get('accounting'):
             return {'transactions': []}
+        if options.get('cash_history'):
+            return {'complete': False}
         if options.get('history'):
             return {'details': {'issueDate': '2025-01-01', 'currency': 'EUR'}, 'history': {
                 'series': [['2025-12-31', 100], ['2026-01-02', 101]],
@@ -167,6 +194,7 @@ def test_complete_source_acquisition_reads_every_boundary_before_publishing(monk
         {'details': {'issueDate': '2025-01-01', 'currency': 'EUR'}, 'history': {
             'series': [['2025-12-31', 100], ['2026-01-02', 106.5]],
             'performances': [{'nameOrIsin': name, 'performanceYTD': {'value': 6.5}}]}} if options.get('history') else
+        {'complete': True, 'certificates': []} if options.get('cash_history') else
         {'accounting_valuation': valuations[options['valuation_date']]})
     monkeypatch.setattr(portal_api, 'read', source)
     progress = Mock()
@@ -178,8 +206,47 @@ def test_complete_source_acquisition_reads_every_boundary_before_publishing(monk
     assert result['result']['reported_ytd_pct'] == 6.5
     assert result['result']['positions']['STOCK']['contribution_pct'] == 7
     assert result['result']['positions']['fee:AMC']['contribution_pct'] == -.5
-    assert source.call_args_list[1].kwargs == {'history': True, 'end': '2026-01-02'}
+    assert source.call_args_list[1].kwargs == {'history': True}
     assert progress.call_count == 2
+    # If ?to= is ignored, collect the same dates as the published source YTD.
+    ignored_end = a._collect(None, {}, 'Fund', '2026-01-01', Mock())
+    assert ignored_end['success'] is True
+    assert ignored_end['result']['to'] == '2026-01-02'
+    source.reset_mock()
+    incremental = a._collect(None, {}, 'Fund', '2026-01-02', Mock(), previous=result)
+    assert incremental['success'] is True
+    assert incremental['cached_valuations'] == 1
+    assert [call.kwargs['valuation_date'] for call in source.call_args_list if 'valuation_date' in call.kwargs] == ['2026-01-02']
+
+
+def test_estimates_keep_unexplained_difference_separate_from_company_profit():
+    opening = boundary('2025-12-31', 500, 500)
+    closing = boundary('2026-01-02', 550, 600)
+    points = [('2025-12-31', D(100)), ('2026-01-02', D(104))]
+    with pytest.raises(a.ApiUnavailable, match='does not reconcile'):
+        a.calculate([opening, closing], [], points, 4)
+    result = a.calculate([opening, closing], [], points, 4, allow_estimates=True)
+    assert result['estimated'] is True
+    assert result['positions']['STOCK']['profit'] == 50
+    assert result['positions']['STOCK']['contribution_pct'] == 5
+    assert 'adjustment:unallocated' not in result['positions']
+    assert sum(row['contribution_pct'] for row in result['positions'].values()) == 5
+    assert result['calculated_contribution_pct'] == 5
+    assert result['difference_pct'] == -1
+
+
+def test_source_cash_movements_are_compared_without_hiding_unexplained_cash():
+    opening = boundary('2025-12-31', 500, 500)
+    closing = boundary('2026-01-02', 550, 600)
+    points = [('2025-12-31', D(100)), ('2026-01-02', D(105))]
+    source_flows = [{'date': '2026-01-02', 'cash_eur': '90'}]
+    with pytest.raises(a.ApiUnavailable, match='cash movements and position ledger differ'):
+        a.calculate([opening, closing], [], points, 5, cash_flows=source_flows)
+    result = a.calculate([opening, closing], [], points, 5, cash_flows=source_flows, allow_estimates=True)
+    assert result['estimated'] is True
+    assert result['source_cash_flows_available'] is True
+    assert result['cash_differences'] == [{'from': '2025-12-31', 'to': '2026-01-02', 'difference_eur': 10}]
+    assert result['positions']['STOCK']['profit'] == 50
 
 
 def test_snapshot_is_durable_account_scoped_and_reads_never_start_source_sessions(monkeypatch):

@@ -178,3 +178,61 @@ def test_shared_dashboard_does_not_invent_values_or_valuation_dates(monkeypatch)
     assert missing['ytd_pct'] is None
     assert missing['latest_month_pct'] is None
     assert missing['ytd_from'] is None
+
+
+def test_missing_monthly_cache_uses_verified_index_history(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    month = datetime.now(ZoneInfo('Europe/Amsterdam')).strftime('%Y-%m')
+    window = {'from': '2025-12-31', 'to': month + '-16', 'ytd_pct': -1.819,
+        'returns': [{'date': '2025-12-31', 'cum_pct': 0},
+                    {'date': month + '-02', 'cum_pct': -2}, {'date': month + '-16', 'cum_pct': -1.819}]}
+    monkeypatch.setattr(m, 'detail', lambda _: {'performance': {'months': []}})
+    monkeypatch.setattr(m.return_windows, 'cached', lambda _: window)
+    row = m.dashboard_overview()[0]
+    assert row['latest_month_pct'] == pytest.approx(-1.819)
+    assert row['periode'] == month + '-01'
+
+
+def test_dashboard_dates_follow_the_return_observation_not_catalogue(monkeypatch):
+    window = {'from': '2025-12-31', 'to': '2026-11-16', 'ytd_pct': 2,
+        'retrieved_at': '2026-11-17T12:00:00Z', 'returns': [
+            {'date': '2026-10-30', 'cum_pct': 0}, {'date': '2026-11-16', 'cum_pct': 2}]}
+    monkeypatch.setattr(m, 'detail', lambda _: {'catalogue_retrieved_at': '2026-11-13T12:00:00Z',
+        'performance': {'months': []}})
+    monkeypatch.setattr(m.return_windows, 'cached', lambda _: window)
+    row = m.dashboard_overview()[0]
+    assert row['as_of'] == '2026-11-16'
+    assert row['fetched_at'] == '2026-11-17T12:00:00Z'
+
+
+def test_mtd_uses_compounded_returns_and_requires_a_month_opening_mark():
+    window = {'from': '2025-12-31', 'returns': [
+        {'date': '2026-10-30', 'cum_pct': 20}, {'date': '2026-11-16', 'cum_pct': 26}]}
+    assert m._month_return(window, '2026-11') == pytest.approx(5)
+    assert m._month_return(window, '2026-12') is None
+    assert m._month_return({'from': '2025-12-31', 'returns': [
+        {'date': '2026-11-16', 'cum_pct': 26}]}, '2026-11') is None
+
+
+def test_monthly_benchmark_uses_same_partial_month_windows_and_saved_eur_prices(monkeypatch):
+    from routers import _benchmark_etf
+    window = {'from': '2026-06-08', 'to': '2026-07-15', 'returns': [
+        {'date': '2026-06-08', 'cum_pct': 0}, {'date': '2026-06-30', 'cum_pct': 20},
+        {'date': '2026-07-15', 'cum_pct': 26}]}
+    monkeypatch.setattr(m.return_windows, 'cached', lambda _: window)
+    def series(label, anchor, dates, **kwargs):
+        assert label == 'ACWI' and anchor == '2026-06-08'
+        assert kwargs == {'read_only': True}
+        return {'ticker': 'ACWI', 'start_price': 120, 'fx_start': 1.2, 'points': [
+            {'date': stamp, 'price_date': stamp, 'cum_pct': value}
+            for stamp, value in zip(dates, [0, 10, 21])]}
+    monkeypatch.setattr(_benchmark_etf, 'etf_return_series', series)
+    result = m._monthly_benchmark({'performance': {'months': [
+        {'month': '2026-06', 'return_pct': 20}, {'month': '2026-07', 'return_pct': 5}]}}, 'ACWI')
+    assert result['2026-06']['return_pct'] == pytest.approx(10)
+    assert result['2026-06']['start_date'] == '2026-06-08'
+    assert result['2026-07']['return_pct'] == pytest.approx(10)
+    assert result['2026-07']['end_date'] == '2026-07-15'
+    assert result['2026-07']['components'][0]['start_price_eur'] == pytest.approx(110)
+    assert result['2026-07']['components'][0]['end_price_eur'] == pytest.approx(121)

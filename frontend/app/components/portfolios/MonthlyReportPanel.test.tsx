@@ -63,6 +63,8 @@ beforeEach(() => {
 
 it('shows Leonteq monthly performance in the shared panel without AIRS requests or jobs', async () => {
   vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ success: true,
+    monthly_benchmark: { [october]: { return_pct: 1.5, start_date: '2026-09-30', end_date: '2026-10-30', source: 'saved ETF prices', components: [] },
+      [november]: { return_pct: 2.5, start_date: '2026-10-30', end_date: '2026-11-13', source: 'saved ETF prices', components: [] } },
     performance: { months: [{ month: october, return_pct: 0 }, { month: november, return_pct: -1.2 }],
       yearly_totals: { '2026': -0.81 } } })));
   await act(async () => root.render(<MonthlyReportPanel name="AITopSelectie" leonteqPortfolio="AITopSelectie"
@@ -71,6 +73,8 @@ it('shows Leonteq monthly performance in the shared panel without AIRS requests 
   expect(host.textContent).toContain('Leonteq · Performance');
   expect(host.textContent).toContain('-0.81%');
   expect(host.textContent).toContain('+12.00%');
+  expect(host.querySelector(`[data-month-benchmark="${october}"]`)?.textContent).toContain('+1.50%');
+  expect(host.querySelector(`[data-month-benchmark="${november}"]`)?.textContent).toContain('+2.50%');
   expect(host.querySelectorAll('nav button')).toHaveLength(2);
   await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[1].click());
   expect(host.querySelector('#monthly-report-details')?.textContent).toContain('-1.20%');

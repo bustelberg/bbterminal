@@ -80,7 +80,7 @@ function prefetchModelAnalysis(id: number, name: string) {
  */
 
 const SHOW_SECONDARY_ROW_ACTIONS = false;
-type OverviewRow = AirsPortfolioOverview & { month_fetched_at?: string | null };
+type OverviewRow = AirsPortfolioOverview & { month_fetched_at?: string | null; month_as_of?: string | null };
 
 const pct = (v: number | null | undefined) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
@@ -1077,8 +1077,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
           {/* Narrow fixed action/numeric columns, with the remaining width for names.
               The table scrolls within this card on small screens. */}
-          <table className="w-full min-w-[60rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[9rem]" /><col className="w-[7rem]" /><col className="w-[11rem]" /><col className="w-[11rem]" /></colgroup>
+          <table className="w-full min-w-[66rem] table-fixed text-[13px] whitespace-nowrap">
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[9rem]" /><col className="w-[7rem]" /><col className="w-[11rem]" /><col className="w-[11rem]" /><col className="w-[6rem]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1097,6 +1097,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                   title={leonteq ? 'Start of the Leonteq year-to-date return window.' : 'Start of the AIRS return reporting window, excluding months before the portfolio was funded.'}>{t.overviewDates.since}</th>
                 <th className="px-2 py-2.5 font-medium text-right normal-case"
                   title={leonteq ? 'Latest portfolio valuation date supplied by Leonteq.' : 'Latest AIRS valuation date available for this portfolio.'}>{t.overviewDates.to}</th>
+                <th className="px-2 py-2.5 font-medium text-left normal-case">Source</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1304,7 +1305,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                       </td>
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(monthToDate(r))}`}>
                         {pct(monthToDate(r))}
-                        <Provenance source={leonteq ? 'leonteq' : 'airs_att'} asOf={leonteq ? undefined : r.periode}
+                        <Provenance source={leonteq ? 'leonteq' : 'airs_att'} asOf={leonteq ? r.month_as_of : r.periode}
                           fetchedAt={leonteq ? r.month_fetched_at : r.fetched_at} kind="copied"
                           onRefresh={async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
                           what={leonteq ? "This month's return, as Leonteq reports it." : "This month's return, as AIRS reports it."}
@@ -1333,10 +1334,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
                         }).format(new Date(`${r.as_of}T00:00:00Z`)) : '—'}
                       </td>
+                      <td className="px-2 py-2.5 text-left text-[13px] text-fg-muted">{leonteq ? 'Leonteq' : 'AIRS'}</td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
+                        <td colSpan={8} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
                             <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
                           )}

@@ -16459,6 +16459,11 @@
             ],
             "title": "Dates Aligned"
           },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
           "has_external_flows": {
             "default": false,
             "title": "Has External Flows",
@@ -35971,6 +35976,22 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
             }
           }
         ],

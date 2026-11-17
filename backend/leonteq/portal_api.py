@@ -152,7 +152,8 @@ def monthly(payload, name):
 
 
 def read(page, ids, name=None, performance=False, transactions=False, *, accounting=False,
-         valuation_date=None, history=False, end=None, instructions=False):
+         valuation_date=None, history=False, end=None, instructions=False, cash_history=False,
+         previous_cash_history=None):
     def get(path):
         try:
             response = page.request.get(f'{BASE}/{path}', headers={'Cache-Control': 'no-cache'}, timeout=10000)
@@ -174,6 +175,9 @@ def read(page, ids, name=None, performance=False, transactions=False, *, account
     if name not in ids:
         raise ApiUnavailable('Portfolio not found in the current catalogue')
     path = f'amc/{quote(ids[name], safe="")}'
+    if cash_history:
+        from leonteq.cash_history import collect
+        return collect(get, path, previous_cash_history)
     if instructions:
         rows, total, seen = [], None, set()
         while total is None or len(rows) < total:

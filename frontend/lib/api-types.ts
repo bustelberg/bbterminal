@@ -15754,6 +15754,11 @@ export interface components {
             /** Dates Aligned */
             dates_aligned?: boolean | null;
             /**
+             * Estimated
+             * @default false
+             */
+            estimated?: boolean;
+            /**
              * Has External Flows
              * @default false
              */
@@ -26990,7 +26995,9 @@ export interface operations {
     };
     management_topselectie_api_leonteq_management_topselecties__name__get: {
         parameters: {
-            query?: never;
+            query?: {
+                benchmark?: string | null;
+            };
             header?: never;
             path: {
                 name: string;

@@ -158,7 +158,8 @@ export default function BookReturnChart(
     benchmarkYtdPct,
     policyWeights,
     series,
-  }: { portfolioId: number; name: string; variant?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; benchmarkYtdPct?: number | null; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null },
+    daily = false,
+  }: { portfolioId: number; name: string; variant?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; benchmarkYtdPct?: number | null; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null; daily?: boolean },
 ) {
   const copy = useAnalyseCopy();
   const [loaded, setData] = useState<BookValueSeries | null>(null);
@@ -215,7 +216,7 @@ export default function BookReturnChart(
   // than rendering a return with no selected control, while the normal dialog stays the latest
   // three Yahoo months.
   // Include the common zero-return anchor, calendar month-ends, and the latest observation.
-  const points = all.filter((p) => isCalendarMonthEnd(p.date));
+  const points = daily ? [...all] : all.filter((p) => isCalendarMonthEnd(p.date));
   const anchorDate = data.return_from ?? all[0].date;
   if (points[0]?.date !== anchorDate) points.unshift({ ...all[0], date: anchorDate, cum_pct: 0 });
   if (points.at(-1)?.date !== last.date) points.push(last);
@@ -301,11 +302,14 @@ export default function BookReturnChart(
             carries now is the one figure this chart exists to state, and a chip the reader has to
             step over to reach it is a cost with no reader. */}
         {/* AIRS publishes this cumulative return directly. The card names its start and end values, rather than inventing a formula. */}
-        <InfoTip wide className="ml-auto" content={<AspectCard
+        <InfoTip wide className="ml-auto" content={benchmarkComponents.length ? <AspectCard
           what="Weighted stock-and-bond benchmark return for this risk profile."
           where="Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation."
           how="ACWI and the bond proxy are combined at the configured risk-profile weights; alternatives and cash are excluded."
-          calculation={weightedBenchmarkTable} />} />
+          calculation={weightedBenchmarkTable} /> : <AspectCard
+          what="Portfolio and benchmark cumulative returns in EUR."
+          where="Saved portfolio return history and benchmark prices over the same dates."
+          how="Both lines start at zero on the portfolio's opening date; benchmark observations use the latest available close on or before each date." />} />
       </div>
       {/* The hover is docked below the plot without reserving permanent empty space. */}
       <div>

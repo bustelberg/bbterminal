@@ -1478,6 +1478,7 @@ class RealisedBlock(BaseModel):
     """
 
     available: bool = False
+    estimated: bool = False
     portefeuille: str | None = None
     note: str | None = None
     basis_eur: float | None = None

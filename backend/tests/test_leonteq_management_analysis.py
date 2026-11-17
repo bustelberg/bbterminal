@@ -8,6 +8,8 @@ from routers import _airs_portfolio_analysis as pa
 
 @pytest.fixture
 def source(monkeypatch):
+    from routers import _benchmark_etf
+    monkeypatch.setattr(_benchmark_etf, 'etf_return_series', lambda *args, **kwargs: {})
     payload = {'success': True, 'leonteq_name': 'AI-TopSelectie', 'catalogue_retrieved_at': '2026-11-16T10:00:00Z',
         'performance': {'return_window': {'portfolio_name': 'AI-TopSelectie', 'currency': 'EUR',
             'from': '2026-06-01', 'to': '2026-11-12', 'ytd_pct': 8.78,
@@ -52,6 +54,18 @@ def test_full_source_values_and_official_return_reach_shared_analyse(source):
     assert 'pair' not in result['book_note'].lower()
 
 
+def test_leonteq_display_names_use_exact_internal_isin_matches(source, monkeypatch):
+    source['composition']['groups'][0]['positions'][0]['name'] = 'CORRECT STOCK CLASS A'
+    monkeypatch.setattr(pa, '_grid', lambda _: {'STOCK': {'name': 'Correct Stock Inc.',
+        'company_id': 123, 'asset_class': 'equity', 'sector': 'Technology', 'currency': 'USD'}})
+    stock, cash = m.analysis('AITopSelectie', 'TEST')['book_holdings']
+    assert stock['name'] == 'Correct Stock Inc.'
+    assert stock['isin'] == 'STOCK'
+    assert stock['own_return_pct'] == 32.92
+    assert cash['name'] == 'EUR cash'
+    assert source['composition']['groups'][0]['positions'][0]['name'] == 'CORRECT STOCK CLASS A'
+
+
 def test_return_history_aligns_benchmark_without_opening_holdings_or_catalogue_dates(source):
     source['summary'] = {}
     result = m.analysis('AITopSelectie', 'TEST')
@@ -86,6 +100,8 @@ def test_missing_opening_composition_does_not_prevent_exact_ai_benchmark_alignme
     assert result['returns']['benchmark_ytd_pct'] == 8
     assert result['returns']['ytd_excess_pct'] == pytest.approx(-9.79)
     assert result['book_holdings'][0]['contribution_pct'] is None
+    assert result['return_series']['returns'][0]['cum_pct'] == 0
+    assert result['return_series']['returns'][-1]['cum_pct'] == pytest.approx(-1.79)
 
 
 def test_no_calendar_ytd_substitute_when_authoritative_return_dates_cannot_be_read(source, monkeypatch):
@@ -124,9 +140,10 @@ def test_non_euro_values_are_not_mislabelled_and_risk_uses_market_inputs(source,
     risk.assert_called_once_with(['STOCK'], 'TEST')
 
 
-def test_reconciled_source_ledger_populates_existing_holdings_sold_and_fee_contract(source):
+@pytest.mark.parametrize('estimated', [False, True])
+def test_reconciled_source_ledger_populates_existing_holdings_sold_and_fee_contract(source, estimated):
     source['accounting'] = {'success': True, 'result': {
-        'available': True, 'from': '2025-12-31', 'to': '2026-11-12',
+        'available': True, 'estimated': estimated, 'from': '2025-12-31', 'to': '2026-11-12',
         'basis_eur': 10000, 'reported_ytd_pct': 8.78,
         'cash': {'opening': 2500, 'closing': 2500},
         'positions': {
@@ -147,4 +164,5 @@ def test_reconciled_source_ledger_populates_existing_holdings_sold_and_fee_contr
     assert cash['weight_start_pct'] == 25
     assert result['realised']['positions'][0]['closed_out'] is True
     assert result['realised']['certificate_adjustments'][0]['contribution_pct'] == -.1
-    assert result['realised']['reconciles'] is True
+    assert result['realised']['reconciles'] is not estimated
+    assert result['realised']['estimated'] is estimated

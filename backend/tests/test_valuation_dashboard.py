@@ -260,6 +260,7 @@ def test_daily_valuation_uses_amsterdam_eight_am_schedule():
 
 def test_empty_database_preparation_discovers_sources_before_publishing(monkeypatch):
     from services import airs_refresh, portfolio_membership
+    from leonteq import management
     from scheduler_runtime.context import LogContext
     roster, calls = [], []
     monkeypatch.setattr(V, 'portfolios', lambda: list(roster))
@@ -276,6 +277,8 @@ def test_empty_database_preparation_discovers_sources_before_publishing(monkeypa
         assert kwargs == {'source': 'all', 'all_portfolios': True}
         calls.append('holdings')
     monkeypatch.setattr(portfolio_membership, 'refresh_holdings', holdings)
+    monkeypatch.setattr(management, 'prepare_contributions', lambda _: {
+        'saved': [], 'estimated': [], 'errors': {}})
     caches = []
     def publish(pid, emit, check, **kwargs):
         calls.append(pid)
@@ -285,7 +288,8 @@ def test_empty_database_preparation_discovers_sources_before_publishing(monkeypa
     monkeypatch.setattr(D, 'refresh', publish)
     summary = D.prepare_all(LogContext())
     assert calls == ['accounts', 'models', 'holdings', 7, 8]
-    assert summary == {'saved': [7, 8], 'errors': {}, 'unavailable_portfolios': []}
+    assert summary == {'saved': [7, 8], 'errors': {}, 'unavailable_portfolios': [],
+        'leonteq_contributions': {'saved': [], 'estimated': [], 'errors': {}}}
     assert caches[0] is caches[1]
 
 

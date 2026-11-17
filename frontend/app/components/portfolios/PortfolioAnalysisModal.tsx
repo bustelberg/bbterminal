@@ -679,12 +679,19 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             </span>
           </div>
         )}
+        {certificateAdjustments.filter(item => item.contribution_pct != null && Math.abs(item.contribution_pct) >= 0.005).map(item => {
+          const label = item.label === 'Leonteq AMC fees' ? (copy.lang === 'nl' ? 'Kosten' : 'Fees') : item.label;
+          return <div key={item.label} aria-label={label} className="flex items-center gap-2 pt-1 text-[11px]">
+            <span className="text-fg-faint">{label}</span>
+            <span className={`ml-auto font-mono tabular-nums ${retTone(item.contribution_pct)}`}>{ppt(item.contribution_pct)}</span>
+          </div>;
+        })}
         {reconciliation && certificateContribution != null && Math.abs(certificateContribution) >= 0.005 && (
           <div className="flex items-center gap-2 text-[11px]">
             <span className="text-fg-faint">{copy.lang === 'nl' ? 'Bekende bijdragen' : 'Known contributions'}
               <InfoTip className="ml-1" text={copy.lang === 'nl'
-                ? 'Totaal inclusief het gemeten resultaat van de certificaten en verkochte posities.'
-                : 'Total including the measured result of certificates and sold positions.'} />
+                ? 'Som van de getoonde bijdragen, inclusief kosten en verkochte posities.'
+                : 'Sum of the displayed contributions, including fees and sold positions.'} />
             </span>
             <span className="ml-auto font-mono tabular-nums">{ppt(reconciliation.calculated)}</span>
           </div>
@@ -2342,7 +2349,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
           they were reached through a certificate — a wrapper that does not exist.
            RENDER THE AUTHORED NOTE, NEVER A LOCAL GUESS. Re-deriving the cause from flags here
           would be a second source of truth for one fact, and it is the copy that goes stale. */}
-      {realised && !realised.available && realised.note && (
+      {portfolioSource !== 'Leonteq' && realised && !realised.available && realised.note && (
         <p className="mb-2 text-[12px] text-warn-500">
           “{copy.holdings.moneyWeighted}” — {copy.serverText(realised.note)}
         </p>
@@ -2542,7 +2549,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {instrumentReturnLabel}{caret('return')}
               </th>
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
-                {copy.holdings.contribution}{caret('contribution')}
+                {copy.holdings.contribution}{realised?.estimated ? ' ≈' : ''}{caret('contribution')}
               </th>
             </tr>
           </thead>
@@ -3241,10 +3248,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             </tbody>
           )}
           {displayedReconciliation && displayedReconciliation.missing !== 0 && (
-            <tbody aria-label={copy.lang === 'nl' ? 'Verschil met AIRS' : 'AIRS reconciliation'}>
+            <tbody aria-label={copy.lang === 'nl' ? `Verschil met ${portfolioSource}` : `${portfolioSource} reconciliation`}>
                 <tr className="border-y border-neutral-800/30 bg-overlay/[0.035] text-warn-300">
                   <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS - 1} className="px-4 py-2 text-xs text-fg-muted">
-                    {copy.lang === 'nl' ? 'Ontbreekt in de berekening' : 'Missing from calculation'}
+                    {copy.lang === 'nl' ? 'Verschil met gerapporteerd rendement' : 'Difference to reported return'}
                     <InfoTip className="ml-2" text={copy.reconciliation.missing(fmtRet(displayedReconciliation.reported), ppt(displayedReconciliation.calculated))} />
                   </td>
                   <td className="py-2 text-right font-mono text-xs tabular-nums">
@@ -3308,15 +3315,15 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   </>}>{copy.lang === 'nl' ? `Het totale portefeuillerendement zoals gerapporteerd door ${portfolioSource}.`
                     : `The total portfolio return reported by ${portfolioSource}.`}</SimpleExplanation>} />
                 </td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(displayedReconciliation?.reported ?? grand.contribution)}`}>
-                  {ppt(displayedReconciliation?.reported ?? grand.contribution)}
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(displayedReconciliation?.calculated ?? grand.contribution)}`}>
+                  {ppt(displayedReconciliation?.calculated ?? grand.contribution)}
                   <InfoTip className="ml-1" content={displayedReconciliation
                     ? <SimpleExplanation details={<>
-                        <p>{ppt(displayedReconciliation.calculated)} + ({ppt(displayedReconciliation.missing)}) = {ppt(displayedReconciliation.reported)}</p>
+                        <p>{ppt(displayedReconciliation.reported)} − ({ppt(displayedReconciliation.calculated)}) = {ppt(displayedReconciliation.missing)}</p>
                         <p>{facts.dated(portfolioSource, realised?.book_as_of)}</p>
                       </>}>{copy.lang === 'nl'
-                        ? 'Berekende bijdragen plus het apart getoonde, nog niet verklaarde verschil met AIRS.'
-                        : 'Calculated contributions plus the separately shown unexplained difference from AIRS.'}</SimpleExplanation>
+                        ? 'Som van de berekende bijdragen; het verschil met het gerapporteerde rendement telt niet mee.'
+                        : 'Sum of calculated contributions; the difference to the reported return is excluded.'}</SimpleExplanation>
                     : <HoldingsColumnExplanation kind="contribution" amount={grand.result}
                         total={realised?.basis_eur} value={grand.contribution} asOf={asOf} />} />
                 </td>
@@ -4154,11 +4161,12 @@ export default function PortfolioAnalysisModal({
                         design and so drew the WHOLE BOOK's line beside a stocks-only tile. AIRS
                         reports a return for the account, not a slice.
                         The book curve arrives with the opening figures in the same bundle. */}
-                    {!isBasket && id != null && (
+                    {(leonteqPortfolio || (!isBasket && id != null)) && (
                       <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] sm:col-span-3 @[44rem]/overview:row-start-2">
                         {/* Reserve the chart footprint alongside the scorecard. */}
-                        <BookReturnChart portfolioId={id} name={name} variant={data.variant} refreshSeq={refreshSeq}
-                          series={source === 'book' ? ((data.return_series as BookValueSeries | null | undefined) ?? null) : undefined}
+                        <BookReturnChart portfolioId={id ?? 0} name={name} variant={data.variant} refreshSeq={refreshSeq}
+                          daily={Boolean(leonteqPortfolio)}
+                          series={leonteqPortfolio || source === 'book' ? ((data.return_series as BookValueSeries | null | undefined) ?? null) : undefined}
                           benchmark={benchmark}
                           benchmarkYtdPct={data.returns?.benchmark_source === 'weighted_etf' ? data.returns.benchmark_ytd_pct : undefined}
                           policyWeights={data.risk_profile_policy}

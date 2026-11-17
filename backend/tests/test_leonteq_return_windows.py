@@ -15,12 +15,23 @@ def test_later_inception_uses_actual_index_start_not_january_or_commercial_issue
     assert result['from'] == '2026-06-08'
     assert result['to'] == '2026-11-12'
     assert result['ytd_pct'] == -1.79
+    assert result['returns'][0] == {'date': '2026-06-08', 'cum_pct': 0}
+    assert result['returns'][-1]['cum_pct'] == pytest.approx(-1.79)
 
 
 def test_existing_portfolio_uses_year_opening_mark():
     data = {'series': [['2025-11-01', 100], ['2025-12-31', 120], ['2026-11-12', 132]],
             'performances': [{'nameOrIsin': 'Fund', 'performanceYTD': {'value': 10}}]}
     assert w.parse(data, {'currency': 'EUR', 'issueDate': '2025-01-01'}, 'Fund', 'now')['from'] == '2025-12-31'
+
+
+def test_source_name_padding_is_ignored_but_duplicate_identity_is_rejected():
+    data = history()
+    data['performances'][0]['nameOrIsin'] = 'Fund '
+    assert w.parse(data, {'currency': 'EUR', 'issueDate': '2026-06-08'}, 'Fund', 'now')['ytd_pct'] == -1.79
+    data['performances'].append({**data['performances'][0], 'nameOrIsin': 'Fund'})
+    with pytest.raises(w.ApiUnavailable, match='matching published'):
+        w.parse(data, {'currency': 'EUR', 'issueDate': '2026-06-08'}, 'Fund', 'now')
 
 
 def test_truncated_or_inconsistent_history_never_becomes_a_comparison():

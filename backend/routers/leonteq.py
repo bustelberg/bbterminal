@@ -43,9 +43,9 @@ async def management_dashboard_topselecties():
 
 
 @router.get('/api/leonteq/management/topselecties/{name}')
-async def management_topselectie(name: str):
+async def management_topselectie(name: str, benchmark: str | None = None):
     from leonteq.management import detail
-    return await asyncio.to_thread(detail, name)
+    return await asyncio.to_thread(detail, name, benchmark=benchmark)
 
 
 @router.get('/api/leonteq/management/topselecties/{name}/analysis')
