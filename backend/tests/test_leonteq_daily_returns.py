@@ -21,12 +21,20 @@ def test_return_refresh_updates_monthly_and_daily_history_and_keeps_partial_succ
 
 def test_daily_job_refreshes_returns_before_portfolio_preparation(monkeypatch):
     from scheduler_jobs import valuation
+    from routers import _benchmark_etf
     from services import valuation_dashboard
     calls = []
+    def refresh_benchmark(label, *, force, strict):
+        assert (label, force, strict) == ('ACWI', True, True)
+        calls.append('benchmark')
+        return (1, ('2026-11-16', 100))
+
+    monkeypatch.setattr(_benchmark_etf, 'ensure_fresh', refresh_benchmark)
     monkeypatch.setattr(m, 'refresh_returns', lambda _: calls.append('returns') or {'saved': ['One'], 'errors': {}})
     monkeypatch.setattr(valuation_dashboard, 'prepare_all', lambda _: calls.append('valuations') or {'saved': [1], 'errors': {}})
+    monkeypatch.setattr(m, 'prepare_dashboard_overview', lambda: calls.append('dashboard') or True)
     message, result = valuation.run()
-    assert calls == ['returns', 'valuations']
+    assert calls == ['benchmark', 'returns', 'valuations', 'dashboard']
     assert result['leonteq_returns']['saved'] == ['One']
     assert '1 portfolios' in message
 

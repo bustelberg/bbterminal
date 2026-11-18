@@ -3761,7 +3761,8 @@ export default function PortfolioAnalysisModal({
       try {
         const analysis = cachedDetails ? Promise.resolve(cachedDetails) : loadPrefetchedAnalysis(requestKey, async () => {
           const r = leonteqPortfolio
-            ? await apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}/analysis?benchmark=${benchmark}&include_holding_risk=${includeHoldingRisk}`)
+            ? await apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}/analysis?benchmark=${benchmark}&include_holding_risk=${includeHoldingRisk}`,
+              { cache: 'no-store', noReadCache: true })
             : isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
             : preparedOverview
@@ -4434,7 +4435,8 @@ export default function PortfolioAnalysisModal({
           <div className="min-h-0 flex-1 overflow-auto">
           <MonthlyReportPanel portefeuille={leonteqPortfolio ? undefined : reportAccount ?? data.book_portefeuille}
             leonteqPortfolio={leonteqPortfolio} leonteqReturns={leonteqPortfolio ? data.returns ?? undefined : undefined}
-            benchmarkName={data.benchmark ?? benchmark} name={name} variant={data.variant} />
+            benchmarkName={data.benchmark ?? benchmark} name={name} variant={data.variant}
+            refreshSeq={leonteqPortfolio ? refreshSeq : undefined} />
           </div>
         </div>
       )}

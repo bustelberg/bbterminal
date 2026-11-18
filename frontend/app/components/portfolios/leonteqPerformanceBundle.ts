@@ -8,10 +8,15 @@ export type LeonteqPerformanceReturns = {
 export type LeonteqPerformanceSource = {
   success?: boolean;
   monthly_benchmark?: PerformanceBundle['years'][string]['weighted_benchmark'];
+  monthly_attribution?: Record<string, {
+    opening_weight_date?: string;
+    positions?: NonNullable<PerformanceBundle['years'][string]['details'][string]['snapshot']>['positions'];
+    reason?: string;
+    estimated_contribution_gap_pp?: number | null;
+  }>;
   performance?: { months?: { month: string; return_pct: number | null }[]; yearly_totals?: Record<string, number> };
 };
 
-/** Preserve the shared report UI without manufacturing monthly position results. */
 export function leonteqPerformanceBundle(name: string, source: LeonteqPerformanceSource,
   returns?: LeonteqPerformanceReturns): PerformanceBundle {
   const observations = (source.performance?.months ?? []).filter(row => row.return_pct != null);
@@ -30,7 +35,25 @@ export function leonteqPerformanceBundle(name: string, source: LeonteqPerformanc
     if (benchmark) report.weighted_benchmark[row.month] = benchmark;
     report.rows[row.month] = { rendement: row.return_pct,
       periode: row.month === currentMonth ? returns?.portfolio_as_of ?? '' : '' };
-    report.details[row.month] = { needs_refresh: false, benchmark_needs_refresh: false, snapshot: null };
+    const attribution = source.monthly_attribution?.[row.month];
+    const contributions = attribution?.positions
+      ?.map(position => position.contribution_pp)
+      .filter((value): value is number => value != null && Number.isFinite(value)) ?? [];
+    const contributionSum = contributions.length ? contributions.reduce((sum, value) => sum + value, 0) : null;
+    const estimated = attribution?.estimated_contribution_gap_pp != null;
+    report.details[row.month] = { needs_refresh: false, benchmark_needs_refresh: false,
+      position_error: attribution?.reason,
+      estimated_contribution_gap_pp: attribution?.estimated_contribution_gap_pp,
+      snapshot: attribution?.positions ? { positions: attribution.positions,
+        opening_weight_date: attribution.opening_weight_date ?? null,
+        reconciliation: {
+          status: contributionSum == null ? 'unavailable' : estimated ? 'not_reconciled' : 'reconciled',
+          monthly_return_pct: row.return_pct,
+          contribution_sum_pp: contributionSum,
+          difference_pp: contributionSum == null || row.return_pct == null ? null : row.return_pct - contributionSum,
+          issues: attribution.reason ? [attribution.reason] : [],
+          adjustments: [],
+        } } : null };
   }
   const currentYear = currentMonth.slice(0, 4);
   if (years[currentYear] && returns) {

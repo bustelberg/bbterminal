@@ -17,9 +17,9 @@ const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
 const ctl = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-xs text-fg-muted hover:border-accent-500/50 disabled:opacity-50';
 const tone = (value?: number | null) => value == null ? 'text-fg-subtle' : value < 0 ? 'text-neg-400' : value > 0 ? 'text-pos-400' : 'text-fg-strong';
 
-export default function MonthlyReportPanel({ portefeuille, name, variant, leonteqPortfolio, leonteqReturns, benchmarkName }: {
+export default function MonthlyReportPanel({ portefeuille, name, variant, leonteqPortfolio, leonteqReturns, benchmarkName, refreshSeq }: {
   portefeuille?: string | null; name: string; variant?: string | null;
-  leonteqPortfolio?: string; leonteqReturns?: LeonteqPerformanceReturns; benchmarkName?: string;
+  leonteqPortfolio?: string; leonteqReturns?: LeonteqPerformanceReturns; benchmarkName?: string; refreshSeq?: number;
 }) {
   const [lang] = useLang();
   const benchmarkLabel = leonteqPortfolio ? benchmarkName ?? 'ACWI' : profileBenchmarkLabel(lang, variant);
@@ -45,7 +45,8 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
     setError(null);
     setPending(true);
     const request = leonteqPortfolio
-      ? apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}?benchmark=${encodeURIComponent(benchmarkLabel)}`)
+      ? apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}?benchmark=${encodeURIComponent(benchmarkLabel)}`,
+          { cache: 'no-store', noReadCache: true })
         .then(async response => {
           if (!response.ok) throw new Error('Leonteq performance could not be loaded.');
           const source = await response.json();
@@ -58,7 +59,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-  }, [portefeuille, leonteqPortfolio, leonteqReturns, benchmarkLabel, reload]);
+  }, [portefeuille, leonteqPortfolio, leonteqReturns, benchmarkLabel, reload, refreshSeq]);
 
   const data = bundle?.portefeuille === (leonteqPortfolio ?? portefeuille) ? bundle : null;
   const today = data?.current_month ?? '';
@@ -72,6 +73,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   const showConstituents = lookThrough && expanded !== undefined;
   const positions = showConstituents ? expanded : selectedReport?.snapshot?.positions;
   const reconciliation = selectedReport?.snapshot?.reconciliation;
+  const estimatedGap = selectedReport?.estimated_contribution_gap_pp;
   const unavailableCertificates = selectedReport?.snapshot?.lookthrough_unavailable ?? [];
   const openingWeightDate = selectedReport?.snapshot?.opening_weight_date;
 
@@ -123,6 +125,13 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   const eurPrice = (value: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   const shortDate = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }).replaceAll('.', '').replace(' sep ', ' sept ');
   const contributionDetails = (position: MonthlyPosition) => {
+    if (leonteqPortfolio && estimatedGap != null) return <p className="text-xs">{text(
+      'Estimated from Leonteq daily position P&L using opening portfolio value where cash-flow timing could not be verified. The difference from the published return remains unallocated.',
+      'Geschat uit dagelijkse Leonteq-positieresultaten met het beginvermogen als kasstroomtiming niet kon worden geverifieerd. Het verschil met het gepubliceerde rendement blijft onverdeeld.')}</p>;
+    if (leonteqPortfolio && selectedReport?.position_error) return <p className="text-xs">{selectedReport.position_error}</p>;
+    if (leonteqPortfolio) return <p className="text-xs">{text(
+      'Leonteq contributions use reconciled daily position results, linked over the selected month.',
+      'Leonteq-bijdragen gebruiken afgestemde dagelijkse positieresultaten, gekoppeld over de geselecteerde maand.')}</p>;
     const calculation = position.contribution_calculation;
     if (!calculation) return <div className="space-y-2 text-xs"><p className="font-medium">{position.name}</p><p>{position.is_cash
       ? text('Cash balance movements from trades are not investment gains. AIRS income and accrued interest are shown separately below.', 'Kasmutaties door transacties zijn geen beleggingsresultaat. AIRS-inkomsten en opgelopen rente staan hieronder afzonderlijk.')
@@ -260,7 +269,12 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
           {showConstituents && unavailableCertificates.length > 0 && <p className="px-5 pt-2 text-xs text-fg-subtle">
             {text('Dated holdings unavailable for', 'Geen gedateerde posities beschikbaar voor')} {unavailableCertificates.join(', ')}.
           </p>}
-          {!positions ? <p className="p-5 text-sm text-fg-subtle">{busy ? text('Reading AIRS position reports…', 'AIRS-positierapporten ophalen…') : text('Position results are not available yet.', 'De positieresultaten zijn nog niet beschikbaar.')}</p>
+          {positions && leonteqPortfolio && selectedReport?.position_error && <p className="px-5 pt-2 text-xs text-fg-subtle">
+            {estimatedGap == null ? text('Contribution unavailable.', 'Bijdrage niet beschikbaar.')
+              : text(`Estimated contributions. Unallocated difference: ${pp(estimatedGap)}.`,
+                  `Geschatte bijdragen. Onverdeeld verschil: ${pp(estimatedGap)}.`)} {selectedReport.position_error}
+          </p>}
+          {!positions ? <p className="p-5 text-sm text-fg-subtle">{busy ? text('Reading AIRS position reports…', 'AIRS-positierapporten ophalen…') : selectedReport?.position_error ?? text('Position results are not available yet.', 'De positieresultaten zijn nog niet beschikbaar.')}</p>
             : !positions.length ? <p className="p-5 text-sm text-fg-subtle">{text('No positions were found in the available AIRS reports.', 'Geen posities gevonden in de beschikbare AIRS-rapporten.')}</p>
             : <div className="overflow-auto p-3"><table className="w-full text-sm"><thead><tr>
               <th className="px-3 py-3 text-left text-xs font-medium text-fg-subtle">{text('Position', 'Positie')}</th>
@@ -276,7 +290,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
                 weights={position.via} weightTitle={position.certificate
                   ? text(`This row: ${position.certificate}. Percentages are opening weights within each selection.`, `Deze regel: ${position.certificate}. Percentages zijn begingewichten binnen elke selectie.`)
                   : undefined} /></td>}
-              <td className="px-3 py-3 text-right font-mono tabular-nums text-fg-muted">{weight(position.opening_weight_pct)}{position.opening_weight_pct != null && openingWeightDate && <InfoTip className="ml-2" text={`${text('Opening weight · AIRS valuation', 'Begingewicht · AIRS-waardering')}\n${shortDate(openingWeightDate)}`} />}</td>
+              <td className="px-3 py-3 text-right font-mono tabular-nums text-fg-muted">{weight(position.opening_weight_pct)}{position.opening_weight_pct != null && openingWeightDate && <InfoTip className="ml-2" text={`${leonteqPortfolio ? text('Opening weight · Leonteq valuation', 'Begingewicht · Leonteq-waardering') : text('Opening weight · AIRS valuation', 'Begingewicht · AIRS-waardering')}\n${shortDate(openingWeightDate)}`} />}</td>
               <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.return_pct)}`}>{pct(position.return_pct)}{position.start_price_eur != null && position.end_price_eur != null && <InfoTip className="ml-2" content={<div className="space-y-2 text-xs">
                 <p className="font-medium text-fg-strong">{text('AIRS price per unit in EUR', 'AIRS-prijs per stuk in EUR')}</p>
                 <table className="w-full"><tbody>

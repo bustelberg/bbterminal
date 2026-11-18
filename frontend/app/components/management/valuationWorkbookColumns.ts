@@ -45,14 +45,14 @@ export const WORKBOOK_PANELS = [
     'company', 'ticker', 'selections', 'valuationCurrency',
   ] },
   { key: 'valuation', en: 'Waardering & koopzone', nl: 'Waardering & koopzone', columns: [
-    'company', 'valuationCurrency', 'price', 'growth', 'fair_multiple', 'fair', 'fairUpside', 'buyMultiple', 'buyPrice', 'buyUpside', 'signal',
+    'company', 'valuationCurrency', 'price', 'basis', 'currentMultiple', 'growth', 'fair_multiple', 'fair', 'fairUpside', 'buyMultiple', 'buyPrice', 'buyUpside', 'signal',
   ] },
   { key: 'scenario', en: 'Scenario', nl: 'Scenario', columns: [
-    'company', 'valuationCurrency', 'growth', 'exit_multiple', 'bear', 'base', 'bull', 'cagr',
+    'company', 'valuationCurrency', 'exit_multiple', 'bear', 'base', 'bull', 'cagr',
   ] },
   { key: 'earnings', en: 'Koers & winst', nl: 'Koers & winst', columns: [
     'company', 'raw_price', 'quote_currency', 'unitScale', 'price', 'basis_kind', 'fy1', 'fy1_date', 'fy2', 'fy2_date', 'forecast_currency', 'forecast_basis',
-    'months_fy1', 'calendarMonths', 'months', 'manual_basis', 'manual_currency', 'manual_label', 'basis_fx', 'basis', 'currentMultiple',
+    'months_fy1', 'calendarMonths', 'months', 'manual_basis', 'manual_currency', 'manual_label', 'basis_fx',
   ] },
   { key: 'sources', en: 'Bron & controle', nl: 'Bron & controle', columns: [
     'company', 'ticker', 'price_date', 'price_source', 'forecast_source', 'forecast_basis', 'manual_date', 'manual_source', 'review_required', 'risk_note',

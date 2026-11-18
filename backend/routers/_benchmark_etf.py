@@ -394,7 +394,8 @@ def repair_index_proxy_history() -> int:
     return refresh_index_proxies(force=True, bypass_daily_guard=True, full_history=True)
 
 
-def etf_returns(label: str, starts: list[str], *, end: str | None = None) -> dict[str, dict]:
+def etf_returns(label: str, starts: list[str], *, end: str | None = None,
+                read_only: bool = False) -> dict[str, dict]:
     """`{start: {eur_pct, local_pct, as_of, start_date, ticker, currency}}` for the windows this
     ETF can price. A window that opens before the fund existed is ABSENT, not null — the caller
     falls back to the reconstruction for it rather than printing a dash.
@@ -407,7 +408,7 @@ def etf_returns(label: str, starts: list[str], *, end: str | None = None) -> dic
     """
     from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
 
-    fresh = ensure_fresh(label)
+    fresh = _saved_proxy(label) if read_only else ensure_fresh(label)
     if not fresh or not starts:
         return {}
     bid, (end_d, end_p) = fresh
@@ -466,6 +467,19 @@ def etf_returns(label: str, starts: list[str], *, end: str | None = None) -> dic
     return out
 
 
+def _saved_proxy(label: str):
+    ticker = PROXY.get(label)
+    if not ticker:
+        return None
+    rows = (supabase.table('benchmark').select('benchmark_id').eq('ticker', ticker)
+            .limit(1).execute().data or [])
+    if not rows:
+        return None
+    bid = rows[0]['benchmark_id']
+    latest = _latest(bid)
+    return (bid, latest) if latest else None
+
+
 def etf_return_series(label: str, anchor: str, dates: list[str], *, read_only: bool = False) -> dict:
     """The proxy ETF's cumulative EUR return sampled on the caller's exact dates.
 
@@ -479,11 +493,7 @@ def etf_return_series(label: str, anchor: str, dates: list[str], *, read_only: b
     if label not in PROXY:
         return {}
     wanted = sorted({str(d)[:10] for d in dates if d and str(d)[:10] >= anchor})
-    if read_only:
-        stored = (supabase.table('benchmark').select('benchmark_id').eq('ticker', PROXY.get(label, label)).limit(1).execute().data or [])
-        fresh = (stored[0]['benchmark_id'], _latest(stored[0]['benchmark_id'])) if stored else None
-    else:
-        fresh = ensure_fresh(label)
+    fresh = _saved_proxy(label) if read_only else ensure_fresh(label)
     if not fresh or not wanted:
         return {}
     bid, _latest_mark = fresh

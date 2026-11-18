@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import unicodedata
@@ -15,6 +16,9 @@ from fastapi import HTTPException
 from deps import supabase
 from leonteq import composition_cache, portfolio_cache
 from leonteq import return_windows
+
+log = logging.getLogger(__name__)
+_DASHBOARD_TABLE = 'leonteq_dashboard_bundle'
 
 
 def key(value):
@@ -121,18 +125,43 @@ def overview():
 
 
 def detail(display_name, refresh=False, progress=None, benchmark=None):
+    from leonteq.progress import report
+
     entry = next((row for row in entries() if row['display_name'] == display_name), None)
     if not entry:
         raise HTTPException(404, 'Unknown TopSelectie')
+    if refresh:
+        report('Refreshing the Leonteq portfolio catalogue…')
     catalogue = portfolio_cache.portfolios(refresh=True) if refresh else portfolio_cache.saved_portfolios()
     matched = resolve(entry, catalogue.get('portfolios') or [])
     if not matched:
-        return {'success': False, 'source': 'Leonteq', 'status': catalogue.get('status') if not catalogue.get('success') else 'portfolio_not_found'}
+        return {'success': False, 'source': 'Leonteq', 'status': catalogue.get('status') if not catalogue.get('success') else 'portfolio_not_found',
+                'catalogue_error': catalogue.get('refresh_error')}
     name = matched['name']
+    if refresh:
+        if catalogue.get('refresh_error'):
+            report('The catalogue refresh failed. Using the saved portfolio match to read fresh data.')
+        report('Refreshing Leonteq holdings…')
     holdings = composition_cache.composition(name, refresh=refresh, saved_only=not refresh)
+    if refresh:
+        report('Refreshing Leonteq monthly returns…')
     returns = performance(name, refresh)
+    if refresh and holdings.get('success') and not holdings.get('refresh_error'):
+        window, _ = return_windows.ensure({'leonteq_name': name,
+            'catalogue_retrieved_at': catalogue.get('retrieved_at'), 'performance': returns})
+        if window:
+            returns = {**returns, 'return_window': window}
     from leonteq import accounting
     ledger = accounting.refresh(name, holdings.get('as_of') or matched.get('as_of'), progress) if refresh and holdings.get('success') and not holdings.get('refresh_error') else accounting.saved(name)
+    response = _snapshot_detail(display_name, catalogue, matched, holdings, returns, ledger)
+    if benchmark:
+        response['monthly_benchmark'] = _monthly_benchmark(response, benchmark)
+        response['monthly_attribution'] = _monthly_attribution(response)
+    return response
+
+
+def _snapshot_detail(display_name, catalogue, matched, holdings, returns, ledger):
+    name = matched['name']
     ledger = ledger or {}
     result = ledger.get('result') or {}
     verified_window = return_windows.cached({'leonteq_name': name, 'accounting': ledger})
@@ -143,7 +172,7 @@ def detail(display_name, refresh=False, progress=None, benchmark=None):
         and (ledger.get('retrieved_at') or '') >= (holdings.get('retrieved_at') or '')
         and (not verified_window or verified_window['to'] == result.get('to'))
         and reference_ytd is not None and abs(reference_ytd - result['reported_ytd_pct']) <= .0051)
-    if eligible:
+    if eligible and not holdings.get('refresh_error') and holdings.get('snapshot_saved') is not False:
         from leonteq.portal_api import composition as shape_composition
         closing = ledger['valuations'][result['to']]
         holdings = {**shape_composition(closing, name), 'success': True,
@@ -151,18 +180,55 @@ def detail(display_name, refresh=False, progress=None, benchmark=None):
         matched = {**matched, 'as_of': result['to'], 'ytd': f"{result['reported_ytd_pct']}%"}
     elif result.get('available'):
         ledger = {**ledger, 'success': False, 'reason': 'Leonteq accounting predates the current holdings/return snapshot', 'result': {'available': False}}
-    response = {'success': bool(holdings.get('success')), 'source': 'Leonteq', 'name': display_name,
+    return {'success': bool(holdings.get('success')), 'source': 'Leonteq', 'name': display_name,
             'leonteq_name': name, 'summary': matched, 'catalogue_retrieved_at': catalogue.get('retrieved_at'),
-            'catalogue_error': catalogue.get('refresh_error'), 'composition': holdings, 'performance': returns,
+            'catalogue_error': catalogue.get('refresh_error'),
+            'catalogue_saved': catalogue.get('snapshot_saved'), 'composition': holdings, 'performance': returns,
             'accounting': ledger}
-    if benchmark:
-        response['monthly_benchmark'] = _monthly_benchmark(response, benchmark)
-    return response
+
+
+def _monthly_attribution(source):
+    from leonteq.accounting import monthly_cash_verified
+
+    window = return_windows.for_monthly_report(source)
+    ledger = source.get('accounting') or {}
+    saved = ledger.get('monthly_attribution') or {}
+    if not window:
+        return {row['month']: {'reason': 'Verified Leonteq return dates are unavailable for this report.'}
+                for row in (source.get('performance') or {}).get('months') or []}
+    details = {}
+    dates = [row['date'] for row in window['returns']]
+    for row in (source.get('performance') or {}).get('months') or []:
+        month = row['month']
+        report = saved.get(month)
+        if not report:
+            details[month] = {'reason': (source.get('accounting') or {}).get('reason')
+                              or 'Monthly positions have not been prepared for this period.'}
+            continue
+        if not report.get('available'):
+            details[month] = {'reason': report.get('reason')}
+            continue
+        end = max((stamp for stamp in dates if stamp[:7] == month), default=None)
+        start = max((stamp for stamp in dates if stamp[:7] < month), default=window['from'])
+        if (report['from'] != start or report['to'] != end or row.get('return_pct') is None
+                or abs(report['reported_ytd_pct'] - row['return_pct']) > .01):
+            details[month] = {'reason': 'Saved position results do not match the current Leonteq monthly return.'}
+            continue
+        estimated = bool(report.get('estimated') and monthly_cash_verified(ledger, report))
+        details[month] = {'opening_weight_date': start, 'reason': report.get('reason'),
+            'estimated_contribution_gap_pp': report['difference_pct'] if estimated else None, 'positions': [
+            {'name': item['name'], 'isin': item['isin'], 'return_pct': item['return_pct'],
+             'contribution_pp': item['contribution_pct'] if estimated or not report.get('estimated') else None,
+             'start_date': start, 'end_date': end,
+             'opening_weight_pct': item['opening'] / report['basis_eur'] * 100 if report['basis_eur'] else None,
+             'is_cash': identity.startswith('cash:'), 'status': 'held'}
+            for identity, item in report['positions'].items()]}
+    return details
 
 
 def _monthly_benchmark(source, benchmark):
     from routers._benchmark_etf import etf_return_series
-    window = return_windows.cached(source)
+    window = return_windows.for_monthly_report(source)
     points = (window or {}).get('returns') or []
     if len(points) < 2:
         return {}
@@ -240,9 +306,7 @@ def refresh_returns(context):
             continue
         try:
             monthly = performance(matched['name'], refresh=True)
-            if not monthly.get('success') or monthly.get('refresh_error'):
-                result['errors'][label] = 'Leonteq monthly returns could not be refreshed and saved.'
-                continue
+            monthly_failed = not monthly.get('success') or monthly.get('refresh_error')
             window, reason = return_windows.ensure({'leonteq_name': matched['name'],
                 'catalogue_retrieved_at': catalogue.get('retrieved_at'),
                 'performance': {**monthly, 'return_window': None}})
@@ -250,6 +314,9 @@ def refresh_returns(context):
                 result['errors'][label] = reason
             else:
                 result['saved'].append(label)
+            if monthly_failed:
+                monthly_error = 'Leonteq monthly returns could not be refreshed and saved.'
+                result['errors'][label] = ' '.join(filter(None, (result['errors'].get(label), monthly_error)))
         except (JobCancelled, Cancelled):
             raise
         except Exception as exc:
@@ -290,13 +357,85 @@ def prepare_contributions(context):
     return result
 
 
+def _dashboard_snapshots(configured, *, strict=False):
+    from leonteq import accounting
+
+    catalogue = portfolio_cache.saved_portfolios()
+    matched = {entry['display_name']: resolve(entry, catalogue.get('portfolios') or [])
+               for entry in configured}
+    names = sorted({row['name'] for row in matched.values() if row})
+    account = portfolio_cache._account_key()
+    if not names or not account:
+        return {}
+
+    def load(table):
+        try:
+            rows = (supabase.table(table).select('portfolio_name,payload').eq('account_key', account)
+                    .in_('portfolio_name', names).execute().data or [])
+            return {row['portfolio_name']: row['payload'] for row in rows if row.get('payload')}
+        except Exception:
+            if strict:
+                raise
+            return {}
+
+    compositions = load(composition_cache.TABLE)
+    performances = load('leonteq_performance_snapshot')
+    ledgers = load(accounting.TABLE)
+    snapshots = {}
+    for label, summary in matched.items():
+        if not summary:
+            continue
+        name = summary['name']
+        holdings = compositions.get(name, {})
+        returns = performances.get(name, {})
+        ledger = ledgers.get(name, {})
+        snapshots[label] = _snapshot_detail(label, catalogue, summary,
+            holdings if holdings.get('success') and holdings.get('groups') else {},
+            returns if returns.get('success') else {},
+            ledger if ledger.get('version') == accounting.VERSION else {})
+    return snapshots
+
+
 def dashboard_overview():
-    """Adapt Leonteq snapshots to the existing management table contract, without AIRS."""
+    """Read the prepared table in one database request."""
     current_month = datetime.now(ZoneInfo('Europe/Amsterdam')).strftime('%Y-%m')
+    account = portfolio_cache._account_key()
+    if account:
+        try:
+            rows = (supabase.table(_DASHBOARD_TABLE).select('payload').eq('account_key', account)
+                    .eq('report_month', current_month).limit(1).execute().data or [])
+            if rows:
+                return rows[0]['payload']
+        except Exception:
+            log.warning('Prepared TopSelecties dashboard could not be read')
+    # Existing installations and month rollover can still read saved source data.
+    return _build_dashboard_overview(current_month)
+
+
+def prepare_dashboard_overview():
+    account = portfolio_cache._account_key()
+    if not account:
+        return False
+    current_month = datetime.now(ZoneInfo('Europe/Amsterdam')).strftime('%Y-%m')
+    try:
+        payload = _build_dashboard_overview(current_month, strict=True)
+        if not any(row['fetched_at'] for row in payload):
+            return False
+        supabase.table(_DASHBOARD_TABLE).upsert({'account_key': account,
+            'report_month': current_month, 'payload': payload}, on_conflict='account_key').execute()
+        return True
+    except Exception:
+        log.warning('Prepared TopSelecties dashboard could not be saved')
+        return False
+
+
+def _build_dashboard_overview(current_month, *, strict=False):
     rows = []
-    for entry in entries():
-        source = detail(entry['display_name'])
-        return_window = return_windows.cached(source)
+    configured = entries()
+    snapshots = _dashboard_snapshots(configured, strict=strict)
+    for entry in configured:
+        source = snapshots.get(entry['display_name'], {})
+        return_window = return_windows.for_monthly_report(source)
         summary = source.get('summary') or {}
         composition = source.get('composition') or {}
         returns = source.get('performance') or {}
@@ -348,6 +487,7 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
     """Full valued Leonteq portfolio in the shared Analyse contract; no AIRS book needed."""
     from routers import _airs_portfolio_analysis as pa
     from routers._airs_holding_isin import classify_bucket
+    from routers._benchmark_etf import PROXY, etf_returns
 
     source = detail(display_name)
     composition = source.get('composition') or {}
@@ -361,15 +501,22 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
             inception = datetime.strptime(summary['start_date'], '%d %b %Y').date().isoformat()
         except ValueError:
             pass
-    # A return window needs index marks, not opening position valuations. Acquire
-    # that lightweight source contract independently and use its SAME dates for ACWI.
-    return_window, window_error = return_windows.ensure(source)
+    # Manual and scheduled preparation save the verified dates before Analyse is opened.
+    return_window = return_windows.for_monthly_report(source)
+    window_error = None if return_window else 'Verified Leonteq return dates have not been saved. Refresh this portfolio.'
     since = return_window['from'] if return_window else None
     return_as_of = return_window['to'] if return_window else None
     portfolio_ytd = return_window['ytd_pct'] if return_window else _number(summary.get('ytd'))
-    market = pa._index_returns(benchmark, [since], end=return_as_of) if return_window else {}
+    market = {}
+    if return_window:
+        if benchmark in PROXY:
+            market = etf_returns(benchmark, [since], end=return_as_of, read_only=True)
+        else:
+            market = pa._index_returns(benchmark, [since], end=return_as_of)
     window = market.get(since) or {}
     benchmark_ytd = window.get('eur_pct')
+    if return_window and benchmark_ytd is None:
+        window_error = f'Saved {benchmark} prices or EUR exchange rates do not cover the verified Leonteq return dates.'
     returns = {**pa._bench_prov(window), 'source': 'leonteq', 'book_available': True,
                'ytd_from': since, 'since_from': inception, 'portfolio_ytd_pct': portfolio_ytd,
                'strategy_ytd_pct': portfolio_ytd, 'portfolio_as_of': return_as_of,

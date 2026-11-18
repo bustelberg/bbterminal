@@ -591,7 +591,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const loadOverview = useCallback(async (completedAccount?: string) => {
     await traceScope('overview', 'loading the portfolios table', async () => {
       try {
-        const r = await apiFetch(`${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/dashboard` : '/api/airs/portfolios/overview'}`);
+        const r = await apiFetch(`${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/dashboard` : '/api/airs/portfolios/overview'}`,
+          leonteq ? { cache: 'no-store', noReadCache: true } : undefined);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const body = (await r.json()) as OverviewRow[];
         //  An empty table is the state a fresh production database is in, and it renders exactly
@@ -694,7 +695,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     setRefreshingRows((s) => new Set(s).add(portefeuille));
     try {
       const { id, done } = await startJob(
-        `${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/${encodeURIComponent(displayName)}/refresh/job`
+        `${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/${encodeURIComponent(displayName)}/refresh/job?refresh_benchmark=true`
           : `/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job?cascade=${cascade}`}`,
         leonteq ? `${displayName} · Leonteq` : t.common.refreshingFromAirs(displayName), undefined, undefined, { label: displayName });
       setRowJobs((m) => ({ ...m, [portefeuille]: id }));
@@ -775,8 +776,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       setRefreshingAll(true);
       setRefreshMsg(null);
       try {
-        for (const row of rows ?? []) {
-          const { id, done } = await startJob(`${API_URL}${LEONTEQ_DASHBOARD}/${encodeURIComponent(row.name)}/refresh/job`, row.name);
+        for (const [index, row] of (rows ?? []).entries()) {
+          const benchmark = index === 0 ? '?refresh_benchmark=true' : '';
+          const { id, done } = await startJob(`${API_URL}${LEONTEQ_DASHBOARD}/${encodeURIComponent(row.name)}/refresh/job${benchmark}`, row.name);
           setFleetJob(id);
           const job = await done;
           await loadOverview();

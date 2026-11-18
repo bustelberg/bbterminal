@@ -26,13 +26,29 @@ def sources(monkeypatch):
 def test_explicit_refresh_acquires_source_accounting_and_keeps_missing_boundary_visible(sources, monkeypatch):
     sources[1].return_value['as_of'] = '2026-11-12'
     monkeypatch.setattr(m, 'performance', lambda *_: {'success': True})
+    ensure_window = Mock(return_value=(None, 'History unavailable'))
+    monkeypatch.setattr(m.return_windows, 'ensure', ensure_window)
     ledger = {'success': False, 'reason': 'Leonteq opening valuation is unavailable for 2026-06-08', 'result': {'available': False}}
     refresh = Mock(return_value=ledger)
     monkeypatch.setattr(accounting, 'refresh', refresh)
     result = m.detail('AITopSelectie', refresh=True)
     assert result['success'] is True
     assert result['accounting'] == ledger
+    ensure_window.assert_called_once()
     refresh.assert_called_once_with('AI-TopSelectie', '2026-11-12', None)
+
+
+def test_monthly_report_reuses_verified_history_when_catalogue_observation_has_not_changed():
+    window = {'portfolio_name': 'AI-TopSelectie', 'currency': 'EUR',
+        'from': '2026-06-08', 'to': '2026-11-17', 'ytd_pct': -3.66,
+        'retrieved_at': '2026-11-18T08:00:00Z'}
+    source = {'leonteq_name': 'AI-TopSelectie', 'return_window': window,
+        'catalogue_retrieved_at': '2026-11-18T09:00:00Z',
+        'summary': {'as_of': '2026-11-17', 'ytd': '-3.66%'}}
+    assert m.return_windows.cached(source) is None
+    assert m.return_windows.for_monthly_report(source) == window
+    source['summary']['as_of'] = '2026-11-18'
+    assert m.return_windows.for_monthly_report(source) is None
 
 
 def test_previous_accounting_cannot_leak_into_a_newer_source_snapshot(sources):
@@ -144,14 +160,24 @@ def test_monthly_child_reports_do_not_read_airs_for_topselecties(sources, monkey
     assert monthly._child_reports('StarTopSelectie OFF DYN', {'2026-10': '2026-10-31'}) == {}
 
 
+def test_prepared_dashboard_reads_the_bundle_without_loading_source_snapshots(sources, monkeypatch):
+    rows = [{'name': 'AITopSelectie', 'fetched_at': '2026-11-18T08:00:00Z'}]
+    build = Mock(return_value=rows)
+    monkeypatch.setattr(m, '_build_dashboard_overview', build)
+    assert m.prepare_dashboard_overview()
+    build.reset_mock()
+    assert m.dashboard_overview() == rows
+    build.assert_not_called()
+
+
 def test_shared_dashboard_contract_uses_source_returns_and_explicit_dates(monkeypatch):
     month = m.datetime.now(m.ZoneInfo('Europe/Amsterdam')).strftime('%Y-%m')
-    monkeypatch.setattr(m, 'detail', lambda _: {
+    monkeypatch.setattr(m, '_dashboard_snapshots', lambda entries, **_: {entries[0]['display_name']: {
         'success': True, 'catalogue_retrieved_at': '2026-11-16T10:00:00Z',
         'summary': {'ytd': '8.78%', 'inception_date': '2026-06-01', 'as_of': '2026-11-12'},
         'composition': {'groups': [{'positions': [{'isin': 'TEST'}]}]},
         'performance': {'months': [{'month': month, 'return_pct': 1.82}]},
-    })
+    }})
     row = m.dashboard_overview()[0]
     assert row['ytd_pct'] == 8.78
     assert row['latest_month_pct'] == 1.82
@@ -162,18 +188,18 @@ def test_shared_dashboard_contract_uses_source_returns_and_explicit_dates(monkey
 
 
 def test_shared_dashboard_does_not_invent_values_or_valuation_dates(monkeypatch):
-    monkeypatch.setattr(m, 'detail', lambda _: {
+    monkeypatch.setattr(m, '_dashboard_snapshots', lambda entries, **_: {entries[0]['display_name']: {
         'success': False, 'catalogue_retrieved_at': '2026-11-16T10:00:00Z',
         'summary': {'ytd': '0.00%', 'start_date': '19 May 2025'},
         'performance': {'months': [{'month': '2025-01', 'return_pct': 99}]},
         'composition': {'groups': [{'positions': [{'price_date': '2026-11-12'}]}]},
-    })
+    }})
     row = m.dashboard_overview()[0]
     assert row['ytd_pct'] == 0
     assert row['latest_month_pct'] is None
     assert row['as_of'] is None
     assert row['ytd_from'] == '2026-01-01'
-    monkeypatch.setattr(m, 'detail', lambda _: {'success': False})
+    monkeypatch.setattr(m, '_dashboard_snapshots', lambda entries, **_: {entries[0]['display_name']: {'success': False}})
     missing = m.dashboard_overview()[0]
     assert missing['ytd_pct'] is None
     assert missing['latest_month_pct'] is None
@@ -187,7 +213,7 @@ def test_missing_monthly_cache_uses_verified_index_history(monkeypatch):
     window = {'from': '2025-12-31', 'to': month + '-16', 'ytd_pct': -1.819,
         'returns': [{'date': '2025-12-31', 'cum_pct': 0},
                     {'date': month + '-02', 'cum_pct': -2}, {'date': month + '-16', 'cum_pct': -1.819}]}
-    monkeypatch.setattr(m, 'detail', lambda _: {'performance': {'months': []}})
+    monkeypatch.setattr(m, '_dashboard_snapshots', lambda entries, **_: {entries[0]['display_name']: {'performance': {'months': []}}})
     monkeypatch.setattr(m.return_windows, 'cached', lambda _: window)
     row = m.dashboard_overview()[0]
     assert row['latest_month_pct'] == pytest.approx(-1.819)
@@ -198,8 +224,8 @@ def test_dashboard_dates_follow_the_return_observation_not_catalogue(monkeypatch
     window = {'from': '2025-12-31', 'to': '2026-11-16', 'ytd_pct': 2,
         'retrieved_at': '2026-11-17T12:00:00Z', 'returns': [
             {'date': '2026-10-30', 'cum_pct': 0}, {'date': '2026-11-16', 'cum_pct': 2}]}
-    monkeypatch.setattr(m, 'detail', lambda _: {'catalogue_retrieved_at': '2026-11-13T12:00:00Z',
-        'performance': {'months': []}})
+    monkeypatch.setattr(m, '_dashboard_snapshots', lambda entries, **_: {entries[0]['display_name']: {'catalogue_retrieved_at': '2026-11-13T12:00:00Z',
+        'performance': {'months': []}}})
     monkeypatch.setattr(m.return_windows, 'cached', lambda _: window)
     row = m.dashboard_overview()[0]
     assert row['as_of'] == '2026-11-16'

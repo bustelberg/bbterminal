@@ -98,7 +98,8 @@ def valuation(payload, expected_date):
     return {'date': stamp, 'nav': nav, 'positions': positions}
 
 
-def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=False, cash_flows=None):
+def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=False, cash_flows=None,
+              positions_only=False):
     """Daily source P&L, checked capital-flow timing, then forward-link contributions.
 
     Trading net cash already includes transaction charges/taxes. AMC fees are a
@@ -109,6 +110,7 @@ def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=Fals
     if len(points) < 2 or len(points) != len(boundaries):
         raise ApiUnavailable('Incomplete Leonteq opening and closing valuation history')
     ledger = {}
+    unreconciled_cash = set()
     linked = defaultdict(lambda: ZERO)
     total_return = ZERO
     has_external_flows = False
@@ -150,8 +152,17 @@ def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=Fals
                 settled = [r for r in interval if r.get('booking_currency') == currency]
                 native_change = sum((-Decimal(r['net_amount']) * Decimal(r['booking_fx'])
                     for r in settled if r.get('net_amount') is not None and r.get('booking_fx') is not None), ZERO)
-                if abs((new or {}).get('quantity', ZERO) - (old or {}).get('quantity', ZERO) - native_change) > Decimal('.02'):
-                    raise ApiUnavailable('Foreign cash quantities need complete source settlement movements')
+                balance_change = (new or {}).get('quantity', ZERO) - (old or {}).get('quantity', ZERO)
+                if abs(balance_change - native_change) > Decimal('.02'):
+                    if positions_only:
+                        estimated = True
+                        unreconciled_cash.add(identity)
+                        continue
+                    raise ApiUnavailable(
+                        f'Foreign cash quantities need complete source settlement movements '
+                        f'for {currency} between {before["date"]} and {after["date"]}: '
+                        f'balance changed by {balance_change}, recorded settlements explain {native_change}'
+                    )
                 profit = ((new or {}).get('value', ZERO) - (old or {}).get('value', ZERO)
                           - sum((Decimal(r['cash_eur']) for r in settled), ZERO))
                 day[identity] = profit
@@ -223,6 +234,9 @@ def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=Fals
     if not estimated and abs(sum(linked.values(), ZERO) - total_return) > Decimal('.00005'):
         raise ApiUnavailable('Linked Leonteq contributions do not reconcile to reported YTD')
     first, last = boundaries[0], boundaries[-1]
+    for identity in unreconciled_cash:
+        ledger.pop(identity, None)
+        linked.pop(identity, None)
     for identity, item in ledger.items():
         item['opening'] = first['positions'].get(identity, {}).get('value', ZERO)
         item['closing'] = last['positions'].get(identity, {}).get('value', ZERO)
@@ -230,6 +244,7 @@ def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=Fals
         item['return_pct'] = item['profit'] / capital * HUNDRED if capital > 0 else None
         item['contribution_pct'] = linked[identity] * HUNDRED
     return {'available': True, 'estimated': estimated, 'from': first['date'], 'to': last['date'],
+            'unreconciled_cash': sorted(unreconciled_cash),
             'calculated_contribution_pct': float(sum(linked.values(), ZERO) * HUNDRED),
             'difference_pct': float((total_return - sum(linked.values(), ZERO)) * HUNDRED),
             'source_cash_flows_available': cash_flows is not None, 'cash_differences': cash_differences,
@@ -238,6 +253,24 @@ def calculate(boundaries, records, points, reported_ytd, *, allow_estimates=Fals
             'cash': {'opening': float(first['positions'].get('cash:EUR', {}).get('value', ZERO)),
                      'closing': float(last['positions'].get('cash:EUR', {}).get('value', ZERO))},
             'positions': {k: {n: float(v) if isinstance(v, Decimal) else v for n,v in item.items()} for k,item in ledger.items()}}
+
+
+def monthly_cash_verified(snapshot, report):
+    """Verify cash for an older estimate using its saved source evidence."""
+    if 'unreconciled_cash' in report:
+        return report['unreconciled_cash'] == []
+    try:
+        start, end = report['from'], report['to']
+        marks = sorted((stamp[:10], _number(value)) for stamp, value in snapshot['history']['series']
+                       if start <= stamp[:10] <= end)
+        if len(marks) < 2 or marks[0][0] != start or marks[-1][0] != end:
+            return False
+        boundaries = [valuation(snapshot['valuations'][stamp], stamp) for stamp, _ in marks]
+        checked = calculate(boundaries, snapshot['transactions'], marks, report['reported_ytd_pct'],
+                            allow_estimates=True, positions_only=True)
+        return checked['unreconciled_cash'] == []
+    except (ApiUnavailable, KeyError, TypeError, ValueError, ArithmeticError):
+        return False
 
 
 def saved(name):
@@ -303,13 +336,16 @@ def _collect(page, ids, name, as_of, progress, previous=None):
         target = Decimal(str(window['ytd_pct']))
         boundaries = []
         previous = previous or {}
-        previous_marks = dict((previous.get('history') or {}).get('series') or [])
+        previous_marks = {stamp[:10]: value
+                          for stamp, value in (previous.get('history') or {}).get('series') or []}
         previous_values = previous.get('valuations') or {}
         previous_end = max(previous_values, default='')
         cached_count = 0
         for index, stamp in enumerate(dates):
             progress(index, len(dates), f'Leonteq accounting · valuation {stamp}')
-            if (stamp < previous_end and stamp < dates[-1] and stamp in previous_values
+            if stamp in payload['valuations']:
+                raw = payload['valuations'][stamp]
+            elif (stamp < previous_end and stamp < dates[-1] and stamp in previous_values
                     and previous_marks.get(stamp) is not None
                     and _number(previous_marks[stamp]) == marks[stamp]):
                 raw = previous_values[stamp]
@@ -355,6 +391,26 @@ def _collect(page, ids, name, as_of, progress, previous=None):
                     # Initial funding is already the reconstructed opening capital.
                     cash_flows = [r for r in cash_flows if r['date'] != first_date]
                     payload['opening_reconstruction']['source_funding_verified'] = True
+        monthly = {}
+        payload['monthly_attribution'] = monthly
+        for month in dict.fromkeys(stamp[:7] for stamp in dates[1:]):
+            indices = [i for i, stamp in enumerate(dates) if stamp[:7] == month]
+            start, end = max(0, indices[0] - 1), indices[-1]
+            month_dates = dates[start:end + 1]
+            month_return = (marks[dates[end]] / marks[dates[start]] - 1) * HUNDRED
+            month_boundaries = boundaries[start:end + 1]
+            month_marks = [(stamp, marks[stamp]) for stamp in month_dates]
+            try:
+                monthly[month] = calculate(month_boundaries, records['transactions'],
+                    month_marks, month_return, cash_flows=cash_flows)
+            except ApiUnavailable as exc:
+                try:
+                    # Position P&L can still be supported when the portfolio funding basis is unclear.
+                    monthly[month] = {**calculate(month_boundaries, records['transactions'],
+                        month_marks, month_return, allow_estimates=True, cash_flows=cash_flows, positions_only=True),
+                        'estimated': True, 'reason': str(exc)}
+                except ApiUnavailable as position_error:
+                    monthly[month] = {'available': False, 'reason': str(position_error)}
         result = calculate(boundaries, records['transactions'], [(d, marks[d]) for d in dates], target,
                            allow_estimates=True, cash_flows=cash_flows)
         payload['cached_valuations'] = cached_count

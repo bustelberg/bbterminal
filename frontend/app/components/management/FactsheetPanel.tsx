@@ -8,6 +8,10 @@ import type { components } from '../../../lib/api-types';
 
 type Factsheet = components['schemas']['FactsheetResponse'];
 const pct = (number: number | null | undefined) => number == null ? '—' : `${number.toFixed(2)}%`;
+const hfriSource = 'https://mondovisione.com/_assets/files/HFR-Media-Reference-Guide-2024.09.09.pdf#page=31';
+const hfriFxSource = 'https://data.ecb.europa.eu/data/datasets/EXR/EXR.M.USD.EUR.SP00.E';
+// Each of the guide's 180 USD return factors is multiplied by opening FX / closing FX (USD per EUR).
+const hfri = { totalReturn: 175.43797018699414, cagr: 6.987963437853262, volatility: 7.995606801522687 };
 
 export default function FactsheetPanel() {
   const [lang] = useLang();
@@ -46,11 +50,11 @@ export default function FactsheetPanel() {
   ]);
   return <section className="space-y-4" aria-label="Factsheet">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm text-fg-muted">{nl ? 'Totaalrendement in EUR, inclusief herbelegde uitkeringen en USD/EUR-valutabewegingen. Dagvolatiliteit geannualiseerd met √252.' : 'EUR total returns, including reinvested distributions and USD/EUR currency movements. Daily volatility annualized using √252.'}</p>
+      <p className="text-sm text-fg-muted">{nl ? 'Totaalrendementen in EUR met USD/EUR-valutabewegingen en herbelegde ETF-uitkeringen. ETF-volatiliteit op dagbasis (√252), HFRI op maandbasis (√12).' : 'Total returns in EUR include USD/EUR currency movements and reinvested ETF distributions. Volatility uses daily ETF returns (√252) and monthly HFRI returns (√12).'}</p>
       <button type="button" disabled={loading} onClick={() => { setError(''); setLoading(true); setRevision(current => current + 1); }} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
     </div>
     <div className="overflow-x-auto rounded-xl border border-neutral-800/40"><table className="w-full text-sm">
-      <caption className="sr-only">ACWI / SYBA / QAI / HDG Factsheet</caption>
+      <caption className="sr-only">Benchmark Factsheet</caption>
       <thead className="bg-elevated text-xs text-fg-muted"><tr>
         <th className="px-3 py-2 text-left">Benchmark</th>
         <th className="px-3 py-2 text-left">{nl ? 'Periode' : 'Period'}</th>
@@ -75,6 +79,22 @@ export default function FactsheetPanel() {
           <td className="px-3 py-3 text-right tabular-nums" title={stats ? `${stats.observations} daily returns · ${stats.years.toFixed(2)} years` : undefined}>{pct(stats?.cagr_pct)}</td>
           <td className="px-3 py-3 text-right tabular-nums">{pct(stats?.volatility_pct)}</td>
         </tr>)}
+        <tr>
+          <td className="px-3 py-3"><a href={hfriSource} target="_blank" rel="noopener noreferrer"
+            className="font-medium text-accent-600 hover:underline">HFRIFWI</a>
+            <div className="text-xs text-fg-muted">HFRI Fund Weighted Composite Index</div>
+            <div className="text-xs text-fg-muted">HFR Media Reference Guide, p. 31</div>
+            <a href={hfriFxSource} target="_blank" rel="noopener noreferrer" className="text-xs text-accent-600 hover:underline">
+              {nl ? 'ECB-wisselkoersen per maandultimo' : 'ECB month-end exchange rates'}
+            </a>
+          </td>
+          <td className="px-3 py-3"><div>{nl ? '15 jaar · EUR, niet afgedekt' : '15 years · EUR, unhedged'}</div>
+            <div className="text-xs text-fg-muted">2009-08-31 → 2024-08-31</div>
+          </td>
+          <td className="px-3 py-3 text-right tabular-nums">{pct(hfri.totalReturn)}</td>
+          <td className="px-3 py-3 text-right tabular-nums" title={nl ? '180 maandrendementen' : '180 monthly returns'}>{pct(hfri.cagr)}</td>
+          <td className="px-3 py-3 text-right tabular-nums">{pct(hfri.volatility)}</td>
+        </tr>
       </tbody>
     </table></div>
     {data?.prepared_at && <p className="text-xs text-fg-muted" title={data.method ?? undefined}>{nl ? 'Bijgewerkt' : 'Updated'}: {data.prepared_at}</p>}

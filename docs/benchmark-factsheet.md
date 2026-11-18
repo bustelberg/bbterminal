@@ -42,3 +42,13 @@ HDG appears immediately after QAI and uses the same shared EUR calculation
 window, adjusted-close methodology and daily volatility convention. Both are
 replication ETF proxies, not the HFRI index itself. The cache key includes HDG,
 so previously saved three-fund snapshots are not reused.
+
+The Factsheet includes a historical row linked to the HFR Media Reference Guide, page 31, for the
+HFRI Fund Weighted Composite Index (`HFRIFWI`). This edition contains monthly
+USD returns from January 1990 through August 2024. The 2024 row is year to date.
+The row converts 180 monthly USD returns from September 2009 through August 2024
+to unhedged EUR using the ECB's last published USD-per-EUR reference rate in each
+month (EXR.M.USD.EUR.SP00.E). Each USD return factor is multiplied by the prior
+month-end rate divided by the current month-end rate. The EUR factors are
+compounded and their monthly return sample standard deviation is annualized
+with sqrt(12). The fixed source window differs from the daily ETF calculations.

@@ -9,7 +9,7 @@ import ValuationFormulaExplanation from './ValuationFormulaExplanation';
 import { selectingTabText } from './valuationTabSelection';
 
 type Quote = { name: string; isin?: string | null; price?: number | null; price_date?: string | null; currency?: string | null };
-const control = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-sm';
+const control = 'rounded-lg border border-neutral-700 bg-elevated px-2 py-1.5 text-xs';
 const SIGNAL_STYLE: Record<string, string> = {
   BUY: 'bg-pos-500/15 text-pos-400',
   CONSIDER: 'bg-warn-500/15 text-warn-400',
@@ -34,6 +34,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
   const [panel, setPanel] = useState<WorkbookPanelKey>('company');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('name');
+  const [columnSort, setColumnSort] = useState<{ key: string; descending: boolean } | null>(null);
   const [formulaIsin, setFormulaIsin] = useState('');
   const [formula, setFormula] = useState<WorkbookColumn | null>(null);
   const formulaAnchor = useRef<HTMLElement | null>(null);
@@ -146,11 +147,34 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
       : result?.reason ?? (result?.signal === '?' ? t('Complete valuation assumptions', 'Vul de waarderingsaannames aan')
         : !row ? t('Valuation inputs unavailable', 'Waarderingsinvoer ontbreekt')
           : result?.cagr == null ? t('Scenario assumptions incomplete', 'Scenarioaannames onvolledig') : null);
-    return { quote, row, result, warning };
+    const source = row?.quote ?? {};
+    const a = row?.assumptions, f = row?.forecast;
+    const signals = nl ? { '?': '?', REVIEW: 'NADER TOETSEN', BUY: 'KOOP', CONSIDER: 'TWIJFEL', 'DO NOT BUY': 'NIET KOPEN' }
+      : { '?': '?', REVIEW: 'REVIEW', BUY: 'BUY', CONSIDER: 'CONSIDER', 'DO NOT BUY': 'DO NOT BUY' };
+    const cells: Record<string, string | number | null | undefined> = {
+      company: quote.name, ticker: row?.ticker, selections: row?.selections.join(' | '),
+      raw_price: source.price, quote_currency: source.currency, price_date: source.price_date, price_source: source.source,
+      fy1: f?.fy1, fy1_date: f?.fy1_date, fy2: f?.fy2, fy2_date: f?.fy2_date,
+      forecast_currency: f?.currency, forecast_basis: f?.basis_label, forecast_source: f?.source,
+      manual_basis: a?.manual_basis, manual_currency: a?.basis_currency, manual_label: a?.basis_label,
+      manual_date: a?.basis_date, manual_source: a?.basis_source,
+      basis_kind: a?.basis_kind === 'manual' ? t('Manual source basis', 'Handmatige bronbasis') : 'GuruFocus NTM EPS',
+      months_fy1: a?.months_fy1, basis_fx: a?.basis_fx, growth: a?.growth, fair_multiple: a?.fair_multiple,
+      exit_multiple: a?.exit_multiple, review_required: a?.review_required == null ? '—' : a.review_required ? t('YES', 'JA') : t('NO', 'NEE'),
+      risk_note: a?.risk_note, years: workbook?.parameters.years, safety_margin: workbook?.parameters.safety_margin,
+      ...result, signal: signals[result?.signal as keyof typeof signals ?? '?'],
+    };
+    return { quote, row, result, warning, cells };
   }).filter(({ quote, row }) => `${quote.name} ${row?.ticker ?? ''}`.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => sort === 'name' ? a.quote.name.localeCompare(b.quote.name)
-      : ((b.result?.[sort as 'fairUpside' | 'cagr'] ?? -Infinity) - (a.result?.[sort as 'fairUpside' | 'cagr'] ?? -Infinity)
-        || a.quote.name.localeCompare(b.quote.name)));
+    .sort((a, b) => {
+      const { key, descending } = columnSort ?? { key: sort === 'name' ? 'company' : sort, descending: sort !== 'name' };
+      const left = a.cells[key], right = b.cells[key];
+      const missing = (value: typeof left) => value == null || value === '' || value === '—' || value === '?';
+      if (missing(left) !== missing(right)) return missing(left) ? 1 : -1;
+      const order = missing(left) ? 0 : typeof left === 'number' && typeof right === 'number'
+        ? left - right : String(left).localeCompare(String(right), nl ? 'nl' : 'en', { numeric: true });
+      return (descending ? -order : order) || a.quote.name.localeCompare(b.quote.name);
+    });
 
   const save = async (parameters: Workbook['parameters'], changed?: WorkbookRow) => {
     if (!workbook || busy) return;
@@ -204,7 +228,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
     const max = field === 'growth' ? 1000 : field === 'months_fy1' ? 12 : undefined;
     return <span className="inline-flex items-center gap-1">
       <input key={`${field}:${value}`} aria-label={label} disabled={disabled} type={numeric ? 'number' : 'text'}
-        className={`${control} ${field === 'risk_note' ? 'w-64' : numeric ? 'w-28' : 'w-40'} disabled:opacity-50`}
+        className={`${control} ${field === 'risk_note' ? 'w-64' : numeric ? 'w-20' : 'w-40'} disabled:opacity-50`}
         defaultValue={value} placeholder="—" step="any" min={min} max={max}
         maxLength={field === 'risk_note' ? 2000 : field === 'basis_source' ? 1000 : field === 'basis_currency' ? 10 : field === 'basis_date' ? 100 : 200}
         onBlur={event => {
@@ -221,17 +245,18 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
       {field === 'growth' && <span>%</span>}
     </span>;
   };
-  const tabs = <nav className="flex flex-wrap gap-2" aria-label={t('Valuation panels', 'Waarderingspanelen')}>
+  const tabs = <nav className="flex flex-wrap gap-1.5" aria-label={t('Valuation panels', 'Waarderingspanelen')}>
       {WORKBOOK_PANELS.map(item => <button key={item.key} type="button" aria-pressed={panel === item.key}
         className={`${control} cursor-pointer select-text ${item.key === 'parameters' ? 'ml-auto' : ''} aria-pressed:border-accent-500/50 aria-pressed:text-accent-300`}
         onClick={event => { if (selectingTabText(event)) return; setPanel(item.key); setFocusedInput(null); }}>
           <span className="cursor-pointer select-text">{nl ? item.nl : item.en}{item.key === 'scenario' ? ` ${scenarioYear}` : ''}</span>
         </button>)}
     </nav>;
-  return <div ref={root} className="space-y-3">
+  return <div ref={root} className="space-y-2">
     <div className="flex flex-wrap items-center gap-3">
       <label className="text-xs text-fg-muted">{t('Find company', 'Zoek bedrijf')} <input type="search" className={control} value={search} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => setSearch(event.target.value)} /></label>
-      <label className="text-xs text-fg-muted">{t('Sort', 'Sorteren')} <select className={control} value={sort} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => setSort(event.target.value)}>
+      <label className="text-xs text-fg-muted">{t('Sort', 'Sorteren')} <select className={control} value={columnSort ? 'column' : sort} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => { setColumnSort(null); setSort(event.target.value); }}>
+        <option value="column" disabled>{t("Column sort", "Kolomsortering")}</option>
         <option value="name">{t('Company A–Z', 'Bedrijf A–Z')}</option>
         <option value="fairUpside">{t('Fair upside: highest first', 'Opwaarts potentieel: hoogste eerst')}</option>
         <option value="cagr">{t('Base CAGR: highest first', 'CAGR basis: hoogste eerst')}</option>
@@ -303,42 +328,33 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
       </form>
     </details></section>}
     {panel !== 'memberships' && panel !== 'parameters' && <>
-    <div ref={table}><table className="w-full whitespace-nowrap text-sm">
+    <div ref={table}><table className="w-full whitespace-nowrap text-xs">
       <caption className="sr-only">{t('Workbook valuation by company', 'Waardering per bedrijf volgens werkmap')}</caption>
       <thead className="bg-elevated text-xs text-fg-muted"><tr>{columns.map(column => <th key={column.key} data-column={column.key} data-kind={column.kind}
-        title={column.formula ? t('Click to see the calculation and company inputs', 'Klik voor de berekening en bedrijfsinvoer') : undefined} className={`sticky top-0 z-10 h-16 border-t-2 px-3 py-2 text-left ${COLUMN_STYLE[column.kind]} ${panel === 'company' || panel === 'valuation' || panel === 'scenario' ? 'max-w-36 whitespace-normal' : ''} ${column.key === 'company' ? 'left-0 z-[15] w-56 min-w-56 max-w-56' : ''} ${focusedInput === column.key ? 'ring-2 ring-inset ring-accent-400' : ''}`}>
-          {column.formula ? <button type="button" className="text-left underline decoration-dotted underline-offset-4" onClick={event => openFormula(column, entries[0]?.quote.isin ?? '', event.currentTarget)}>{nl ? column.nl : column.en}</button> : nl ? column.nl : column.en}
+        aria-sort={(columnSort?.key ?? (sort === 'name' ? 'company' : sort)) === column.key
+          ? ((columnSort?.descending ?? sort !== 'name') ? 'descending' : 'ascending') : undefined} className={`sticky top-0 z-10 h-12 border-t-2 px-2 py-1.5 text-left ${COLUMN_STYLE[column.kind]} ${panel === 'company' || panel === 'valuation' || panel === 'scenario' ? 'max-w-36 whitespace-normal' : ''} ${column.key === 'company' ? 'left-0 z-[15] w-44 min-w-44 max-w-44' : ''} ${focusedInput === column.key ? 'ring-2 ring-inset ring-accent-400' : ''}`}>
+          <button type="button" className="cursor-pointer text-left hover:text-accent-300" onClick={() => {
+            setFormula(null);
+            setColumnSort({ key: column.key, descending: columnSort?.key === column.key && !columnSort.descending });
+          }}>{nl ? column.nl : column.en}{columnSort?.key === column.key && <span aria-hidden="true"> {columnSort.descending ? '↓' : '↑'}</span>}</button>
           {column.key === 'selections' && membershipGaps.length > 0 && <button type="button" className="mt-1 block text-xs font-normal underline" title={coverageNote}
             onClick={() => { setPanel('memberships'); setFocusedInput(null); }}>{t('Coverage details', 'Dekkingsdetails')}</button>}
         </th>)}</tr></thead>
-      <tbody className="divide-y divide-neutral-800/30">{entries.map(({ quote, row, result }, i) => {
+      <tbody className="divide-y divide-neutral-800/30">{entries.map(({ quote, row, result, cells }, i) => {
         const source = row?.quote ?? {};
-        const a = row?.assumptions, f = row?.forecast;
-        const signals = nl ? { '?': '?', REVIEW: 'NADER TOETSEN', BUY: 'KOOP', CONSIDER: 'TWIJFEL', 'DO NOT BUY': 'NIET KOPEN' }
-          : { '?': '?', REVIEW: 'REVIEW', BUY: 'BUY', CONSIDER: 'CONSIDER', 'DO NOT BUY': 'DO NOT BUY' };
-        const cells: Record<string, string | number | null | undefined> = {
-          company: quote.name, ticker: row?.ticker, selections: row?.selections.join(' | '),
-          raw_price: source.price, quote_currency: source.currency, price_date: source.price_date, price_source: source.source,
-          fy1: f?.fy1, fy1_date: f?.fy1_date, fy2: f?.fy2, fy2_date: f?.fy2_date,
-          forecast_currency: f?.currency, forecast_basis: f?.basis_label, forecast_source: f?.source,
-          manual_basis: a?.manual_basis, manual_currency: a?.basis_currency, manual_label: a?.basis_label,
-          manual_date: a?.basis_date, manual_source: a?.basis_source,
-          basis_kind: a?.basis_kind === 'manual' ? t('Manual source basis', 'Handmatige bronbasis') : 'GuruFocus NTM EPS',
-          months_fy1: a?.months_fy1, basis_fx: a?.basis_fx, growth: a?.growth, fair_multiple: a?.fair_multiple,
-          exit_multiple: a?.exit_multiple, review_required: a?.review_required == null ? '—' : a.review_required ? t('YES', 'JA') : t('NO', 'NEE'),
-          risk_note: a?.risk_note, years: workbook?.parameters.years, safety_margin: workbook?.parameters.safety_margin,
-          ...result, signal: signals[result?.signal as keyof typeof signals ?? '?'],
-        };
         const percentages = new Set(['growth', 'safety_margin', 'fairUpside', 'buyUpside', 'cagr']);
         const multiples = new Set(['fair_multiple', 'exit_multiple', 'currentMultiple', 'buyMultiple']);
-        return <tr key={quote.isin ?? `${quote.name}:${i}`} aria-busy={refreshingIsin === quote.isin} className={`h-20 ${refreshingIsin === quote.isin ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+        return <tr key={quote.isin ?? `${quote.name}:${i}`} aria-busy={refreshingIsin === quote.isin} className={`h-12 ${refreshingIsin === quote.isin ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
           {columns.map(column => {
             const raw = cells[column.key];
+            const cagrStyle = column.key === 'cagr' && typeof raw === 'number' && Number.isFinite(raw)
+              ? raw > 10 ? 'text-pos-400' : raw >= 7 ? 'text-orange-400' : 'text-neg-400'
+              : '';
             const display = typeof raw === 'number' ? number(column.key === 'growth' || column.key === 'safety_margin' ? raw * 100 : raw,
               percentages.has(column.key) ? '%' : multiples.has(column.key) ? '×' : '') : raw || '—';
             return <td key={column.key} data-column={column.key} data-kind={column.kind}
               title={column.formula ? result?.reason ?? t('Click to explain this value', 'Klik voor uitleg van deze waarde') : raw == null ? undefined : String(raw)}
-              className={`px-3 py-2 tabular-nums ${COLUMN_STYLE[column.kind]} ${column.key === 'company' ? 'sticky left-0 w-56 min-w-56 max-w-56 bg-card font-medium' : ''} ${column.key === 'risk_note' ? 'max-w-80 whitespace-normal' : ''}`}>
+              className={`px-2 py-1.5 tabular-nums ${COLUMN_STYLE[column.kind]} ${column.key === 'company' ? 'sticky left-0 w-44 min-w-44 max-w-44 bg-card font-medium' : ''} ${column.key === 'risk_note' ? 'max-w-80 whitespace-normal' : ''}`}>
               {row && assumptionCell(column, row, quote.name) || (column.key === 'selections' ? <div className="flex max-h-16 flex-wrap items-center gap-1 overflow-y-auto">
                 {row?.selections.map(code => <span key={code} className="rounded border border-neutral-800/40 px-1.5 py-0.5"
                   title={`${code} = ${workbook?.membership_legend?.find(item => item.code === code)?.name ?? code}${row.membership_profiles?.[code]?.length ? `: ${row.membership_profiles[code].join(', ')}` : ''}`}>{code}</span>)}
@@ -351,7 +367,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
                   : column.key === 'risk_note' ? <span className="line-clamp-2 max-w-80 whitespace-normal">{display}</span>
                   : column.formula ? <button type="button" className={`cursor-pointer text-left ${column.key === 'signal'
                     ? `rounded-md px-2 py-1 font-medium ${SIGNAL_STYLE[String(result?.signal)] ?? SIGNAL_STYLE.REVIEW}`
-                    : 'underline decoration-dotted underline-offset-4'}`}
+                    : `underline decoration-dotted underline-offset-4 ${cagrStyle}`}`}
                       aria-label={t(`Explain ${column.en} for ${quote.name}`, `Uitleg ${column.nl} voor ${quote.name}`)}
                       onClick={event => openFormula(column, quote.isin ?? '', event.currentTarget)}>{display}</button> : display)}
             </td>;

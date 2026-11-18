@@ -55,30 +55,81 @@ async def management_topselectie_analysis(name: str, benchmark: str = 'ACWI', in
 
 
 @router.post('/api/leonteq/management/topselecties/{name}/refresh/job')
-async def refresh_management_topselectie(name: str):
+async def refresh_management_topselectie(name: str, refresh_benchmark: bool = False):
     import jobs
     from jobs import UserFacingJobError
-    from leonteq.management import detail, entries
+    from leonteq.management import detail, entries, prepare_dashboard_overview
+    from leonteq.progress import observe
+    from leonteq.return_windows import for_monthly_report
     from fastapi import HTTPException
     if name not in {row['display_name'] for row in entries()}:
         raise HTTPException(404, 'Unknown TopSelectie')
 
     def run(ctx):
         ctx.progress(0, 1, f'Reading {name} from Leonteq…')
+        benchmark_issue = None
+        if refresh_benchmark:
+            from routers._benchmark_etf import ensure_fresh
+            ctx.progress(0, 1, 'Refreshing ACWI prices from Yahoo Finance…')
+            try:
+                if ensure_fresh('ACWI', force=True, bypass_daily_guard=True, strict=True) is None:
+                    benchmark_issue = 'No saved ACWI benchmark prices are available.'
+            except Exception:
+                benchmark_issue = 'The Yahoo Finance ACWI refresh failed.'
+            if benchmark_issue:
+                ctx.progress(0, 1, benchmark_issue)
         def progress(done, total, message):
             ctx.check()
             ctx.progress(done, total, message)
-        result = detail(name, refresh=True, progress=progress)
-        if (not result.get('success') or result.get('catalogue_error')
-                or result.get('composition', {}).get('refresh_error')
-                or not result.get('performance', {}).get('success')
-                or result.get('performance', {}).get('refresh_error')
-                or result.get('composition', {}).get('snapshot_saved') is False):
-            raise UserFacingJobError('Leonteq refresh incomplete. Last successful Leonteq snapshots remain available.')
+        with observe(lambda message, _: progress(0, 1, message)):
+            result = detail(name, refresh=True, progress=progress)
+        ctx.check()
+        if 'composition' in result and not prepare_dashboard_overview():
+            ctx.progress(0, 1, 'The prepared TopSelecties dashboard could not be saved.')
+        failures = []
+        catalogue_issue = result.get('catalogue_error')
+        if not catalogue_issue and result.get('catalogue_saved') is False:
+            catalogue_issue = 'snapshot_save_failed'
+        if 'composition' not in result:
+            failures.append(('catalogue', catalogue_issue or result.get('status')))
+        for key, label in (('composition', 'holdings'), ('performance', 'monthly returns')):
+            if key not in result:
+                continue
+            snapshot = result[key]
+            if snapshot.get('snapshot_saved') is False:
+                failures.append((label, 'snapshot_save_failed'))
+            elif snapshot.get('refresh_error') or not snapshot.get('success'):
+                failures.append((label, snapshot.get('refresh_error') or snapshot.get('status')))
+        if failures:
+            reasons = {
+                'busy': 'another Leonteq operation is in progress',
+                'missing_credentials': 'Leonteq credentials are missing',
+                'login_rejected': 'Leonteq rejected the login',
+                'verification_required': 'Leonteq requires additional login verification',
+                'browser_unavailable': 'the browser could not start',
+                'browser_error': 'the portal browser connection failed',
+                'session_failed': 'the portal session could not be authenticated',
+                'portfolios_failed': 'the portal did not return a readable portfolio list',
+                'composition_failed': 'the portal did not return readable holdings',
+                'timeout': 'Leonteq did not respond in time',
+                'portfolio_not_found': 'no unique match for the configured portfolio name',
+                'snapshot_save_failed': 'the database did not save the snapshot',
+            }
+            details = '; '.join(f'{stage}: {reasons.get(status, "source read failed")}' for stage, status in failures)
+            raise UserFacingJobError(f'Leonteq refresh incomplete ({details}). Last successful snapshots remain available.')
+        month_reports = (result.get('accounting') or {}).get('monthly_attribution') or {}
+        saved_months = sum(bool(month.get('available')) for month in month_reports.values())
+        ctx.progress(0, 1, f'Saved position results for {saved_months} months.')
+        if not for_monthly_report(result):
+            raise UserFacingJobError('Leonteq holdings and monthly returns updated, but verified return dates are unavailable.')
         if not (result.get('accounting') or {}).get('success'):
             raise UserFacingJobError('Leonteq holdings updated; contribution unavailable: '
                                     + ((result.get('accounting') or {}).get('reason') or 'opening valuations or net transactions are incomplete'))
         ctx.progress(1, 1, 'Leonteq holdings and returns updated.')
+        if benchmark_issue:
+            return f'Leonteq holdings and returns updated. {benchmark_issue}'
+        if catalogue_issue:
+            return 'Leonteq holdings and returns updated using the resolved portfolio name. The catalogue was not updated.'
         return 'Leonteq holdings and returns updated.'
 
     job, reused = jobs.start(f'leonteq.management.{name}', name, run)

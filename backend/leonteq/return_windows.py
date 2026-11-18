@@ -76,6 +76,23 @@ def cached(source):
     return max(valid, key=lambda window: window['retrieved_at']) if valid else None
 
 
+def for_monthly_report(source):
+    window = cached(source)
+    if window:
+        return window
+    # A catalogue reread can advance the retrieval timestamp without advancing
+    # the portfolio. Reuse history only for the same observed close and YTD.
+    summary = source.get('summary') or {}
+    candidate = cached({**source, 'catalogue_retrieved_at': None})
+    try:
+        ytd = _number(str(summary.get('ytd', '')).strip().rstrip('%').replace('−', '-'))
+    except (ApiUnavailable, ValueError, TypeError):
+        return None
+    if candidate and candidate['to'] == summary.get('as_of') and abs(Decimal(str(candidate['ytd_pct'])) - ytd) <= Decimal('.0051'):
+        return candidate
+    return None
+
+
 def read(name):
     """Only index history/details: no opening holdings, transactions, or AIRS pairing."""
     from leonteq.portal_login import check_login, _login_lock
@@ -122,4 +139,5 @@ def ensure(source):
             on_conflict='account_key,portfolio_name').execute()
     except Exception:
         log.warning('Leonteq return window could not be cached')
+        return None, 'The database did not save the verified Leonteq return dates.'
     return window, None

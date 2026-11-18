@@ -114,8 +114,8 @@ it('anchors formula popups to the clicked cell within a scrolled table', async (
     vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 80, 1000, 500));
     viewport.scrollLeft = 900;
     viewport.scrollTop = 200;
-    for (const selector of ['td[data-column="fair"] button', 'th[data-column="fair"] button']) {
-      const anchor = host.querySelector<HTMLButtonElement>(selector)!;
+    {
+      const anchor = host.querySelector<HTMLButtonElement>('td[data-column="fair"] button')!;
       vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(new DOMRect(780, 180, 50, 20));
       await act(async () => anchor.click());
       const popup = host.querySelector<HTMLElement>('[aria-label="Formula details"]')!;
@@ -151,7 +151,7 @@ it('separates blue source values from yellow conversions and preserves green ana
     await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
       rows={[{ isin: 'EXACT', name: 'Company', price: 100, currency: 'USD', price_date: '2026-11-13' }]} />));
     expect([...host.querySelectorAll('nav button')].map(button => button.textContent)).toEqual([
-      'Onderneming', 'Koers & winst', 'Waardering & koopzone', 'Scenario 2029', 'Bron & controle', 'Afkortingen', 'Parameters',
+      'Onderneming', 'Waardering & koopzone', 'Scenario 2029', 'Koers & winst', 'Bron & controle', 'Afkortingen', 'Parameters',
     ]);
     expect(host.querySelectorAll('thead th')).toHaveLength(4);
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Koers & winst')!.click());
@@ -162,7 +162,7 @@ it('separates blue source values from yellow conversions and preserves green ana
     expect(host.querySelector('tbody [data-column="raw_price"]')?.getAttribute('data-kind')).toBe('data');
     expect(host.querySelector('tbody [data-column="raw_price"]')?.className).toContain('bg-card');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Waardering & koopzone')!.click());
-    expect(host.querySelector('thead [data-column="fair"]')?.getAttribute('title')).toContain('Click to see the calculation');
+    expect(host.querySelector('thead [data-column="fair"] button')?.textContent).toBe('Fair price');
     expect(host.textContent).toContain('Buy signal');
     expect(host.querySelector('tbody [data-column="fair_multiple"]')?.className).toContain('bg-card');
     expect(host.querySelector('td[data-column="company"] button')).toBeNull();
@@ -266,7 +266,7 @@ it('switches panels without refetching, keeps search/sort, and links formulas to
       sort.value = 'cagr'; sort.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Waardering & koopzone')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('th[data-column="fair"] button')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('td[data-column="fair"] button')!.click());
     const formula = host.querySelector('[aria-label="Formula details"]')!;
     await act(async () => formula.querySelector<HTMLButtonElement>('button[data-input="fy1"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('Koers & winst');
@@ -298,7 +298,7 @@ it('edits all shared parameters in one tab and updates the scenario year without
     await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ isin: 'EXACT', name: 'Company' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Waardering & koopzone')!.click());
     expect(host.querySelector('input[name="safety_margin"]')).toBeNull();
-    await act(async () => host.querySelector<HTMLButtonElement>('th[data-column="buyPrice"] button')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('td[data-column="buyPrice"] button')!.click());
     await act(async () => host.querySelector<HTMLButtonElement>('[data-input="safety_margin"]')!.click());
     expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('Parameters');
     expect(host.querySelectorAll('details input')).toHaveLength(6);
@@ -372,7 +372,7 @@ it('explains fair value using company inputs while retaining the expanded formul
   try {
     await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Waardering & koopzone')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('th[data-column="fair"] button')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('td[data-column="fair"] button')!.click());
     const formula = host.querySelector('[aria-label="Formula details"]')!;
     expect(formula.querySelectorAll('.katex-display')).toHaveLength(2);
     expect(formula.querySelector('[aria-label="Variables"]')?.textContent).toContain('Fair valuation multiple.');

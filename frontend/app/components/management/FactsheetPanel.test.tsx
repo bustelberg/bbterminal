@@ -31,7 +31,7 @@ it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async (
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
     await act(async () => root.render(<FactsheetPanel />));
-    expect(host.querySelectorAll('tbody tr')).toHaveLength(4);
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(5);
     const bond = host.querySelectorAll('tbody tr')[1];
     expect(bond.textContent).toContain('State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF');
     expect(bond.textContent).toContain('15 years');
@@ -56,7 +56,7 @@ it('separates true fifteen-year statistics from the bond funds shorter available
   try {
     await act(async () => root.render(<FactsheetPanel />));
     const rows = host.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6);
     expect(rows[4].textContent).toContain('3.21%');
     expect(rows[4].textContent).toContain('6.54%');
     expect(rows[0].textContent).toContain('4.73%');

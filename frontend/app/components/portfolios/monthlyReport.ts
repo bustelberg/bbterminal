@@ -94,6 +94,8 @@ export type PerformanceBundle = {
       needs_refresh: boolean;
       refresh_reason?: 'missing_report' | 'outdated_report' | 'ambiguous_position' | 'incomplete_report' | 'preparation_failed' | null;
       benchmark_needs_refresh: boolean;
+      position_error?: string;
+      estimated_contribution_gap_pp?: number | null;
       snapshot: (Pick<NonNullable<MonthlyReport['snapshot']>, 'positions' | 'reconciliation'>
         & { opening_weight_date: string | null; lookthrough_positions?: MonthlyPosition[];
           lookthrough_unavailable?: string[] }) | null;

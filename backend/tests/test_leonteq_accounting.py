@@ -235,6 +235,28 @@ def test_estimates_keep_unexplained_difference_separate_from_company_profit():
     assert result['difference_pct'] == -1
 
 
+def test_monthly_positions_can_survive_an_unexplained_foreign_cash_movement(monkeypatch):
+    opening = boundary('2026-08-12', 500, 500)
+    closing = boundary('2026-08-13', 550, 500)
+    closing['positions']['cash:USD'] = {'name': 'USD cash', 'quantity': D('502.31'), 'value': D(430)}
+    closing['nav'] += D(430)
+    points = [('2026-08-12', D(100)), ('2026-08-13', D(105))]
+    with pytest.raises(a.ApiUnavailable, match='recorded settlements explain 0'):
+        a.calculate([opening, closing], [], points, 5, allow_estimates=True)
+    result = a.calculate([opening, closing], [], points, 5, allow_estimates=True, positions_only=True)
+    assert result['estimated']
+    assert result['positions']['STOCK']['return_pct'] == 10
+    assert 'cash:USD' not in result['positions']
+    legacy = {key: value for key, value in result.items() if key != 'unreconciled_cash'}
+    snapshot = {'history': {'series': points}, 'transactions': [],
+                'valuations': {opening['date']: opening, closing['date']: closing}}
+    monkeypatch.setattr(a, 'valuation', lambda raw, _: raw)
+    assert not a.monthly_cash_verified(snapshot, legacy)
+    closing['positions'].pop('cash:USD')
+    closing['nav'] -= D(430)
+    assert a.monthly_cash_verified(snapshot, legacy)
+
+
 def test_source_cash_movements_are_compared_without_hiding_unexplained_cash():
     opening = boundary('2025-12-31', 500, 500)
     closing = boundary('2026-01-02', 550, 600)

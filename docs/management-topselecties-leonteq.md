@@ -4,7 +4,10 @@ The management dashboard uses the same `PortfolioOverviewPanel` for every collec
 including the same table, sorting, allocation-policy control, Refresh all and Analyse actions.
 TopSelecties reads exclusively from Leonteq LYNQS through
 `/api/leonteq/management/topselecties/dashboard`. The other collections retain their AIRS path.
-Opening the tab reads saved snapshots only. Refresh runs a background job that reads the
+The daily job and individual refreshes save the complete overview in
+`leonteq_dashboard_bundle`. Opening the tab reads that bundle in one database
+query. If there is no bundle for the current month yet, the endpoint uses the
+saved source snapshots. Refresh runs a background job that reads the
 Leonteq catalogue, composition and monthly performance; it never refreshes AIRS.
 
 `backend/config/management_topselecties.json` lists the ten products and their Leonteq
@@ -62,9 +65,12 @@ net purchases, explicitly described as a cash-flow capital return rather than a 
 The table, columns and controls are unchanged. Existing contribution tooltips explain source
 gaps. A successful old ledger cannot be blended into newer source holdings or returns.
 The Performance button is available beside Risk for Leonteq books as well. It opens the
-same monthly report panel, populated from saved Leonteq monthly returns and the aligned
-YTD comparison. Historical per-month benchmark and position attribution remain unavailable
-until separately calculated; this panel never loads an AIRS bundle or starts AIRS jobs.
+same monthly report panel. One request loads the saved Leonteq monthly returns and position
+attribution together with benchmark comparisons calculated from stored ETF prices.
+Accounting preparation reconciles each month independently and stores the results in the
+accounting snapshot. A failed YTD reconciliation can still leave later months available.
+The report shows the source gap when a month cannot be reconciled or its saved attribution
+no longer matches the displayed return window.
 For AITopSelectie, source acquisition on 16 November 2026 found the first return mark on
 8 June 2026 but no composition for that date. Transactions has 19 initial buys, whereas
 Instructions has 20 BOOKED initial buys, including 107 Alphabet shares missing from
@@ -95,6 +101,7 @@ Apply `20261116120000_leonteq_management_source_revision.sql` and
 `20261116130000_leonteq_accounting_snapshots.sql` with the normal database
 migration process before deploying. It invalidates prepared holdings/risk on Leonteq snapshot
 writes. Source-policy code and identity configuration participate in prepared-code versions.
+Apply `20261118100000_leonteq_dashboard_bundle.sql` for the prepared overview.
 Use **Refresh all** on the TopSelecties tab after deployment to populate missing snapshots.
 
 Validation uses fake storage and mocked vendor responses. No live provider or database
