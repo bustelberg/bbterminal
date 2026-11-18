@@ -265,7 +265,18 @@ def monthly_cash_verified(snapshot, report):
                        if start <= stamp[:10] <= end)
         if len(marks) < 2 or marks[0][0] != start or marks[-1][0] != end:
             return False
-        boundaries = [valuation(snapshot['valuations'][stamp], stamp) for stamp, _ in marks]
+        opening = snapshot.get('opening_reconstruction') or {}
+        values = snapshot['valuations']
+        if (opening.get('verified_against_source_index')
+                and opening.get('date') == start and opening.get('first_composition_date') == marks[1][0]):
+            from leonteq.opening import reconstruct
+
+            boundaries = [valuation(values[stamp], stamp) for stamp, _ in marks[1:]]
+            first = reconstruct(boundaries[0], snapshot['transactions'], start, marks,
+                                opening_cash=opening['opening_cash_eur'])
+            boundaries.insert(0, first)
+        else:
+            boundaries = [valuation(values[stamp], stamp) for stamp, _ in marks]
         checked = calculate(boundaries, snapshot['transactions'], marks, report['reported_ytd_pct'],
                             allow_estimates=True, positions_only=True)
         return checked['unreconciled_cash'] == []

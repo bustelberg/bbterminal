@@ -8,8 +8,8 @@ import { apiFetch } from '../../../lib/apiFetch';
 vi.mock('../../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
 vi.mock('../../../lib/i18n', () => ({ useLang: () => ['en'] }));
 vi.mock('../../../lib/hooks/useEffectiveRole', () => ({ useIsAdmin: () => false }));
-vi.mock('./BookReturnChart', () => ({ default: ({ series, daily }: { series?: { return_pct: number }; daily?: boolean }) =>
-  <div data-testid="leonteq-return-chart" data-daily={String(daily)}>{series?.return_pct}</div> }));
+vi.mock('./BookReturnChart', () => ({ default: ({ series, weekly }: { series?: { return_pct: number }; weekly?: boolean }) =>
+  <div data-testid="leonteq-return-chart" data-weekly={String(weekly)}>{series?.return_pct}</div> }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 it.each([false, true, 'estimated'])('keeps the same source-only holdings table with accounting available=%s', async (mode) => {
@@ -62,7 +62,7 @@ it.each([false, true, 'estimated'])('keeps the same source-only holdings table w
     expect(text).toContain('+5.00%');
     expect(text).toContain('+3.78pp'); // Opening holdings are not required for aligned index returns.
     expect(host.querySelector('[data-testid="leonteq-return-chart"]')?.textContent).toBe('8.78');
-    expect(host.querySelector('[data-testid="leonteq-return-chart"]')?.getAttribute('data-daily')).toBe('true');
+    expect(host.querySelector('[data-testid="leonteq-return-chart"]')?.getAttribute('data-weekly')).toBe('true');
     expect(text).toContain('Leonteq return');
     const navigation = document.querySelector('nav[aria-label="Further analysis"]');
     expect([...navigation!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Performance', 'Risk']);

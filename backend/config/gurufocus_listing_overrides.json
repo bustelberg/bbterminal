@@ -1,9 +1,99 @@
 {
+  "BE0003851681": {
+    "ticker": "AED",
+    "exchange": "XBRU",
+    "name": "Aedifica NV/SA",
+    "identity_source": "https://live.euronext.com/en/product/equities/BE0003851681-XBRU/market-information",
+    "listing_source": "https://www.gurufocus.com/stock/XBRU:AED/summary"
+  },
   "NL0012866412": {
     "ticker": "BESI",
     "exchange": "XAMS",
     "name": "BE Semiconductor Industries NV",
     "identity_source": "https://www.besi.com/investor-relations/share-information/",
     "listing_source": "https://www.gurufocus.com/stock/XAMS%3ABESI/summary"
+  },
+  "US02665T3068": {
+    "ticker": "AMH",
+    "exchange": "NYSE",
+    "is_us": true,
+    "name": "American Homes 4 Rent - Class A",
+    "identity_source": "https://www.gurufocus.com/stock/AMH/summary",
+    "listing_source": "https://www.gurufocus.com/stock/AMH/summary"
+  },
+  "DE0006618309": {
+    "ticker": "CHG",
+    "exchange": "XTER",
+    "name": "CHAPTERS Group AG",
+    "identity_source": "https://live.deutsche-boerse.com/equity/chapters-group-ag",
+    "listing_source": "https://www.gurufocus.com/term/roc-joel/XTER%3ACHG"
+  },
+  "US18507C1036": {
+    "ticker": "CLPT",
+    "exchange": "NASDAQ",
+    "is_us": true,
+    "name": "ClearPoint Neuro, Inc.",
+    "identity_source": "https://www.gurufocus.com/stock/CLPT/summary",
+    "listing_source": "https://www.gurufocus.com/stock/CLPT/summary"
+  },
+  "US2772761019": {
+    "ticker": "EGP",
+    "exchange": "NYSE",
+    "is_us": true,
+    "name": "EastGroup Properties, Inc.",
+    "identity_source": "https://www.gurufocus.com/stock/EGP/summary",
+    "listing_source": "https://www.gurufocus.com/stock/EGP/summary"
+  },
+  "US29415C1018": {
+    "ticker": "EOSE",
+    "exchange": "NASDAQ",
+    "is_us": true,
+    "name": "Eos Energy Enterprises, Inc.",
+    "identity_source": "https://www.gurufocus.com/stock/EOSE/summary",
+    "listing_source": "https://www.gurufocus.com/stock/EOSE/summary"
+  },
+  "US29472R1086": {
+    "ticker": "ELS",
+    "exchange": "NYSE",
+    "is_us": true,
+    "name": "Equity LifeStyle Properties, Inc.",
+    "identity_source": "https://www.gurufocus.com/stock/ELS/summary",
+    "listing_source": "https://www.gurufocus.com/stock/ELS/summary"
+  },
+  "NL0015000K93": {
+    "ticker": "ECMPA",
+    "exchange": "XAMS",
+    "name": "Eurocommercial Properties N.V.",
+    "identity_source": "https://www.gurufocus.com/stock/XAMS:ECMPA/summary",
+    "listing_source": "https://www.gurufocus.com/stock/XAMS:ECMPA/summary"
+  },
+  "DE0006450000": {
+    "ticker": "LPK",
+    "exchange": "XTER",
+    "name": "LPKF Laser & Electronics SE",
+    "identity_source": "https://www.gurufocus.com/stock/XTER:LPK/summary",
+    "listing_source": "https://www.gurufocus.com/stock/XTER:LPK/summary"
+  },
+  "BE0974349814": {
+    "ticker": "WDP",
+    "exchange": "XBRU",
+    "name": "Warehouses De Pauw SA",
+    "identity_source": "https://www.gurufocus.com/stock/XBRU:WDP/summary",
+    "listing_source": "https://www.gurufocus.com/stock/XBRU:WDP/summary"
+  },
+  "NL0000289213": {
+    "ticker": "WHA",
+    "exchange": "XAMS",
+    "name": "Wereldhave N.V.",
+    "identity_source": "https://www.gurufocus.com/stock/XAMS:WHA/summary",
+    "listing_source": "https://www.gurufocus.com/stock/XAMS:WHA/summary"
+  },
+  "US97785W1062": {
+    "ticker": "WOLF",
+    "exchange": "NYSE",
+    "is_us": true,
+    "name": "Wolfspeed, Inc. — post-reorganization common shares",
+    "identity_source": "https://www.sec.gov/Archives/edgar/data/876661/000087666125000713/ruleprovisionnotice.htm",
+    "listing_source": "https://www.gurufocus.com/stock/WOLF/summary"
   }
 }

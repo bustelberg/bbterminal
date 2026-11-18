@@ -226,7 +226,7 @@ async def refresh_index_proxy(label: str):
         )
     try:
         # All direct scorecard proxies share one adjusted-close convention. Refresh the complete
-        # set here so a reader correcting one stale tile does not leave AGGH.AS, HYEA.L or SPY on
+        # set here so a reader correcting one stale tile does not leave SYBA.DE, HYEA.L or SPY on
         # a legacy/raw series until each happens to be opened separately.
         await asyncio.to_thread(refresh_index_proxies)
         got = await asyncio.to_thread(ensure_fresh, label, force=True, bypass_daily_guard=True, strict=True)

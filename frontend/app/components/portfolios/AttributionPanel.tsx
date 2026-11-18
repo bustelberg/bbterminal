@@ -552,7 +552,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     returnBasis: 'The EUR close at the end of the window against the close at the start.',
   };
   const hasRows = (data?.rows?.length ?? 0) > 0;
-  // Bonds are priced against their dedicated comparator (normally AGGH.AS), rather than
+  // Bonds are priced against their dedicated comparator (normally SYBA.DE), rather than
   // ACWI. They therefore belong in this view as one sleeve-level row, not as a made-up
   // stock-sector Brinson decomposition.
   const bondsSleeve = (data?.sleeves ?? []).find((sleeve) => sleeve.bucket === 'Bonds');

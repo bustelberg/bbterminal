@@ -18,6 +18,23 @@ def selected(monkeypatch):
     return row
 
 
+def test_all_valuations_use_one_workbook_row_per_company(monkeypatch):
+    from services import portfolio_membership
+
+    monkeypatch.setattr(portfolio_membership, 'all_companies', lambda: {
+        'companies': [{'name': 'Company', 'isins': ['DE000TEST001', 'US000TEST002'],
+                       'valuation_isin': 'DE000TEST001', 'company_id': 44}],
+        'unavailable_portfolios': ['Missing portfolio'],
+    })
+    monkeypatch.setattr(D.W, 'read', lambda portfolio_id, *, prepared_bundle: {'portfolio_id': portfolio_id,
+        'rows': prepared_bundle['rows']})
+    result = D.read_all()
+    assert result['workbook']['portfolio_id'] == 0
+    assert [row['isin'] for row in result['rows']] == ['DE000TEST001']
+    assert result['rows'][0]['valuation_company_id'] == 44
+    assert result['evidence']['unavailable_portfolios'] == ['Missing portfolio']
+
+
 def test_single_cached_payload_contains_all_tab_inputs_without_source_refresh(selected, monkeypatch):
     monkeypatch.setattr(D, 'holdings', lambda _selected: ([{'isin': 'CURRENT', 'name': 'Current', 'weight_pct': 5}], {'composition_date': '2026-11-13'}))
     monkeypatch.setattr(D, 'supabase', FakeSupabase({V.TABLE: [{'portfolio_id': 1, 'prepared_at': 'stamp',

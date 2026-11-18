@@ -45,8 +45,8 @@ def test_neutraal_monthly_benchmark_uses_reviewed_60_40_policy(monkeypatch):
     months = [{'month': '2026-09', 'periode': '2026-09-30'}]
     result = report._weighted_months('BUS_Neutraal_FX', months)
     assert result['2026-09']['return_pct'] == pytest.approx(6.8)
-    assert result['2026-09']['source'] == '60% ACWI / 40% AGGH.AS · EUR'
-    assert [(c['ticker'], c['weight_pct'], c['return_pct']) for c in result['2026-09']['components']] == [('ACWI', 60, 10), ('AGGH.AS', 40, 2)]
+    assert result['2026-09']['source'] == '60% ACWI / 40% SYBA.DE · EUR'
+    assert [(c['ticker'], c['weight_pct'], c['return_pct']) for c in result['2026-09']['components']] == [('ACWI', 60, 10), ('SYBA.DE', 40, 2)]
     monkeypatch.setattr(report, '_acwi_months', lambda *args: {})
     assert report._weighted_months('BUS_Neutraal_FX', months) == {}
     assert report._weighted_months('UNKNOWN', months) == {}
@@ -74,7 +74,7 @@ def test_obligatie_topselectie_bundle_uses_only_stored_bond_quotes(monkeypatch):
     monkeypatch.setattr(report, 'supabase', db)
 
     def quotes(months, ticker, currency):
-        assert (ticker, currency) == ('AGGH.AS', 'EUR')
+        assert (ticker, currency) == ('SYBA.DE', 'EUR')
         return {row['month']: {'return_pct': .5 if 'anchor' in row else .25,
                               'start_date': '2026-07-31', 'end_date': row['periode']}
                 for row in months}

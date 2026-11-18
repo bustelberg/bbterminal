@@ -98,3 +98,6 @@ def test_collector_recovers_only_actual_inception_and_retains_execution_evidence
     assert result['opening_reconstruction']['opening_cash_eur'] == '1000'
     assert result['transactions'][0]['source'] == 'leonteq_booked_instruction'
     assert result['result']['positions']['STOCK']['contribution_pct'] == -.5
+    legacy_month = {key: value for key, value in result['monthly_attribution']['2026-01'].items()
+                    if key != 'unreconciled_cash'}
+    assert accounting.monthly_cash_verified(result, legacy_month)

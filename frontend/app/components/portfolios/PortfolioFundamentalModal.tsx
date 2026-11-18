@@ -920,11 +920,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   const [bookWeights, setBookWeights] = useState<BookWeightsPayload | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<Model>('dcf');
-  // A Toppenberg book is normally read through its linked certificates. This is a default only:
-  // the reader can still toggle back to the wrappers for the lifetime of this modal.
-  const [lookThroughCertificates, setLookThroughCertificates] = useState(
-    () => defaultLookThroughCertificates(name, bookPortfolio),
-  );
+  const canLookThrough = Boolean(bookPortfolio) && defaultLookThroughCertificates(name, bookPortfolio);
+  const [lookThroughSelected, setLookThroughCertificates] = useState(canLookThrough);
+  const lookThroughCertificates = canLookThrough && lookThroughSelected;
   // Direct holdings and certificate look-through are two views of the same book. Keep each
   // completed response for the lifetime of the modal so the checkbox can switch between them
   // immediately instead of repeating both API requests every time.
@@ -1302,7 +1300,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-          {bookPortfolio && (
+          {canLookThrough && (
             <label
               title="Replace linked certificates with the companies held by their underlying strategies."
               className={`${headerControlClass} cursor-pointer gap-1.5 ${supportingControlClass} ${lookThroughCertificates ? 'bg-overlay/10' : 'bg-page'}`}>

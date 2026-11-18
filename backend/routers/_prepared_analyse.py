@@ -30,6 +30,7 @@ _FILES = tuple(sorted({
     _ROOT / 'routers' / '_risk_history_window.py', _ROOT / 'routers' / '_risk_benchmark_history.py',
     Path(__file__).resolve(),
     _ROOT / 'routers' / '_benchmark_index.py', _ROOT / 'routers' / '_weighted_benchmark.py',
+    _ROOT / 'routers' / '_benchmark_etf.py', _ROOT / 'routers' / '_asset_financials.py',
     _ROOT / 'config' / 'airs_strategy_map.json',
     _ROOT / 'index_universe' / 'iShares-MSCI-ACWI-ETF_fund.xls',
     _ROOT / 'index_universe' / 'iShares-MSCI-ACWI-ETF_holdings.csv',
@@ -179,7 +180,7 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
             holdings: bool = True, should_stop=None, on_step=None,
             max_portfolios: int | None = 2, max_seconds: float = 20, risk: bool = False) -> dict:
     from common.read_cache import read_cache
-    from routers import _airs_portfolio_analysis as analysis
+    from routers import _airs_portfolio_analysis as analysis, _airs_stocks
     from routers._active_share import _load_benchmark_weights
     from routers._airs_account_links import list_account_links
 
@@ -229,10 +230,11 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                 attempted_keys.pop()
                 break
             code = code_version()
-            current = (supabase.table('analyse_prepared_snapshot').select('cache_key').eq('cache_key', key)
+            expected_keys = [key] if pid is None else [key, _airs_stocks.key(pid, 'ACWI', look)]
+            current = (supabase.table('analyse_prepared_snapshot').select('cache_key').in_('cache_key', expected_keys)
                        .eq('source_version', version).eq('code_version', code)
-                       .eq('calculation_day', date.today().isoformat()).limit(1).execute().data or [])
-            if current:
+                       .eq('calculation_day', date.today().isoformat()).execute().data or [])
+            if len(current) == len(expected_keys):
                 result['already_current'] += 1
                 if risk and pid is not None:
                     _, risk_ready = read(scope, f'risk-views:{key}')
@@ -268,6 +270,16 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                         payload = analysis.compute_portfolio_analysis(pid, 'ACWI', 'book', 'book', None, look, False)
                         from routers._airs_value_series import with_return_series
                         payload = with_return_series(payload, 'ACWI')
+                        charts_token = analysis._OVERVIEW_ONLY.set(True)
+                        try:
+                            stocks = analysis.compute_portfolio_analysis(pid, 'ACWI', 'book', 'book', 'Equity', look, True)
+                            stocks = {**stocks, 'details_pending': True,
+                                'stock_etfs': _airs_stocks.fund_allocations(payload.get('book_holdings') or [])}
+                            _airs_stocks.save(scope, _airs_stocks.key(pid, 'ACWI', look), stocks, version, code)
+                        except Exception as exc:
+                            result['errors'][_airs_stocks.key(pid, 'ACWI', look)] = f'{type(exc).__name__}: {exc}'
+                        finally:
+                            analysis._OVERVIEW_ONLY.reset(charts_token)
                     payload = {**payload, 'details_pending': False}
                 finally:
                     analysis._INCLUDE_HOLDING_RISK.reset(token)

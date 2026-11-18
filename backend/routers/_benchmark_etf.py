@@ -67,14 +67,14 @@ _log = logging.getLogger(__name__)
 PROXY: dict[str, str] = {
     "ACWI": "ACWI",     # iShares MSCI ACWI ETF (NASDAQ), 4,627 bars from 2008-03-28
     "SP500": "SPY",     # SPDR S&P 500 ETF Trust, 8,445 bars from 1993-01-29
-    "BONDS": "AGGH.AS",  # iShares Core Global Aggregate Bond UCITS ETF
+    "BONDS": "SYBA.DE",  # State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF
     "ALTERNATIVES": "HYEA.L",  # iShares EUR High Yield Corporate Bond UCITS ETF
 }
 
 _NAMES = {"ACWI": "iShares MSCI ACWI ETF", "SPY": "SPDR S&P 500 ETF Trust",
-          "AGGH.AS": "iShares Core Global Aggregate Bond UCITS ETF",
+          "SYBA.DE": "State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF",
           "HYEA.L": "iShares EUR High Yield Corporate Bond UCITS ETF"}
-_CURRENCY = {"ACWI": "USD", "SPY": "USD", "AGGH.AS": "EUR", "HYEA.L": "EUR"}
+_CURRENCY = {"ACWI": "USD", "SPY": "USD", "SYBA.DE": "EUR", "HYEA.L": "EUR"}
 
 #  The fallback rule only. How far behind TODAY the newest stored bar may be before we go back to
 # the vendor, used when the market anchor below cannot be had. Three days clears a normal weekend;

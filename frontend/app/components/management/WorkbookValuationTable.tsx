@@ -7,6 +7,7 @@ import { workbookValuation, type CalculationKey, type Workbook, type WorkbookRow
 import { COLUMN_STYLE, WORKBOOK_PANELS, columnsForPanel, panelForInput, type WorkbookColumn, type WorkbookPanelKey } from './valuationWorkbookColumns';
 import ValuationFormulaExplanation from './ValuationFormulaExplanation';
 import { selectingTabText } from './valuationTabSelection';
+import { valuationControl, valuationField, valuationToolbar } from './valuationControlStyles';
 
 type Quote = { name: string; isin?: string | null; price?: number | null; price_date?: string | null; currency?: string | null };
 const control = 'rounded-lg border border-neutral-700 bg-elevated px-2 py-1.5 text-xs';
@@ -22,8 +23,8 @@ const sourceFields = (row?: WorkbookRow) => row ? {
 } : {};
 const number = (v: number | null | undefined, suffix = '') => v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(2)}${suffix}`;
 
-export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshingIsin = null, workbookUpdate = null, workbookData }: {
-  portfolioId: number; rows: Quote[]; nl: boolean; refreshingIsin?: string | null; workbookUpdate?: Workbook | null; workbookData?: Workbook | null;
+export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshingIsin = null, workbookUpdate = null, workbookData, readOnly = false }: {
+  portfolioId: number; rows: Quote[]; nl: boolean; refreshingIsin?: string | null; workbookUpdate?: Workbook | null; workbookData?: Workbook | null; readOnly?: boolean;
 }) {
   const [workbook, setWorkbook] = useState<Workbook | null>(workbookData ?? null);
   const hasWorkbook = workbook !== null;
@@ -177,7 +178,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
     });
 
   const save = async (parameters: Workbook['parameters'], changed?: WorkbookRow) => {
-    if (!workbook || busy) return;
+    if (!workbook || busy || readOnly) return;
     setBusy(true); setError('');
     try {
       const companies = Object.fromEntries(workbook.rows.filter(row => row.isin).map(row => [row.isin!,
@@ -200,6 +201,8 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
     return raw === '' ? null : Number(raw) / (percent ? 100 : 1);
   };
   const assumptionCell = (column: WorkbookColumn, row: WorkbookRow, company: string) => {
+    if (readOnly) return null;
+    if (panel === 'scenario' && column.key === 'growth') return null;
     const manualFields: Record<string, keyof CompanyAssumption> = {
       manual_basis: 'manual_basis', manual_currency: 'basis_currency', manual_label: 'basis_label',
       manual_date: 'basis_date', manual_source: 'basis_source',
@@ -245,36 +248,26 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
       {field === 'growth' && <span>%</span>}
     </span>;
   };
-  const tabs = <nav className="flex flex-wrap gap-1.5" aria-label={t('Valuation panels', 'Waarderingspanelen')}>
+  const tabs = <nav className={valuationToolbar} aria-label={t('Valuation panels', 'Waarderingspanelen')}>
       {WORKBOOK_PANELS.map(item => <button key={item.key} type="button" aria-pressed={panel === item.key}
-        className={`${control} cursor-pointer select-text ${item.key === 'parameters' ? 'ml-auto' : ''} aria-pressed:border-accent-500/50 aria-pressed:text-accent-300`}
+        className={`${valuationControl} cursor-pointer select-text hover:border-accent-500/50 ${item.key === 'parameters' ? 'ml-auto' : ''} aria-pressed:border-accent-500/50 aria-pressed:text-accent-300`}
         onClick={event => { if (selectingTabText(event)) return; setPanel(item.key); setFocusedInput(null); }}>
           <span className="cursor-pointer select-text">{nl ? item.nl : item.en}{item.key === 'scenario' ? ` ${scenarioYear}` : ''}</span>
         </button>)}
     </nav>;
   return <div ref={root} className="space-y-2">
-    <div className="flex flex-wrap items-center gap-3">
-      <label className="text-xs text-fg-muted">{t('Find company', 'Zoek bedrijf')} <input type="search" className={control} value={search} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => setSearch(event.target.value)} /></label>
-      <label className="text-xs text-fg-muted">{t('Sort', 'Sorteren')} <select className={control} value={columnSort ? 'column' : sort} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => { setColumnSort(null); setSort(event.target.value); }}>
+    <div className={valuationToolbar}>
+      <label className={valuationField}>{t('Find company', 'Zoek bedrijf')} <input type="search" className={`${valuationControl} min-w-0`} value={search} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => setSearch(event.target.value)} /></label>
+      <label className={valuationField}>{t('Sort', 'Sorteren')} <select className={valuationControl} value={columnSort ? 'column' : sort} disabled={panel === 'memberships' || panel === 'parameters'} onChange={event => { setColumnSort(null); setSort(event.target.value); }}>
         <option value="column" disabled>{t("Column sort", "Kolomsortering")}</option>
         <option value="name">{t('Company A–Z', 'Bedrijf A–Z')}</option>
         <option value="fairUpside">{t('Fair upside: highest first', 'Opwaarts potentieel: hoogste eerst')}</option>
         <option value="cagr">{t('Base CAGR: highest first', 'CAGR basis: hoogste eerst')}</option>
       </select></label>
-    <div className="text-xs">
-      <span data-column="as_of" className={`${COLUMN_STYLE.data} rounded px-2 py-1 ${focusedInput === 'as_of' ? 'ring-2 ring-accent-400' : ''}`}>{t('As of', 'Peildatum')}: {workbook?.as_of ?? '—'}</span>
-    </div>
+      <span data-column="as_of" className={`${valuationControl} ${focusedInput === 'as_of' ? 'ring-2 ring-accent-400' : ''}`}>{t('As of', 'Peildatum')}: {workbook?.as_of ?? '—'}</span>
     </div>
     {tabs}
     <div ref={viewport} data-valuation-viewport className="relative h-[min(65vh,48rem)] min-h-80 overflow-auto rounded-xl border border-neutral-800/40 [scrollbar-gutter:stable]">
-    {panel !== 'memberships' && <p className="px-3 py-2 text-center text-xs text-fg-subtle">{{
-      company: t('Company identities and portfolio memberships.', 'Bedrijfsgegevens en portefeuillelidmaatschappen.'),
-      earnings: t('Yahoo prices and GuruFocus earnings forecasts.', 'Yahoo-koersen en GuruFocus-winstprognoses.'),
-      valuation: t('Edit assumptions directly in the table.', 'Wijzig aannames direct in de tabel.'),
-      scenario: t('Compare projected returns across scenarios.', 'Vergelijk verwachte rendementen per scenario.'),
-      sources: t('Prices from Yahoo; forecasts from GuruFocus.', 'Koersen van Yahoo; prognoses van GuruFocus.'),
-      parameters: t('Adjust shared portfolio assumptions.', 'Pas gedeelde portefeuilleaannames aan.'),
-    }[panel]}</p>}
       {error && <p role="alert" className="absolute right-3 top-3 z-30 max-w-lg rounded-lg bg-card p-3 text-sm text-neg-300 shadow-lg">{error}</p>}
       {error && !workbook && <button type="button" className={control} onClick={() => { setError(''); setLoadAttempt(value => value + 1); }}>{t('Retry valuation inputs', 'Waarderingsinvoer opnieuw laden')}</button>}
       {!workbook && !error && <p role="status" className="absolute right-3 top-3 z-30 rounded-lg bg-card p-3 text-sm text-fg-muted">{t('Loading valuation inputs…', 'Waarderingsinvoer laden…')}</p>}
@@ -320,19 +313,19 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
             bear_growth_delta: t('Bear growth change (pp)', 'Negatief groei (pp)'), bear_multiple_delta: t('Bear multiple change (%)', 'Negatief multiple (%)'),
             bull_growth_delta: t('Bull growth change (pp)', 'Positief groei (pp)'), bull_multiple_delta: t('Bull multiple change (%)', 'Positief multiple (%)') };
           return <label key={`${key}:${val}`} className={`space-y-1 rounded-lg p-2 text-xs ${COLUMN_STYLE.assumption}`}><span className="block">{labels[key]}</span>
-            <input className={`${control} w-28`} type="number" name={key} step={key === 'years' ? '1' : 'any'} required
+            <input className={`${control} w-28`} type="number" name={key} step={key === 'years' ? '1' : 'any'} required disabled={readOnly}
               min={key === 'years' ? 1 : key === 'safety_margin' ? 0 : undefined} max={key === 'years' ? 30 : key === 'safety_margin' ? 99.999 : undefined}
               defaultValue={val * (key === 'years' ? 1 : 100)} /></label>;
         })}
-        <button disabled={busy} className={control}>{t('Save assumptions', 'Aannames opslaan')}</button>
+        {!readOnly && <button disabled={busy} className={control}>{t('Save assumptions', 'Aannames opslaan')}</button>}
       </form>
     </details></section>}
     {panel !== 'memberships' && panel !== 'parameters' && <>
     <div ref={table}><table className="w-full whitespace-nowrap text-xs">
       <caption className="sr-only">{t('Workbook valuation by company', 'Waardering per bedrijf volgens werkmap')}</caption>
-      <thead className="bg-elevated text-xs text-fg-muted"><tr>{columns.map(column => <th key={column.key} data-column={column.key} data-kind={column.kind}
+      <thead className="text-xs text-fg-muted"><tr>{columns.map(column => <th key={column.key} data-column={column.key} data-kind={column.kind}
         aria-sort={(columnSort?.key ?? (sort === 'name' ? 'company' : sort)) === column.key
-          ? ((columnSort?.descending ?? sort !== 'name') ? 'descending' : 'ascending') : undefined} className={`sticky top-0 z-10 h-12 border-t-2 px-2 py-1.5 text-left ${COLUMN_STYLE[column.kind]} ${panel === 'company' || panel === 'valuation' || panel === 'scenario' ? 'max-w-36 whitespace-normal' : ''} ${column.key === 'company' ? 'left-0 z-[15] w-44 min-w-44 max-w-44' : ''} ${focusedInput === column.key ? 'ring-2 ring-inset ring-accent-400' : ''}`}>
+          ? ((columnSort?.descending ?? sort !== 'name') ? 'descending' : 'ascending') : undefined} className={`sticky top-0 z-10 h-12 px-2 py-1.5 text-left ${COLUMN_STYLE[column.kind]} ${panel === 'company' || panel === 'valuation' || panel === 'scenario' ? 'max-w-36 whitespace-normal' : ''} ${column.key === 'company' ? 'left-0 z-[15] w-44 min-w-44 max-w-44' : ''} ${focusedInput === column.key ? 'ring-2 ring-inset ring-accent-400' : ''}`}>
           <button type="button" className="cursor-pointer text-left hover:text-accent-300" onClick={() => {
             setFormula(null);
             setColumnSort({ key: column.key, descending: columnSort?.key === column.key && !columnSort.descending });
@@ -349,6 +342,9 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
             const raw = cells[column.key];
             const cagrStyle = column.key === 'cagr' && typeof raw === 'number' && Number.isFinite(raw)
               ? raw > 10 ? 'text-pos-400' : raw >= 7 ? 'text-orange-400' : 'text-neg-400'
+              : '';
+            const fairUpsideStyle = column.key === 'fairUpside' && typeof raw === 'number' && Number.isFinite(raw)
+              ? raw < 0 ? 'text-neg-400' : 'text-pos-400'
               : '';
             const display = typeof raw === 'number' ? number(column.key === 'growth' || column.key === 'safety_margin' ? raw * 100 : raw,
               percentages.has(column.key) ? '%' : multiples.has(column.key) ? '×' : '') : raw || '—';
@@ -367,7 +363,7 @@ export default function WorkbookValuationTable({ portfolioId, rows, nl, refreshi
                   : column.key === 'risk_note' ? <span className="line-clamp-2 max-w-80 whitespace-normal">{display}</span>
                   : column.formula ? <button type="button" className={`cursor-pointer text-left ${column.key === 'signal'
                     ? `rounded-md px-2 py-1 font-medium ${SIGNAL_STYLE[String(result?.signal)] ?? SIGNAL_STYLE.REVIEW}`
-                    : `underline decoration-dotted underline-offset-4 ${cagrStyle}`}`}
+                    : `underline decoration-dotted underline-offset-4 ${cagrStyle} ${fairUpsideStyle}`}`}
                       aria-label={t(`Explain ${column.en} for ${quote.name}`, `Uitleg ${column.nl} voor ${quote.name}`)}
                       onClick={event => openFormula(column, quote.isin ?? '', event.currentTarget)}>{display}</button> : display)}
             </td>;

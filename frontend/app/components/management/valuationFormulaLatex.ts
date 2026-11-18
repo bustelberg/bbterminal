@@ -73,6 +73,7 @@ export function valuationFormulaLatex(calculation: CalculationKey, workbook: Wor
       case 'calendarMonths': return `\\min\\left(12,\\max\\left(0,12\\left(${v('Y_1', f?.fy1_date ? Number(f.fy1_date.slice(0, 4)) : null)}-${v('Y_P', q?.price_date ? Number(q.price_date.slice(0, 4)) : null)}\\right)+${v('M_1', f?.fy1_date ? Number(f.fy1_date.slice(5, 7)) : null)}-${v('M_P', q?.price_date ? Number(q.price_date.slice(5, 7)) : null)}+1\\right)\\right)`;
       case 'months': return numeric ? n(result?.months) : 'M_{\\mathrm{override}}\\;\\text{if entered, otherwise }M_{\\mathrm{calendar}}';
       case 'basis': return basis(numeric);
+      case 'projectedBasis': return `${B}\\times\\left(1+${v('g', a?.growth)}\\right)^{${v('T', p.years)}}`;
       case 'currentMultiple': return `\\frac{${P}}{${B}}`;
       case 'fair': return fair;
       case 'fairUpside': return `\\left(\\frac{${fair}}{${P}}-1\\right)\\times100`;
@@ -89,11 +90,12 @@ export function valuationFormulaLatex(calculation: CalculationKey, workbook: Wor
   const value = result?.[calculation];
   const unit = ['fairUpside', 'buyUpside', 'cagr'].includes(calculation) ? '\\%'
     : ['currentMultiple', 'buyMultiple'].includes(calculation) ? '\\times'
-    : ['price', 'basis', 'fair', 'buyPrice', 'bear', 'base', 'bull'].includes(calculation) ? text(result?.valuationCurrency ?? '') : '';
+    : ['price', 'basis', 'projectedBasis', 'fair', 'buyPrice', 'bear', 'base', 'bull'].includes(calculation) ? text(result?.valuationCurrency ?? '') : '';
   const answer = typeof value === 'number' ? `${value.toFixed(2)}\\;${unit}` : typeof value === 'string' ? text(value) : null;
   const labels: Record<CalculationKey, string> = {
     valuationCurrency: 'Currency', unitScale: 'Price unit factor', price: 'Price', calendarMonths: 'Calendar months',
     months: 'Months used', basis: 'Basis per share', currentMultiple: 'Current multiple', fair: 'Fair price',
+    projectedBasis: 'Projected basis per share',
     fairUpside: 'Fair upside', buyMultiple: 'Buy multiple', buyPrice: 'Buy price', buyUpside: 'Buy upside',
     signal: 'Signal', bear: 'Bear', base: 'Base', bull: 'Bull', cagr: 'Base CAGR',
   };

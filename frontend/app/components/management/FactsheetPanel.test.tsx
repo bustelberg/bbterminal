@@ -31,7 +31,8 @@ it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async (
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
     await act(async () => root.render(<FactsheetPanel />));
-    expect(host.querySelectorAll('tbody tr')).toHaveLength(5);
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(host.querySelector('tbody')?.textContent).not.toMatch(/QAI|HFRIFWI/);
     const bond = host.querySelectorAll('tbody tr')[1];
     expect(bond.textContent).toContain('State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF');
     expect(bond.textContent).toContain('15 years');
@@ -39,6 +40,10 @@ it('shows a full fifteen-year AGG row and links to its own Yahoo quote', async (
     expect(bond.querySelector('a')?.getAttribute('href')).toBe('https://www.justetf.com/en/etf-profile.html?isin=IE00B41RYL63#overview');
     expect(bond.textContent).toContain('IE00B41RYL63');
     expect(host.textContent).toContain('USD/EUR currency movements');
+    const toggle = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    await act(async () => toggle.click());
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(5);
+    expect(host.querySelector('tbody')?.textContent).toContain('HFRIFWI');
     const alternatives = host.querySelectorAll('tbody tr')[2];
     expect(alternatives.textContent).toContain('Liquid alternatives proxy');
     expect(alternatives.textContent).toContain('15 years');
@@ -56,9 +61,9 @@ it('separates true fifteen-year statistics from the bond funds shorter available
   try {
     await act(async () => root.render(<FactsheetPanel />));
     const rows = host.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(6);
-    expect(rows[4].textContent).toContain('3.21%');
-    expect(rows[4].textContent).toContain('6.54%');
+    expect(rows).toHaveLength(4);
+    expect(rows[3].textContent).toContain('3.21%');
+    expect(rows[3].textContent).toContain('6.54%');
     expect(rows[0].textContent).toContain('4.73%');
     expect(rows[0].textContent).toContain('15.00%');
     expect(rows[1].textContent).toContain('Fifteen years of fund history are not available');

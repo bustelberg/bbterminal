@@ -19,7 +19,7 @@ import pytest
 import routers._tracking_error as T
 
 BENCH = "IE00B6R52259"      # the ACWI tracker `_BENCHMARK_RISK_ETF` maps to
-BOND_BENCH = "IE00BDBRDM35" # the EUR-hedged AGGH tracker used by risk profiles
+BOND_BENCH = "IE00B41RYL63" # the EUR aggregate bond tracker used by risk profiles
 ONE = "US0000000001"
 BOND = "IE0000000002"
 
@@ -148,12 +148,12 @@ class TestTheDefinition:
         stock_returns = [0.02] * 399
         bond_returns = [0.01] * 399
         acwi_returns = [0.03] * 399
-        aggh_returns = [0.005] * 399
+        syba_returns = [0.005] * 399
         import routers._airs_portfolio_analysis as PA
         T._risk_prices.cache_clear()
         monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {
             ONE: _prices(stock_returns, dates), BOND: _prices(bond_returns, dates),
-            BENCH: _prices(acwi_returns, dates), BOND_BENCH: _prices(aggh_returns, dates),
+            BENCH: _prices(acwi_returns, dates), BOND_BENCH: _prices(syba_returns, dates),
         })
 
         built = T.build_paired_series([
@@ -164,10 +164,10 @@ class TestTheDefinition:
 
         assert built["portfolio"][0] == pytest.approx(0.016)
         assert built["benchmark"][0] == pytest.approx(0.020)
-        assert built["benchmark_label"] == "60% ACWI + 40% AGGH.AS"
+        assert built["benchmark_label"] == "60% ACWI + 40% SYBA.DE"
         assert built["total"] == 2
 
-    def test_missing_aggh_history_names_the_broken_policy_tracker(self, monkeypatch):
+    def test_missing_syba_history_names_the_broken_policy_tracker(self, monkeypatch):
         dates = _weekdays(400)
         import routers._airs_portfolio_analysis as PA
         T._risk_prices.cache_clear()
@@ -176,7 +176,7 @@ class TestTheDefinition:
             BOND: _prices([0.0] * 399, dates),
             BENCH: _prices([0.01] * 399, dates),
         })
-        with pytest.raises(T.SeriesError, match=r"AGGH\.AS"):
+        with pytest.raises(T.SeriesError, match=r"SYBA\.DE"):
             T.build_paired_series([
                 {"isin": ONE, "name": "Stock", "weight_pct": 60.0, "bucket": "Equity"},
                 {"isin": BOND, "name": "Bond", "weight_pct": 40.0, "bucket": "Bonds"},
@@ -301,7 +301,7 @@ class TestWhatItRefuses:
 
         assert got["available"] is True
         assert got["status"] == "ready"
-        assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
+        assert got["benchmark"] == "60% ACWI + 40% SYBA.DE"
 
     @pytest.mark.parametrize("metric", ["correlation", "volatility", "drawdown"])
     def test_every_headline_risk_metric_uses_the_latest_complete_window(self, metric, monkeypatch):

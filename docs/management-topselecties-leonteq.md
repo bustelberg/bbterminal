@@ -85,12 +85,17 @@ holdings or a first-return mismatch withhold attribution. The reconstructed sour
 and method are retained in the snapshot. This recovery is limited to the actual initial
 index boundary, never a missing year-opening balance of an existing book.
 Negative EUR cash remains a cash balance; short securities are unsupported.
-The full 115-date audit still fails on 9–10 June: EUR cash increases by 1,002.90
-with no transaction on 10 June, and neither start- nor end-of-day funding treatment
-reproduces the index return from the composition P&L. The instructions feed has no
-10 June order either. Opening reconstruction therefore removes one genuine gap but
-does not make the full YTD contribution publishable. The accounting failure includes
-the exact interval; no residual is silently assigned to a security or labelled as fees.
+The live 9–10 June audit found the exact EUR 1,002.90 increase in the linked
+certificate's cash report: 1,000 units bought at EUR 100.29 on 10 June at
+15:05:33 UTC. No index booking or rebalancing order occurred on 10 June.
+Composition NAV fell from EUR 776,582.1678 to EUR 764,545.0037, implying
+EUR -13,040.0641 P&L after removing the inflow. The published index fell from
+99.56182 to 97.89309, or -1.676074%. Composition P&L yields -1.679161%
+if funding enters after the return or -1.676995% if it enters before.
+The cash movement is verified, but the return still differs under both
+timing conventions. The certificate fee history reports management, collateral
+and agent fees on 10 June. The source does not establish how those fees enter
+the index relative to the composition, so the residual remains unallocated.
 
 Certificate look-through in other portfolios uses Leonteq TopSelecties constituents. The
 parent portfolio's own certificate valuation remains AIRS. Missing constituents leave the

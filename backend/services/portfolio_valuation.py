@@ -9,6 +9,7 @@ references; unreviewed issuer aliases are not used.
 from bisect import bisect_right
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
+import re
 from statistics import median
 from threading import Lock, RLock
 
@@ -183,7 +184,14 @@ def portfolios():
     return result
 
 
-def company_holdings(portfolio_id):
+def excluded_valuation_instrument(name, isin=None):
+    normalized = re.sub(r'[^a-z0-9]+', '', (name or '').casefold())
+    return (str(isin or '').strip().upper() == 'XS1002121454'
+            or normalized in ('rabostak14pp', 'rabobankcertificaat', 'rabobankcertificaten',
+                              'leontequsdovernightreturneuretn'))
+
+
+def company_holdings(portfolio_id, *, look_through=True):
     from routers._airs_ref import model, positions_for
     from routers._airs_lookthrough import expand_positions
     from routers._airs_portfolio_analysis import _grid, _is_fund, _class_from_categorie
@@ -196,7 +204,8 @@ def company_holdings(portfolio_id):
         positions = [row for row in positions if row.get('datum') == portfolio['positions_datum']]
     if not positions:
         raise ValueError(f'No saved composition for portfolio {portfolio_id}; refresh AIRS Fixed positions first.')
-    expanded, evidence = expand_positions(portfolio_id, portfolio.get('positions_datum'), positions)
+    expanded, evidence = (expand_positions(portfolio_id, portfolio.get('positions_datum'), positions)
+                          if look_through else (positions, {}))
     grid = _grid(sorted({row['isin'] for row in expanded if row.get('isin')}))
     companies = {}
     excluded = 0
@@ -204,7 +213,7 @@ def company_holdings(portfolio_id):
         isin, name = row.get('isin'), row.get('fonds')
         asset = grid.get(isin) or {}
         bucket = classify_bucket(_class_from_categorie(row.get('categorie')), _is_fund(asset, name or ''), isin, name, asset)
-        if bucket in ('Cash', 'Bonds') or _is_fund(asset, name or ''):
+        if excluded_valuation_instrument(name, isin) or bucket in ('Cash', 'Bonds') or _is_fund(asset, name or ''):
             excluded += 1
             continue
         # Unknown classifications remain visible with their data limitation.

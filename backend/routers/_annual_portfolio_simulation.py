@@ -75,7 +75,7 @@ def simulate(inputs: dict, years: int = 5, today: date | None = None,
     requested_start, requested_end = start_date or dates[0], dates[-1]
     required = {**{key: {'name': names.get(key, key), 'weight_pct': weight * 100, 'kind': 'holding'}
                    for key, weight in weights.items()},
-                **{f'benchmark:{name}': {'name': 'AGGH.AS' if name == 'BONDS' else name,
+                **{f'benchmark:{name}': {'name': 'SYBA.DE' if name == 'BONDS' else name,
                     'weight_pct': weight, 'kind': 'benchmark', 'isin': leg_isins[name]}
                    for name, weight in legs.items()}}
     marks, issues = {}, []
@@ -150,7 +150,7 @@ def simulate(inputs: dict, years: int = 5, today: date | None = None,
     elapsed = (date.fromisoformat(common[-1]) - date.fromisoformat(common[0])).days / 365.25
     factor = 1 / elapsed
     pcagr, bcagr = (port ** factor - 1) * 100, (bench ** factor - 1) * 100
-    components = [{'name': 'AGGH.AS' if name == 'BONDS' else name, 'isin': leg_isins[name],
+    components = [{'name': 'SYBA.DE' if name == 'BONDS' else name, 'isin': leg_isins[name],
                    'weight_pct': weight, 'start_date': common[0], 'end_date': common[-1],
                    'start_price_eur': marks[f'benchmark:{name}'][common[0]],
                    'end_price_eur': marks[f'benchmark:{name}'][common[-1]],
@@ -226,7 +226,7 @@ def compute_simulation(holdings: list[dict], benchmark: str, years: int = 5,
     if start_date:
         dates = history_marks(start_date, date.today().isoformat())
     issues = []
-    base = {'available': False, 'benchmark': ' + '.join(f"{weight:g}% {'AGGH.AS' if name == 'BONDS' else name}" for name, weight in legs.items()),
+    base = {'available': False, 'benchmark': ' + '.join(f"{weight:g}% {'SYBA.DE' if name == 'BONDS' else name}" for name, weight in legs.items()),
             'frequency': 'monthly', 'simulation_scope': 'Yahoo-only direct equities',
             'requested_window_from': dates[0], 'requested_window_to': dates[-1],
             'covered_portfolio_pct': 0, 'excluded_holdings': excluded, 'history_issues': issues}
@@ -313,7 +313,7 @@ def compute_simulation(holdings: list[dict], benchmark: str, years: int = 5,
                            'benchmark_component_isins': ids, 'benchmark_label': base['benchmark']}, years,
                           start_date=start_date)
         return {**result, 'simulation_scope': base['simulation_scope'], 'excluded_holdings': excluded,
-                'benchmark_isin': ', '.join(f"{'AGGH.AS' if name == 'BONDS' else name}: {isin}" for name, isin in ids.items()),
+                'benchmark_isin': ', '.join(f"{'SYBA.DE' if name == 'BONDS' else name}: {isin}" for name, isin in ids.items()),
                 'covered_portfolio_pct': included if equity_only else (included / total * 100 if total else 0),
                 'history_issues': [*issues, *result.get('history_issues', [])]}
     except Exception as exc:

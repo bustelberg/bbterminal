@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL } from '../../lib/apiUrl';
+import { apiFetch } from '../../lib/apiFetch';
 import { trace } from '../../lib/debugTrace';
 import { useMgmtCopy } from '../components/management/managementCopy';
-import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
+import PortfolioOverviewPanel, { type OverviewRow } from '../components/PortfolioOverviewPanel';
 import { CompactHelpProvider } from '../../lib/compactHelp';
 
 /**
@@ -52,10 +53,32 @@ type TabKey = CollectionKey;
  * a gap now waits for the next tick instead of a button. See `docs/airs-portfolios.md`.
  */
 const TAB_ORDER: TabKey[] = ['bustelberg', 'toppenberg', 'topselecties', 'imagine_fund', 'test_topselecties'];
+type ManagementBundle = Record<'airs' | 'leonteq', OverviewRow[] | null>;
 
 export default function Page() {
   const t = useMgmtCopy();
   const [tab, select] = useState<TabKey>('bustelberg');
+  const bundle = useRef<{ data: ManagementBundle; fetchedAt: number } | null>(null);
+  const pending = useRef<Promise<ManagementBundle> | null>(null);
+  const readBundledRows = useCallback((leonteq: boolean) =>
+    bundle.current?.data[leonteq ? 'leonteq' : 'airs'] ?? null, []);
+  const loadBundledRows = useCallback(async (leonteq: boolean, force: boolean) => {
+    const source = leonteq ? 'leonteq' : 'airs';
+    const cached = bundle.current;
+    if (!force && cached?.data[source] && Date.now() - cached.fetchedAt < 60_000) {
+      return cached.data[source];
+    }
+    pending.current ??= apiFetch(`${API_URL}/api/airs/portfolios/management-bundle`,
+      { cache: 'no-store', noReadCache: true }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as ManagementBundle;
+      bundle.current = { data, fetchedAt: Date.now() };
+      return data;
+    }).finally(() => { pending.current = null; });
+    const rows = (await pending.current)[source];
+    if (!rows) throw new Error(leonteq ? 'Leonteq overview could not be loaded.' : 'AIRS overview could not be loaded.');
+    return rows;
+  }, []);
   /**
    *  The lazy-mount latch went with the two tabs (2026-09-01) AND COMES BACK WITH THEM. It was a
    * `seen` set: a pane was not rendered until its tab had been opened, and after that stayed
@@ -115,7 +138,8 @@ export default function Page() {
         </div>
 
         {/* Remount at the source boundary so cached AIRS rows cannot enter TopSelecties. */}
-        <PortfolioOverviewPanel key={tab === 'topselecties' ? 'leonteq' : 'airs'} collection={tab} />
+        <PortfolioOverviewPanel key={tab === 'topselecties' ? 'leonteq' : 'airs'} collection={tab}
+          loadBundledRows={loadBundledRows} readBundledRows={readBundledRows} />
       </div>
     </div></CompactHelpProvider>
   );

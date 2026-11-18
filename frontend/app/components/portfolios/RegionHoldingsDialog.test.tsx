@@ -3,9 +3,36 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { Chart } from './PortfolioAnalysisModal';
+import { apiFetch } from '../../../lib/apiFetch';
 
 vi.mock('./PanelDialog', () => ({ default: ({ children }: { children: React.ReactNode }) => <div role="dialog">{children}</div> }));
 vi.mock('../../../lib/i18n', () => ({ useLang: () => ['en'] }));
+vi.mock('../../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
+
+it('fetches one breakdown for the clicked Stocks bar', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const request = vi.mocked(apiFetch);
+  request.mockResolvedValueOnce(Response.json({
+    bucket: 'North America',
+    benchmark_holdings: [{ name: 'Benchmark constituent', isin: 'OTHER', weight_pct: 5 }],
+  }));
+  try {
+    await act(async () => root.render(<Chart axis="region" benchmark="ACWI"
+      breakdownUrl="/stocks-breakdown?axis=region" rows={[
+        { bucket: 'North America', portfolio_pct: 3, benchmark_pct: 5, diff_pct: -2, holdings: [] },
+        { bucket: 'Europe', portfolio_pct: 2, benchmark_pct: 4, diff_pct: -2, holdings: [] },
+      ]} />));
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Show holdings in North America"]')!.click());
+    expect(request).toHaveBeenCalledExactlyOnceWith('/stocks-breakdown?axis=region&bucket=North%20America', expect.anything());
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Benchmark constituent');
+  } finally {
+    await act(async () => root.unmount());
+    request.mockReset();
+  }
+});
 
 it.each(['North America', 'Europe', 'Unclassified', 'USD', 'EUR'])('opens the portfolio and benchmark holdings comparison for %s', async bucket => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

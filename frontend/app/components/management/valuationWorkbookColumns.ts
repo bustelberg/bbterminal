@@ -28,6 +28,7 @@ const calculations: readonly (readonly [CalculationKey, string, string])[] = [
   ['valuationCurrency', 'Valuation currency', 'Waarderingsvaluta'], ['unitScale', 'Price unit factor', 'Koerseenheidfactor'],
   ['price', 'Price in valuation currency', 'Koers in waarderingsvaluta'], ['calendarMonths', 'FY1 calendar months', 'Kalendermaanden FY1'],
   ['months', 'FY1 months used', 'Gebruikte maanden FY1'], ['basis', 'Calculated earnings / NAV / BV per share', 'Berekende winst / NAV / BV p.a.'],
+  ['projectedBasis', 'Projected earnings / NAV / BV per share', 'Verwachte winst / NAV / BV p.a.'],
   ['currentMultiple', 'Current multiple', 'Actuele multiple'], ['fair', 'Fair price', 'Faire koers'], ['fairUpside', 'Fair vs price', 'Verschil fair vs koers'],
   ['buyMultiple', 'Buy multiple', 'Koopmultiple'], ['buyPrice', 'Buy price', 'Koopprijs'], ['buyUpside', 'To buy price', 'Tot koopprijs'],
   ['signal', 'Buy signal', 'Koopsignaal'], ['bear', 'Bear', 'Negatief'], ['base', 'Base', 'Basis'], ['bull', 'Bull', 'Positief'], ['cagr', 'Base CAGR', 'CAGR basis'],
@@ -48,9 +49,9 @@ export const WORKBOOK_PANELS = [
     'company', 'valuationCurrency', 'price', 'basis', 'currentMultiple', 'growth', 'fair_multiple', 'fair', 'fairUpside', 'buyMultiple', 'buyPrice', 'buyUpside', 'signal',
   ] },
   { key: 'scenario', en: 'Scenario', nl: 'Scenario', columns: [
-    'company', 'valuationCurrency', 'exit_multiple', 'bear', 'base', 'bull', 'cagr',
+    'company', 'valuationCurrency', 'basis', 'growth', 'projectedBasis', 'exit_multiple', 'bear', 'base', 'bull', 'cagr',
   ] },
-  { key: 'earnings', en: 'Koers & winst', nl: 'Koers & winst', columns: [
+  { key: 'earnings', en: 'EPS berekening', nl: 'EPS berekening', columns: [
     'company', 'raw_price', 'quote_currency', 'unitScale', 'price', 'basis_kind', 'fy1', 'fy1_date', 'fy2', 'fy2_date', 'forecast_currency', 'forecast_basis',
     'months_fy1', 'calendarMonths', 'months', 'manual_basis', 'manual_currency', 'manual_label', 'basis_fx',
   ] },

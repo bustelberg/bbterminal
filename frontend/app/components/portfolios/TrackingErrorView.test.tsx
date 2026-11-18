@@ -19,7 +19,7 @@ describe('shared hypothetical performance view', () => {
     vi.mocked(startJob).mockClear();
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-    state.response = { available: true, benchmark: '60% ACWI + 40% AGGH.AS', observations: 24,
+    state.response = { available: true, benchmark: '60% ACWI + 40% SYBA.DE', observations: 24,
       frequency: 'monthly', periods_per_year: 12, history_limited: true,
       covered_portfolio_pct: 60, simulation_scope: 'Yahoo-only direct equities',
       excluded_holdings: [{ isin: 'ETF', name: 'Excluded ETF', weight_pct: 20, reason: 'ETF excluded' }],

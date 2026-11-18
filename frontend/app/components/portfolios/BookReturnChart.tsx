@@ -158,8 +158,8 @@ export default function BookReturnChart(
     benchmarkYtdPct,
     policyWeights,
     series,
-    daily = false,
-  }: { portfolioId: number; name: string; variant?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; benchmarkYtdPct?: number | null; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null; daily?: boolean },
+    weekly = false,
+  }: { portfolioId: number; name: string; variant?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; benchmarkYtdPct?: number | null; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null; weekly?: boolean },
 ) {
   const copy = useAnalyseCopy();
   const [loaded, setData] = useState<BookValueSeries | null>(null);
@@ -215,8 +215,8 @@ export default function BookReturnChart(
   // A chart click may deliberately inspect an older AIRS point. Keep it as an extra tab rather
   // than rendering a return with no selected control, while the normal dialog stays the latest
   // three Yahoo months.
-  // Include the common zero-return anchor, calendar month-ends, and the latest observation.
-  const points = daily ? [...all] : all.filter((p) => isCalendarMonthEnd(p.date));
+  // Both lines use these dates, including the common opening point and latest published close.
+  const points = all.filter((p) => weekly ? new Date(ts(p.date)).getUTCDay() === 5 : isCalendarMonthEnd(p.date));
   const anchorDate = data.return_from ?? all[0].date;
   if (points[0]?.date !== anchorDate) points.unshift({ ...all[0], date: anchorDate, cum_pct: 0 });
   if (points.at(-1)?.date !== last.date) points.push(last);
@@ -347,7 +347,7 @@ export default function BookReturnChart(
             fill={chartTheme.neg} fillOpacity={0.08}
             dot={<ReturnDot fill={chartTheme.neg} />} />
           <Line dataKey="benchmark" type="monotone" stroke={chartTheme.compare} strokeWidth={1.8}
-            strokeDasharray="5 3" dot={false} connectNulls={false} />
+            dot={false} connectNulls={false} />
         </AreaChart>
       </ResponsiveContainer>
       </div>

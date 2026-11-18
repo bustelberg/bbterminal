@@ -57,7 +57,7 @@ cached month adds no request. Explicit refresh/recovery replaces the selected re
 Monthly benchmark recovery: a month response reports `benchmark_needs_refresh` separately
 from missing AIRS position data. The UI never reuses a cached month with a missing applicable
 benchmark. It automatically runs `/accounts/{account}/monthly-benchmark/job`, then rereads
-the report. Recovery first checks saved data, and only requests the ACWI/AGGH ETF histories
+the report. Recovery first checks saved data, and only requests the ACWI/SYBA.DE ETF histories
 and USD FX if the required return cannot be read. It never redownloads AIRS holdings.
 The existing daily post-AIRS job verifies monthly benchmarks for all dashboard accounts,
 repairs shared sources once, and retains per-account failures in its durable job receipt.

@@ -20,6 +20,7 @@ export default function FactsheetPanel() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  const [showOptionalBenchmarks, setShowOptionalBenchmarks] = useState(false);
   useEffect(() => {
     let active = true;
     async function load() {
@@ -44,14 +45,20 @@ export default function FactsheetPanel() {
     void load();
     return () => { active = false; };
   }, [revision]);
-  const entries = (data?.rows ?? []).flatMap(row => [
+  const entries = (data?.rows ?? []).filter(row => showOptionalBenchmarks || row.ticker !== 'QAI').flatMap(row => [
     { row, stats: row.period, period: `${data?.period_years ?? 15} ${nl ? 'jaar' : 'years'}`, missing: row.reason },
     ...(row.available_history ? [{ row, stats: row.available_history, period: nl ? 'Beschikbare historie' : 'Available history', missing: null }] : []),
   ]);
   return <section className="space-y-4" aria-label="Factsheet">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-fg-muted">{nl ? 'Totaalrendementen in EUR met USD/EUR-valutabewegingen en herbelegde ETF-uitkeringen. ETF-volatiliteit op dagbasis (√252), HFRI op maandbasis (√12).' : 'Total returns in EUR include USD/EUR currency movements and reinvested ETF distributions. Volatility uses daily ETF returns (√252) and monthly HFRI returns (√12).'}</p>
-      <button type="button" disabled={loading} onClick={() => { setError(''); setLoading(true); setRevision(current => current + 1); }} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-fg-muted">
+          <input type="checkbox" checked={showOptionalBenchmarks} onChange={event => setShowOptionalBenchmarks(event.target.checked)} />
+          {nl ? 'Toon QAI en HFRIFWI' : 'Show QAI and HFRIFWI'}
+        </label>
+        <button type="button" disabled={loading} onClick={() => { setError(''); setLoading(true); setRevision(current => current + 1); }} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{loading ? (nl ? 'Berekenen…' : 'Calculating…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
+      </div>
     </div>
     <div className="overflow-x-auto rounded-xl border border-neutral-800/40"><table className="w-full text-sm">
       <caption className="sr-only">Benchmark Factsheet</caption>
@@ -79,7 +86,7 @@ export default function FactsheetPanel() {
           <td className="px-3 py-3 text-right tabular-nums" title={stats ? `${stats.observations} daily returns · ${stats.years.toFixed(2)} years` : undefined}>{pct(stats?.cagr_pct)}</td>
           <td className="px-3 py-3 text-right tabular-nums">{pct(stats?.volatility_pct)}</td>
         </tr>)}
-        <tr>
+        {showOptionalBenchmarks && <tr>
           <td className="px-3 py-3"><a href={hfriSource} target="_blank" rel="noopener noreferrer"
             className="font-medium text-accent-600 hover:underline">HFRIFWI</a>
             <div className="text-xs text-fg-muted">HFRI Fund Weighted Composite Index</div>
@@ -94,7 +101,7 @@ export default function FactsheetPanel() {
           <td className="px-3 py-3 text-right tabular-nums">{pct(hfri.totalReturn)}</td>
           <td className="px-3 py-3 text-right tabular-nums" title={nl ? '180 maandrendementen' : '180 monthly returns'}>{pct(hfri.cagr)}</td>
           <td className="px-3 py-3 text-right tabular-nums">{pct(hfri.volatility)}</td>
-        </tr>
+        </tr>}
       </tbody>
     </table></div>
     {data?.prepared_at && <p className="text-xs text-fg-muted" title={data.method ?? undefined}>{nl ? 'Bijgewerkt' : 'Updated'}: {data.prepared_at}</p>}

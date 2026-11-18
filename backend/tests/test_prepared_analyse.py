@@ -87,6 +87,30 @@ def test_overview_route_rebuilds_missing_snapshot_through_shared_analysis(store,
     assert len(calls) == 1
 
 
+def test_stocks_bundle_and_selected_breakdown_use_prepared_data(store, monkeypatch):
+    from routers import airs, _airs_stocks, _airs_portfolio_analysis as analysis
+
+    compute = Mock(side_effect=AssertionError('Prepared Stocks views must use the database'))
+    monkeypatch.setattr(analysis, 'compute_portfolio_analysis_async', compute)
+    holding = {'name': 'Benchmark constituent', 'weight_pct': 4}
+    _airs_stocks.save('holdings', _airs_stocks.key(1, 'ACWI', False), {
+        'axes': [{'axis': 'sector', 'rows': [
+            {'bucket': 'Technology', 'benchmark_pct': 4, 'benchmark_holdings': [holding]},
+            {'bucket': 'Utilities', 'benchmark_pct': 2, 'benchmark_holdings': [{'weight_pct': 2}]},
+        ]}, {'axis': 'region', 'rows': []}, {'axis': 'currency', 'rows': []}],
+    }, 10, 'code-v1')
+
+    result = asyncio.run(airs.airs_model_stocks_bundle(1))
+    assert [axis['axis'] for axis in result['axes']] == ['sector', 'region', 'currency']
+    assert result['axes'][0]['rows'][0] == {
+        'bucket': 'Technology', 'benchmark_pct': 4, 'has_benchmark_holdings': True,
+    }
+    assert asyncio.run(airs.airs_model_stocks_breakdown(1, 'sector', 'Technology')) == {
+        'bucket': 'Technology', 'benchmark_holdings': [holding],
+    }
+    compute.assert_not_called()
+
+
 @pytest.mark.parametrize('field,value', [('source_version', 9), ('code_version', 'old'),
                                        ('calculation_day', '2000-01-01'), ('scope', 'acwi')])
 def test_mismatched_snapshots_are_not_served(store, field, value):
@@ -105,10 +129,10 @@ def test_changes_during_calculation_are_not_saved(store, monkeypatch):
 
 
 def test_batch_is_bounded_and_next_batch_skips_current_rows(store, monkeypatch):
-    from routers import _airs_portfolio_analysis as A, _active_share as S
+    from routers import _airs_portfolio_analysis as A, _active_share as S, _airs_stocks
     calls = []
     def calculate(pid, *_args):
-        calls.append(pid)
+        calls.append((pid, A._OVERVIEW_ONLY.get()))
         assert not A._INCLUDE_HOLDING_RISK.get()
         return {'portfolio_id': pid, 'book_holdings': []}
     monkeypatch.setattr(A, 'compute_portfolio_analysis', calculate)
@@ -118,11 +142,14 @@ def test_batch_is_bounded_and_next_batch_skips_current_rows(store, monkeypatch):
     assert first['benchmarks'] == 1
     assert first['batch_exhausted']
     assert first['pending_keys'] == [P.holdings_key(3, 'ACWI', False), P.holdings_key(3, 'ACWI', True)]
-    assert calls == [1, 1, 2, 2]
+    assert calls == [(pid, overview) for pid in (1, 1, 2, 2) for overview in (False, True)]
     _, bundle = P.read('holdings', P.holdings_key(1, 'ACWI', False))
     assert bundle['book_holdings'] == []
     assert bundle['return_series']['returns'] == []
     assert bundle['details_pending'] is False
+    _, stocks = P.read('holdings', _airs_stocks.key(1, 'ACWI', False))
+    assert stocks['details_pending'] is True
+    assert set(stocks['stock_etfs']) == {'sector', 'region', 'currency'}
     second = P.prepare(portfolio_ids=[1, 2, 3])
     assert second['holdings'] == 2
     assert second['already_current'] == 5
@@ -147,7 +174,7 @@ def test_source_churn_prioritises_oldest_portfolio_and_keeps_variants_together(s
                 'scope': 'holdings', 'source_version': 9, 'code_version': 'code-v1',
                 'calculation_day': '2026-11-05', 'prepared_at': prepared_at, 'payload': {}}).execute()
     result = P.prepare(portfolio_ids=[1, 2], benchmark=False, max_portfolios=1, max_seconds=60)
-    assert calls == [2, 2]
+    assert calls == [2, 2, 2, 2]
     assert result['batch_exhausted']
     assert result['holdings'] == 2
 

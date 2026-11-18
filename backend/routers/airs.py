@@ -19,6 +19,7 @@ import json
 import logging
 import re
 from io import StringIO
+from typing import Literal
 from routers import _airs_portfolio_store as store
 from routers._risk_read import read as read_risk
 from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
@@ -951,7 +952,7 @@ class PortfolioAnalysisReturns(BaseModel):
     # so the Book-vs-strategy drift tile reads the strategy number regardless of the toggle.
     strategy_ytd_pct: float | None = None
     # The scorecard's like-for-like sleeve comparison. Both composite returns use these same
-    # portfolio weights: stocks versus ACWI, bonds versus AGGH.AS, alternatives versus HYEA.L,
+    # portfolio weights: stocks versus ACWI, bonds versus SYBA.DE, alternatives versus HYEA.L,
     # and cash at 0%.
     block_returns: list[dict] = []
     benchmark_ytd_pct: float | None = None
@@ -1668,6 +1669,29 @@ async def airs_model_portfolio_overview_bundle(portfolio_id: int, look_through: 
         if version is not None:
             await asyncio.to_thread(prepared.save, 'holdings', key, payload, version, code)
     return {**payload, 'timings_ms': {'prepared_lookup': round((time.perf_counter() - started) * 1000)}}
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/stocks-bundle")
+async def airs_model_stocks_bundle(portfolio_id: int, benchmark: str = 'ACWI', look_through: bool = False,
+                                 source: str = 'book', weight_by: str = 'book', overview_only: bool = True,
+                                 include_holding_risk: bool = False):
+    from routers._airs_stocks import snapshot
+    return await snapshot(portfolio_id, benchmark, look_through,
+        source='model' if source == 'model' else 'book', weight_by='model' if weight_by == 'model' else 'book',
+        overview_only=overview_only, include_holding_risk=include_holding_risk)
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/stocks-breakdown")
+async def airs_model_stocks_breakdown(portfolio_id: int, axis: Literal['sector', 'region', 'currency'], bucket: str,
+                                    benchmark: str = 'ACWI', look_through: bool = False, source: str = 'book',
+                                    weight_by: str = 'book'):
+    from routers._airs_stocks import snapshot
+    payload = await snapshot(portfolio_id, benchmark, look_through,
+        source='model' if source == 'model' else 'book', weight_by='model' if weight_by == 'model' else 'book',
+        breakdown_only=True)
+    rows = next((item['rows'] for item in payload['axes'] if item['axis'] == axis), [])
+    row = next((row for row in rows if row['bucket'] == bucket), {})
+    return {'bucket': bucket, 'benchmark_holdings': row.get('benchmark_holdings') or []}
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
@@ -4680,6 +4704,25 @@ class AirsPortfolioOverview(BaseModel):
     # the day AIRS VALUED the book — it is what lets a stale badge say whose lag it is. See
     # `_airs_accounts._fetched_at`.
     fetched_at: str | None = None
+
+
+@router.get("/api/airs/portfolios/management-bundle")
+async def management_portfolios_bundle():
+    """Saved overview rows for all management collections."""
+    from leonteq.management import dashboard_overview
+
+    sources = await asyncio.gather(airs_portfolios_overview(), asyncio.to_thread(dashboard_overview),
+                                   return_exceptions=True)
+    bundle = {}
+    for key, rows in zip(('airs', 'leonteq'), sources):
+        if isinstance(rows, asyncio.CancelledError):
+            raise rows
+        if isinstance(rows, Exception):
+            logging.getLogger(__name__).warning('Management overview failed for %s (%s)', key, type(rows).__name__)
+            bundle[key] = None
+        else:
+            bundle[key] = rows
+    return bundle
 
 
 @router.get("/api/airs/portfolios/overview", response_model=list[AirsPortfolioOverview])

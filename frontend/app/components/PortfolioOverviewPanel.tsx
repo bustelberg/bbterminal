@@ -80,7 +80,7 @@ function prefetchModelAnalysis(id: number, name: string) {
  */
 
 const SHOW_SECONDARY_ROW_ACTIONS = false;
-type OverviewRow = AirsPortfolioOverview & { month_fetched_at?: string | null; month_as_of?: string | null };
+export type OverviewRow = AirsPortfolioOverview & { month_fetched_at?: string | null; month_as_of?: string | null };
 
 const pct = (v: number | null | undefined) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
@@ -235,7 +235,11 @@ function defaultTableSort(collection: PortfolioCollection): TableSort {
   };
 }
 
-export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
+export default function PortfolioOverviewPanel({ collection, loadBundledRows, readBundledRows }: {
+  collection: PortfolioCollection;
+  loadBundledRows?: (leonteq: boolean, force: boolean) => Promise<OverviewRow[]>;
+  readBundledRows?: (leonteq: boolean) => OverviewRow[] | null;
+}) {
   const leonteq = collection === 'topselecties';
   const canOpen = (row: AirsPortfolioOverview) => leonteq || canAnalyse(row);
   const currentMonth = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit' }).format(new Date());
@@ -252,7 +256,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // to 403 — a button that only fails is worse than no button. The split is refresh vs. mutate,
   // and `_auth_middleware.py::_USER_REFRESH_PATHS` is the same split on the server.
   const isAdmin = useIsAdmin();
-  const [rows, setRows] = useState<OverviewRow[] | null>(null);
+  const [rows, setRows] = useState<OverviewRow[] | null>(() => readBundledRows?.(leonteq) ?? null);
   // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
   // The name comparator still uses the explicit profile order.
   const [storedSort, setStoredSort] = useState<TableSort>(() => defaultTableSort(collection));
@@ -588,13 +592,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
 
   }, []);
 
-  const loadOverview = useCallback(async (completedAccount?: string) => {
+  const loadOverview = useCallback(async (completedAccount?: string, force = true) => {
     await traceScope('overview', 'loading the portfolios table', async () => {
       try {
-        const r = await apiFetch(`${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/dashboard` : '/api/airs/portfolios/overview'}`,
-          leonteq ? { cache: 'no-store', noReadCache: true } : undefined);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const body = (await r.json()) as OverviewRow[];
+        let body: OverviewRow[];
+        if (loadBundledRows) {
+          body = await loadBundledRows(leonteq, force);
+        } else {
+          const r = await apiFetch(`${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/dashboard` : '/api/airs/portfolios/overview'}`,
+            leonteq ? { cache: 'no-store', noReadCache: true } : undefined);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          body = await r.json() as OverviewRow[];
+        }
         //  An empty table is the state a fresh production database is in, and it renders exactly
         // like a broken page. It is not an error — nothing has been scanned yet — so it is a
         // WARN with the remedy in it, not a red banner and not silence.
@@ -636,15 +645,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         setErr(e instanceof Error ? e.message : String(e));
       }
     });
-  }, [leonteq]);
+  }, [leonteq, loadBundledRows]);
 
   // Paint the last short-lived snapshot before the browser shows the client render, then always
   // revalidate against the backend. That is stale-while-revalidate rather than a cache-only view.
   useBrowserLayoutEffect(() => {
-    if (leonteq) return;
+    if (leonteq || readBundledRows?.(leonteq)) return;
     const cached = readOverviewCache();
     if (cached) setRows(cached);
-  }, [leonteq]);
+  }, [leonteq, readBundledRows]);
 
   useEffect(() => {
     let pending = false;
@@ -654,7 +663,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       if (refreshingAll || document.hidden || pending || Date.now() - lastStarted < 5000) return;
       pending = true;
       lastStarted = Date.now();
-      void loadOverview().finally(() => { pending = false; });
+      void loadOverview(undefined, false).finally(() => { pending = false; });
     };
     reload();
     const timer = window.setInterval(reload, 60_000);
@@ -1387,6 +1396,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           name={analyse.name}
           reportAccount={analyse.pf}
           onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!, analyse.name) : undefined}
+          onRefreshContribution={analyse.pf ? async () => {
+            void refreshOne(analyse.pf!, analyse.name, false);
+            return null;
+          } : undefined}
           refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
           refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
           //  The row's own cancel, not a second one — and passed unconditionally while the modal

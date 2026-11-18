@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import PortfolioOverviewPanel from '../PortfolioOverviewPanel';
+import ManagementDashboard from '../../management-dashboard/page';
 import { apiFetch } from '../../../lib/apiFetch';
 import { startJob } from '../../../lib/stores/jobs';
 
@@ -17,6 +18,39 @@ vi.mock('../../../lib/stores/jobs', () => ({ startJob: vi.fn(), cancelJob: vi.fn
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 afterEach(() => { vi.clearAllMocks(); window.sessionStorage.clear(); });
+
+it('loads all management collections from a single overview request', async () => {
+  const collections = [
+    ['Bustelberg', 'bustelberg'], ['Toppenberg', 'toppenberg'],
+    ['TopSelecties', 'topselecties'], ['Imagine Fund', 'imagine_fund'],
+    ['Test TopSelecties', 'test_topselecties'],
+  ];
+  const rows = collections.map(([label, group]) => ({
+    name: `${label} Example`, dynamic_portefeuille: group, management_group: group, holdings: 1,
+  }));
+  vi.mocked(apiFetch).mockImplementation(async input => {
+    expect(String(input)).toContain('/api/airs/portfolios/management-bundle');
+    return new Response(JSON.stringify({
+      airs: rows.filter(row => row.management_group !== 'topselecties'),
+      leonteq: rows.filter(row => row.management_group === 'topselecties'),
+    }));
+  });
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<ManagementDashboard />));
+    for (const [label] of collections) {
+      const button = [...host.querySelectorAll('button')].find(button => button.textContent?.trim() === label)!;
+      await act(async () => button.click());
+      expect(host.querySelector('tbody')?.textContent).toContain(`${label} Example`);
+    }
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
 
 it('uses the identical overview table and Analyse control with Leonteq data and refresh only', async () => {
   const source = { name: 'AITopSelectie', dynamic_portefeuille: 'AITopSelectie',

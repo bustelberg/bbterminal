@@ -145,6 +145,12 @@ async def refresh_valuation_holdings(source: Literal['all', 'airs', 'leonteq'] =
     return {'job_id': job.id, 'label': source, 'already_running': reused}
 
 
+@router.get('/api/airs/valuation/portfolios/all/dashboard', response_model=ValuationBundle)
+async def valuation_all_dashboard():
+    from services import valuation_dashboard as dashboard
+    return await asyncio.to_thread(dashboard.read_all)
+
+
 @router.get('/api/airs/valuation/portfolios/{portfolio_id}/dashboard', response_model=ValuationBundle)
 async def valuation_dashboard(portfolio_id: int = Path(ge=1)):
     from services import valuation_dashboard as dashboard

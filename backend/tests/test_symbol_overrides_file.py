@@ -130,10 +130,10 @@ class TestTheOverridesFileIsWellFormed:
         got = {e["isin"]: e["symbol"] for e in _entries()}
         assert got["SE0023950795"] == "ROKO-B.ST"
 
-    def test_risk_profile_bond_tracker_is_pinned_to_aggh(self):
+    def test_risk_profile_bond_tracker_is_pinned_to_syba(self):
         """A fresh environment must bootstrap the fixed policy benchmark without fuzzy search."""
         got = {e["isin"]: e["symbol"] for e in _entries()}
-        assert got["IE00BDBRDM35"] == "AGGH.AS"
+        assert got["IE00B41RYL63"] == "SYBA.DE"
 
     def test_letko_fund_uses_its_reviewed_yahoo_series(self):
         got = {e["isin"]: e["symbol"] for e in _entries()}

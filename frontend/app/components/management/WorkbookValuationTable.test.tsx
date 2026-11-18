@@ -151,10 +151,10 @@ it('separates blue source values from yellow conversions and preserves green ana
     await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false}
       rows={[{ isin: 'EXACT', name: 'Company', price: 100, currency: 'USD', price_date: '2026-11-13' }]} />));
     expect([...host.querySelectorAll('nav button')].map(button => button.textContent)).toEqual([
-      'Onderneming', 'Waardering & koopzone', 'Scenario 2029', 'Koers & winst', 'Bron & controle', 'Afkortingen', 'Parameters',
+      'Onderneming', 'Waardering & koopzone', 'Scenario 2029', 'EPS berekening', 'Bron & controle', 'Afkortingen', 'Parameters',
     ]);
     expect(host.querySelectorAll('thead th')).toHaveLength(4);
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Koers & winst')!.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'EPS berekening')!.click());
     expect(host.querySelector('tbody [data-column="price"]')?.textContent).toBe('100.00');
     expect(host.querySelector('tbody [data-column="price"]')?.getAttribute('data-kind')).toBe('calculation');
     expect(host.querySelector('tbody [data-column="price"]')?.className).toContain('bg-card');
@@ -189,14 +189,14 @@ it('preserves drag-selected tab text while allowing ordinary clicks and keyboard
   const selection = document.getSelection()!;
   try {
     await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[]} />));
-    const tab = [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Koers & winst')!;
+    const tab = [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'EPS berekening')!;
     const range = document.createRange(); range.selectNodeContents(tab);
     selection.removeAllRanges(); selection.addRange(range);
     await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
     expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('Onderneming');
-    expect(selection.toString()).toBe('Koers & winst');
+    expect(selection.toString()).toBe('EPS berekening');
     await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); });
-    expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('Koers & winst');
+    expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('EPS berekening');
     selection.removeAllRanges();
     const other = [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(button => button.textContent === 'Onderneming')!;
     await act(async () => { other.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
@@ -269,7 +269,7 @@ it('switches panels without refetching, keeps search/sort, and links formulas to
     await act(async () => host.querySelector<HTMLButtonElement>('td[data-column="fair"] button')!.click());
     const formula = host.querySelector('[aria-label="Formula details"]')!;
     await act(async () => formula.querySelector<HTMLButtonElement>('button[data-input="fy1"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('Koers & winst');
+    expect(host.querySelector('nav button[aria-pressed="true"]')?.textContent).toBe('EPS berekening');
     expect(host.querySelector('th[data-column="fy1"]')?.className).toContain('ring-2');
     expect(host.querySelector('td[data-column="fy1"]')?.getAttribute('data-kind')).toBe('data');
     expect(host.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('Company');
@@ -323,13 +323,13 @@ it('patches refreshed source cells without restarting the workbook read or chang
   const props = { portfolioId: 7, nl: false, portfolioName: 'Portfolio', rows: [{ name: 'Company', isin: 'EXACT' }] };
   try {
     await act(async () => root.render(<WorkbookValuationTable {...props} />));
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Koers & winst')!.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'EPS berekening')!.click());
     const reads = vi.mocked(apiFetch).mock.calls.length;
     const update = { ...workbook, rows: [{ ...workbook.rows[0], selections: [], quote: {
       price: 23456, currency: 'GBp', price_date: '2026-11-16', source: 'Yahoo Finance' } }] };
     await act(async () => root.render(<WorkbookValuationTable {...props} workbookUpdate={update} />));
     expect(apiFetch).toHaveBeenCalledTimes(reads);
-    expect(host.querySelector('nav[aria-label="Valuation panels"] button[aria-pressed="true"]')?.textContent).toBe('Koers & winst');
+    expect(host.querySelector('nav[aria-label="Valuation panels"] button[aria-pressed="true"]')?.textContent).toBe('EPS berekening');
     expect(host.textContent).toContain('23456.00');
     expect(host.textContent).not.toContain('Loading valuation inputs');
   } finally { await act(async () => root.unmount()); host.remove(); }
@@ -356,7 +356,7 @@ it('links stock prices to their actual Yahoo listing in a new tab', async () => 
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
   try {
     await act(async () => root.render(<WorkbookValuationTable portfolioId={7} nl={false} rows={[{ name: 'Company', isin: 'EXACT' }]} />));
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'Koers & winst')!.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')].find(b => b.textContent === 'EPS berekening')!.click());
     const link = host.querySelector<HTMLAnchorElement>('td[data-column="raw_price"] a')!;
     expect(link.href).toBe('https://finance.yahoo.com/quote/ABC.L/');
     expect(link.target).toBe('_blank');

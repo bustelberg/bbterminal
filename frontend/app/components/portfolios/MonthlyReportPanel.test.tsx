@@ -71,25 +71,24 @@ it('shows Leonteq monthly performance in the shared panel without AIRS requests 
     leonteqReturns={{ portfolio_ytd_pct: -0.81, benchmark_ytd_pct: 12, ytd_excess_pct: -12.81,
       ytd_from: '2026-06-08', portfolio_as_of: '2026-11-13' }} />));
   expect(host.textContent).toContain('Leonteq · Performance');
-  expect(host.textContent).toContain('-0.81%');
-  expect(host.textContent).toContain('+12.00%');
+  expect(host.textContent).not.toContain('-0.81%');
+  expect(host.textContent).not.toContain('+12.00%');
   expect(host.querySelector(`[data-month-benchmark="${october}"]`)?.textContent).toContain('+1.50%');
   expect(host.querySelector(`[data-month-benchmark="${november}"]`)?.textContent).toContain('+2.50%');
   expect(host.querySelectorAll('nav button')).toHaveLength(2);
   await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[1].click());
-  expect(host.querySelector('#monthly-report-details')?.textContent).toContain('-1.20%');
+  expect(host.querySelector('#monthly-report-details')?.textContent).not.toContain('-1.20%');
   expect(host.textContent).not.toContain('AIRS');
   expect(vi.mocked(apiFetch).mock.calls.every(([url]) => String(url).includes('/api/leonteq/management/topselecties/'))).toBe(true);
   expect(startJob).not.toHaveBeenCalled();
 });
 
-it('switches to bundled certificate constituents without fetching again', async () => {
-  await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+it('lets Toppenberg switch between bundled certificate views without fetching again', async () => {
+  await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Toppenberg Neutraal" />));
   await act(async () => host.querySelectorAll<HTMLButtonElement>('nav button')[1].click());
   const details = host.querySelector('#monthly-report-details')!;
-  expect(details.textContent).not.toContain('Constituent');
   const toggle = details.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
-  await act(async () => toggle.click());
+  expect(toggle.checked).toBe(true);
   expect(details.textContent).toContain('Constituent');
   expect(details.textContent).toContain('Sample stock');
   expect(details.querySelector('th:nth-child(2)')?.textContent).toBe('Via');
@@ -102,6 +101,8 @@ it('switches to bundled certificate constituents without fetching again', async 
   expect(details.textContent).toContain('+2.00%');
   await act(async () => toggle.click());
   expect(details.textContent).not.toContain('Constituent');
+  await act(async () => toggle.click());
+  expect(details.textContent).toContain('Constituent');
   expect(apiFetch).toHaveBeenCalledOnce();
 });
 
@@ -122,7 +123,7 @@ it('opens and closes month details from the same data used for the tile', async 
   expect(details?.textContent).toContain('Sample stock');
   expect(details?.textContent).toContain('+1.00pp');
   expect(details?.textContent).toContain('+0.41%');
-  expect(details?.textContent).toContain('+0.02%');
+  expect(details?.textContent).not.toContain('+0.02%');
   expect(tile.textContent).toBe(contents);
 
   await act(async () => tile.click());

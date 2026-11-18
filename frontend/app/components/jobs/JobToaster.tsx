@@ -124,10 +124,9 @@ export default function JobToaster() {
   if (!jobs.length) return null;
 
   return (
-    // `pointer-events-none` on the stack, restored per card: the column spans a corner of the
-    // viewport and would otherwise swallow clicks on whatever sits underneath it.
-    <div className="fixed bottom-4 right-4 z-[10000] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]
-                    pointer-events-none">
+    <div role="region" aria-label={lang === 'nl' ? 'Taakmeldingen' : 'Job notifications'} tabIndex={0}
+      className="fixed bottom-4 right-4 z-[10000] flex max-h-[calc(100dvh-2rem)] w-80 max-w-[calc(100vw-2rem)]
+                 flex-col gap-2 overflow-y-auto overscroll-y-contain">
       {/*  KEYED ON `id:status`, SO GOING STALE REMOUNTS THE CARD. That is what lets the countdown
           be a `useState` initialiser instead of an effect — the card that appears when a job
           finishes is a new card, already armed with the right number of seconds. */}
@@ -262,7 +261,7 @@ export function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
       role={busy ? 'alert' : 'status'}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`pointer-events-auto bg-card border border-neutral-800/40 rounded-xl
+      className={`shrink-0 bg-card border border-neutral-800/40 rounded-xl
                   shadow-lg px-3 py-2.5 space-y-1.5
                   transition-all duration-300 ease-out
                   ${leaving ? 'opacity-0 translate-x-4' : 'opacity-100 translate-x-0'}`}>

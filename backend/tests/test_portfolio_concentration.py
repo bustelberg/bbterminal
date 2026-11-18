@@ -162,9 +162,9 @@ class TestAgainstTheIndex:
             [_h("Nvidia", "NVDA", 100.0)], "ACWI",
             benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
 
-        assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
+        assert got["benchmark"] == "60% ACWI + 40% SYBA.DE"
         assert got["benchmark_issuers"] == 3
-        assert got["benchmark_top"][0]["name"] == "AGGH.AS"
+        assert got["benchmark_top"][0]["name"] == "SYBA.DE"
         assert got["benchmark_top"][0]["weight_pct"] == pytest.approx(40.0)
         assert got["benchmark_top"][1]["weight_pct"] == pytest.approx(36.0)
         assert got["benchmark_effective_positions"] == pytest.approx(

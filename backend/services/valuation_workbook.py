@@ -5,7 +5,8 @@ from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException
-from deps import paginate, supabase
+from deps import chunked, paginate, supabase
+from services.gurufocus_listing_overrides import reviewed_listings
 from services.portfolio_membership import read as read_memberships
 
 DEFAULTS = Path(__file__).resolve().parents[1] / 'config' / 'valuation_workbook_defaults.json'
@@ -28,6 +29,11 @@ def normalize_assumptions(ticker, assumptions):
 
 def attach_fx(workbook):
     """Bundle saved units-per-EUR observations; never fetch providers on a read."""
+    overrides = reviewed_listings()
+    workbook = {**workbook, 'rows': [
+        {**row, 'ticker': source_ticker({}, row.get('isin'))}
+        if not row.get('ticker') and row.get('isin') in overrides else row
+        for row in workbook['rows']]}
     dates = [row.get('quote', {}).get('price_date') for row in workbook['rows']]
     dates = [date.fromisoformat(stamp[:10]) for stamp in dates if stamp]
     if not dates:
@@ -45,12 +51,17 @@ def attach_fx(workbook):
     return {**workbook, 'rows': [{**row, 'fx_rates': rates} for row in workbook['rows']]}
 
 
-def source_ticker(company):
+def source_ticker(company, isin=None):
     ticker = (company.get('gurufocus_ticker') or '').strip()
     exchange = company.get('gurufocus_exchange') or {}
     if ':' in ticker or exchange.get('is_us'):
         return ticker
-    return f"{exchange.get('exchange_code')}:{ticker}" if exchange.get('exchange_code') and ticker else ''
+    if exchange.get('exchange_code') and ticker:
+        return f"{exchange['exchange_code']}:{ticker}"
+    reviewed = reviewed_listings().get(isin)
+    if not reviewed:
+        return ''
+    return reviewed['ticker'] if reviewed.get('is_us') else f"{reviewed['exchange']}:{reviewed['ticker']}"
 
 
 def consensus(rows, after):
@@ -97,18 +108,28 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
                             '20261116140000_valuation_workbook_assumptions.sql.') from None
     settings = saved[0]['payload'] if saved else {}
     isins = sorted({row['isin'] for row in bundle['rows'] if row.get('isin')})
-    companies = list(paginate(lambda lo, hi: supabase.table('company').select(
-        'company_id,isin,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(currency_code,exchange_code,is_us)')
-        .in_('isin', sorted({valuation.reference_isin(isin) for isin in isins})).is_('out_of_scope_at', 'null').order('company_id').range(lo, hi).execute())) if isins else []
+    def lookup(keys, query):
+        return [row for group in chunked(keys)
+                for row in paginate(lambda lo, hi: query(group).range(lo, hi).execute())]
+
+    company_columns = 'company_id,isin,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(currency_code,exchange_code,is_us)'
+    def company_lookup(column, keys):
+        return lookup(keys, lambda group: supabase.table('company').select(company_columns)
+                      .in_(column, group).is_('out_of_scope_at', 'null').order('company_id'))
+
+    selected_ids = {row['valuation_company_id'] for row in bundle['rows'] if row.get('valuation_company_id')}
+    records = company_lookup('isin', sorted({valuation.reference_isin(isin) for isin in isins}))
+    records += company_lookup('company_id', sorted(selected_ids - {row['company_id'] for row in records}))
+    companies_by_id = {row['company_id']: row for row in records}
     by_isin = {}
-    for company in companies:
+    for company in companies_by_id.values():
         by_isin.setdefault(company['isin'], []).append(company)
-    ids = [c['company_id'] for c in companies]
-    metrics = list(paginate(lambda lo, hi: supabase.table('metric_data')
-        .select('company_id,target_date,numeric_value,metric_code').in_('company_id', ids)
+    ids = sorted(companies_by_id)
+    metrics = lookup(ids, lambda group: supabase.table('metric_data')
+        .select('company_id,target_date,numeric_value,metric_code').in_('company_id', group)
         .eq('source_code', 'gurufocus').in_('metric_code', FORECAST_CODES)
         .gte('target_date', date.today().isoformat()).order('company_id').order('target_date')
-        .order('metric_code').range(lo, hi).execute())) if ids else []
+        .order('metric_code'))
     by_company = {}
     for metric in metrics:
         by_company.setdefault(metric['company_id'], []).append(metric)
@@ -116,13 +137,13 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
     # Read recent closes independently of historical P/E availability. A missing
     # historical valuation must not hide a valid current quote or forecast.
     quote_start = (date.today() - timedelta(days=14)).isoformat()
-    quotes = list(paginate(lambda lo, hi: supabase.table('company_yahoo_price')
-        .select('company_id,analysis_id,target_date,close,currency').in_('company_id', ids)
+    quotes = lookup(ids, lambda group: supabase.table('company_yahoo_price')
+        .select('company_id,analysis_id,target_date,close,currency').in_('company_id', group)
         .gte('target_date', quote_start).lte('target_date', date.today().isoformat()).order('company_id').order('target_date')
-        .order('analysis_id').range(lo, hi).execute())) if ids else []
-    executions = list(paginate(lambda lo, hi: supabase.table('asset_execution')
-        .select('isin,analysis_id,yahoo_symbol').in_('isin', sorted(by_isin))
-        .eq('status', 'ok').order('isin').range(lo, hi).execute())) if by_isin else []
+        .order('analysis_id'))
+    executions = lookup(sorted(isin for isin in by_isin if isin), lambda group: supabase.table('asset_execution')
+        .select('isin,analysis_id,yahoo_symbol').in_('isin', group)
+        .eq('status', 'ok').order('isin'))
     symbols = {(item['isin'], item.get('analysis_id')): item.get('yahoo_symbol') for item in executions}
     by_quote = {}
     for quote in quotes:
@@ -131,8 +152,8 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
     incomplete_codes = [item['code'] for item in membership['legend'] if item['status'] != 'complete']
     for holding in bundle['rows']:
         matches = by_isin.get(valuation.reference_isin(holding.get('isin')), [])
-        company = matches[0] if len(matches) == 1 else {}
-        ticker = source_ticker(company)
+        company = companies_by_id.get(holding.get('valuation_company_id')) or (matches[0] if len(matches) == 1 else {})
+        ticker = source_ticker(company, valuation.reference_isin(holding.get('isin')))
         initial = seed.get(ticker, {})
         assumptions = {k: v for k, v in initial.items() if k not in ('name', 'ticker', 'selections')}
         assumptions.update((settings.get('companies') or {}).get(holding.get('isin'), {}))
@@ -147,7 +168,10 @@ def read(portfolio_id, *, only_isin=None, include_membership=True, prepared_bund
         source_quote = observations[0] if len(unique) == 1 else {}
         quote_symbols = {symbols.get((company.get('isin'), item.get('analysis_id'))) for item in observations}
         yahoo_symbol = next(iter(quote_symbols)) if len(quote_symbols) == 1 and source_quote else None
-        confirmed = membership['memberships'].get(holding.get('isin'), {})
+        confirmed = {}
+        for member_isin in holding.get('member_isins') or [holding.get('isin')]:
+            for code, profiles in membership['memberships'].get(member_isin, {}).items():
+                confirmed[code] = sorted(set(confirmed.get(code, [])) | set(profiles))
         # Membership in a family is proved by one positive holding, even if
         # another profile in that family is unavailable. Only unconfirmed codes
         # can still be affected by missing sources.

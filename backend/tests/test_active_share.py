@@ -146,10 +146,10 @@ def test_risk_profile_active_share_uses_the_stock_and_bond_policy(monkeypatch):
         {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
     ], "ACWI", benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
 
-    assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
+    assert got["benchmark"] == "60% ACWI + 40% SYBA.DE"
     assert got["active_share_pct"] == 40.0
     assert sum(row["portfolio_pct"] for row in got["rows"] if row["held"]) == 100.0
-    assert any(row["name"] == "AGGH.AS" and row["benchmark_pct"] == 40.0 for row in got["rows"])
+    assert any(row["name"] == "SYBA.DE" and row["benchmark_pct"] == 40.0 for row in got["rows"])
     assert next(row for row in got["rows"] if row["name"] == "Active bond")["bucket"] == "Bonds"
     assert next(row for row in got["rows"] if row["name"] == "Nvidia")["bucket"] == "Stocks"
 

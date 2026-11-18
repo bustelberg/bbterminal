@@ -604,7 +604,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     bond_mark = etf_returns("BONDS", [start]).get(start) or {}
     sleeve_specs = (
         ("Stocks", {"Equity", "ETF Equity"}, benchmark_label, r_b_total),
-        ("Bonds", {"Bonds"}, str(bond_mark.get("ticker") or "AGGH.AS"), bond_mark.get("eur_pct")),
+        ("Bonds", {"Bonds"}, str(bond_mark.get("ticker") or "SYBA.DE"), bond_mark.get("eur_pct")),
         ("Alternatives", {"Alternatives"}, None, None),
         ("Cash", {"Cash"}, "Cash", 0.0),
     )

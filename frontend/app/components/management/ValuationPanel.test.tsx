@@ -41,8 +41,28 @@ it('shows only Offensief profiles while keeping standalone portfolios and Bustel
   try {
     await act(async () => root.render(<ValuationPanel />));
     expect([...host.querySelectorAll('select option')].slice(1).map(option => option.textContent)).toEqual([
-      'Bustelberg Offensief', 'Bustelberg 2.0 Offensief', 'Toppenberg Offensief', 'AITopSelectie', 'Imagine Fund',
+      'All', 'Bustelberg Offensief', 'Bustelberg 2.0 Offensief', 'Toppenberg Offensief', 'AITopSelectie', 'Imagine Fund',
     ]);
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it('opens All in the valuation workbook with read-only assumptions', async () => {
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockImplementation(async url => response(String(url).endsWith('/portfolios') ? roster : {
+    ...payload('Combined company'), portfolio_id: 0, workbook: { ...workbook(), portfolio_id: 0 },
+    evidence: { unavailable_portfolios: ['Missing portfolio'] },
+  }));
+  const { host, root } = mount();
+  try {
+    await act(async () => root.render(<ValuationPanel />));
+    await select(host, 'all');
+    expect(vi.mocked(apiFetch).mock.calls[1][0]).toContain('/portfolios/all/dashboard');
+    expect(host.textContent).toContain('Combined company');
+    expect(host.textContent).toContain('Incomplete holdings for Missing portfolio');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav button')]
+      .find(button => button.textContent === 'Waardering & koopzone')!.click());
+    expect(host.querySelector('[data-column="growth"] input')).toBeNull();
+    expect(host.querySelector('tbody [data-column="growth"]')?.textContent).toBe('10.00%');
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -73,7 +93,7 @@ it('shows the workbook directly and loads its panels without refetching', async 
     await select(host);
     expect(apiFetch).toHaveBeenCalledTimes(2); // Roster + one selected-portfolio payload.
     expect(vi.mocked(apiFetch).mock.calls[1][0]).toContain('/portfolios/1/dashboard');
-    for (const label of ['Koers & winst', 'Waardering & koopzone', 'Scenario 2029', 'Bron & controle', 'Afkortingen', 'Parameters', 'Onderneming']) {
+    for (const label of ['EPS berekening', 'Waardering & koopzone', 'Scenario 2029', 'Bron & controle', 'Afkortingen', 'Parameters', 'Onderneming']) {
       await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Valuation panels"] button')].find(b => b.textContent === label)!.click());
     }
     expect(host.textContent).toContain('Company One');
@@ -188,7 +208,7 @@ it('Refresh uses one POST stream for row progress and the complete data without 
   const { host, root } = mount();
   try {
     await act(async () => root.render(<ValuationPanel />)); await select(host);
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Valuation panels"] button')].find(b => b.textContent === 'Koers & winst')!.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Valuation panels"] button')].find(b => b.textContent === 'EPS berekening')!.click());
     await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Refresh')!.click());
     expect(apiFetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(apiFetch).mock.calls[2][0]).toContain('/portfolios/1/dashboard/refresh');
@@ -209,7 +229,7 @@ it('Refresh uses one POST stream for row progress and the complete data without 
     });
     expect(host.textContent).toContain('Updated Company');
     expect(host.querySelector('tr[aria-busy="true"]')).toBeNull();
-    expect(host.querySelector('nav[aria-label="Valuation panels"] button[aria-pressed="true"]')?.textContent).toBe('Koers & winst');
+    expect(host.querySelector('nav[aria-label="Valuation panels"] button[aria-pressed="true"]')?.textContent).toBe('EPS berekening');
     expect(jobsStore.get().jobs.at(-1)?.status).toBe('done');
     expect(apiFetch).toHaveBeenCalledTimes(3);
   } finally { await act(async () => root.unmount()); host.remove(); }

@@ -1,5 +1,6 @@
 """Exact-ISIN membership from saved holdings, never workbook membership flags."""
 from math import isfinite
+import re
 
 from management_portfolios import _CORE_LABELS, key
 
@@ -109,6 +110,155 @@ def read():
     return build(roster, portfolio_valuation.company_holdings, management.entries(), portfolio_cache.saved_portfolios(),
                  lambda name: composition_cache.composition(name, saved_only=True))
 
+
+
+def all_companies():
+    """Union of saved company holdings across the management dashboard."""
+    from leonteq import composition_cache, management, portfolio_cache
+    from routers._airs_holding_isin import classify_bucket
+    from routers._airs_portfolio_analysis import _grid, _is_fund
+    from services import portfolio_valuation
+
+    companies, unavailable, models = {}, set(), {}
+
+    def add(holding, portfolio, weight):
+        isin = str(holding.get('isin') or '').strip().upper()
+        if not isin or not positive(weight):
+            return
+        name = holding.get('name') or isin
+        if (portfolio_valuation.excluded_valuation_instrument(name, isin)
+                or re.search(r'\b(?:ETF|ETN|ETC|UCITS|overnight return|money market)\b', name, re.I)
+                or re.search(r'\s\d+(?:[.,]\d+|\s+\d+/\d+)?%?\s+\d{1,2}/\d{1,2}/\d{2,4}\s*$', name)):
+            return
+        company = companies.setdefault(isin, {'name': name, 'portfolios': set()})
+        company['portfolios'].add(portfolio)
+
+    for row in portfolio_valuation.portfolios():
+        group = row.get('management_group')
+        if group == 'topselecties':
+            continue
+        name, model_id = row['name'], row.get('id')
+        if model_id is None:
+            unavailable.add(name)
+            continue
+        scope = model_id, group == 'toppenberg'
+        if scope not in models:
+            try:
+                models[scope] = portfolio_valuation.company_holdings(model_id, look_through=scope[1])
+            except ValueError:
+                models[scope] = None
+        if models[scope] is None:
+            unavailable.add(name)
+            continue
+        holdings, evidence = models[scope]
+        if positive((evidence.get('lookthrough') or {}).get('opaque_pct')):
+            unavailable.add(name)
+        for holding in holdings:
+            if not holding.get('isin') and positive(holding.get('weight_pct')):
+                unavailable.add(name)
+            add(holding, name, holding.get('weight_pct'))
+
+    catalogue = portfolio_cache.saved_portfolios().get('portfolios') or []
+    leonteq_positions = []
+    non_company_isins = set()
+    for entry in management.entries():
+        name = entry['display_name']
+        matched = management.resolve(entry, catalogue)
+        snapshot = composition_cache.composition(matched['name'], saved_only=True) if matched else {}
+        if not snapshot.get('success') or not snapshot.get('groups'):
+            unavailable.add(name)
+            continue
+        for group in snapshot['groups']:
+            category = str(group.get('name') or '').strip().casefold()
+            positions = group.get('positions') or []
+            if category in ('bond', 'bonds', 'fund', 'funds', 'cash', 'certificate', 'certificates', 'etf', 'etn', 'note', 'notes'):
+                non_company_isins.update(str(holding['isin']).strip().upper() for holding in positions if holding.get('isin'))
+            elif category in ('share', 'shares', 'equity', 'equities', 'stock', 'stocks'):
+                leonteq_positions.extend((name, holding) for holding in positions)
+    for isin in non_company_isins:
+        companies.pop(isin, None)
+    grid = _grid(sorted(set(companies) | {holding['isin'] for _, holding in leonteq_positions if holding.get('isin')}))
+    for name, holding in leonteq_positions:
+        if not _is_fund(grid.get(holding.get('isin')), holding.get('name') or ''):
+            if not holding.get('isin') and positive(holding.get('weight')):
+                unavailable.add(name)
+            add(holding, name, holding.get('weight'))
+    for isin, company in list(companies.items()):
+        asset = grid.get(isin) or {}
+        fund = _is_fund(asset, company['name'])
+        if isin in non_company_isins or fund or classify_bucket(None, fund, isin, company['name'], asset) in ('Bonds', 'Cash'):
+            del companies[isin]
+    rows = _valuation_issuers(companies, grid)
+    return {'companies': sorted(rows, key=lambda row: (row['name'].casefold(), row['isins'][0])),
+            'unavailable_portfolios': sorted(unavailable, key=str.casefold)}
+
+
+def _valuation_issuers(holdings, grid):
+    from deps import fetch_in_chunks, supabase
+    from services import company_notes_identity, portfolio_valuation
+
+    unresolved = [{'isin': isin} for isin in sorted(holdings) if not (grid.get(isin) or {}).get('company_id')]
+    links, _ = company_notes_identity.load(unresolved, supabase) if unresolved else ({}, {})
+    columns = 'company_id,isin,company_name,gurufocus_ticker'
+
+    def lookup(column, values):
+        return fetch_in_chunks(sorted(values), lambda group: supabase.table('company').select(columns)
+                               .in_(column, group).is_('out_of_scope_at', 'null').execute())
+
+    ids = {asset['company_id'] for isin, asset in grid.items() if isin in holdings and asset.get('company_id')}
+    ids.update(link['company_id'] for link in links.values() if link.get('company_id'))
+    references = {portfolio_valuation.reference_isin(isin) for isin in holdings}
+    records = {row['company_id']: row for row in lookup('company_id', ids)
+               + lookup('isin', references | set(holdings))
+               + lookup('company_name', {holding['name'] for holding in holdings.values()})}
+    return _merge_valuation_issuers(holdings, grid, links, records)
+
+
+def _merge_valuation_issuers(holdings, grid, links, records):
+    from index_universe.acwi.identity import issuer_key
+    from services.portfolio_valuation import reference_isin
+
+    by_isin, by_name = {}, {}
+    for row in records.values():
+        if row.get('isin'):
+            by_isin.setdefault(row['isin'], []).append(row)
+        if row.get('company_name'):
+            by_name.setdefault(issuer_key(row['company_name']), []).append(row)
+
+    issuers = {}
+    for isin, company in sorted(holdings.items()):
+        asset = grid.get(isin) or {}
+        reference = reference_isin(isin)
+        known_id = asset.get('company_id') or (links.get(isin) or {}).get('company_id')
+        exact = by_isin.get(reference, [])
+        exact_record = exact[0] if len(exact) == 1 else None
+        # An international issue ISIN can resolve to a company's metadata even
+        # when the held instrument is its debt. Require equity evidence for it.
+        if isin.startswith('XS') and (not exact_record or str(asset.get('asset_class') or '').casefold() != 'equity'):
+            continue
+        linked_record = records.get(known_id)
+        record = exact_record or linked_record
+        if linked_record and linked_record.get('gurufocus_ticker') and not (record or {}).get('gurufocus_ticker'):
+            record = linked_record
+        name = (record or {}).get('company_name') or asset.get('name') or company['name']
+        identity = issuer_key(name) or isin
+        candidates = by_name.get(identity, [])
+        if not (record or {}).get('gurufocus_ticker'):
+            ticker_candidates = [candidate for candidate in candidates if candidate.get('gurufocus_ticker')]
+            if len(ticker_candidates) == 1:
+                record = ticker_candidates[0]
+            elif not record and len(candidates) == 1:
+                record = candidates[0]
+        issuer = issuers.setdefault(identity, {'name': name, 'isins': [], 'portfolios': set(), 'choice': None})
+        score = (bool((record or {}).get('gurufocus_ticker')), reference == isin, bool(record))
+        if issuer['choice'] is None or score > issuer['choice'][0]:
+            issuer['choice'] = (score, (record or {}).get('isin') or isin, (record or {}).get('company_id'))
+            issuer['name'] = name
+        issuer['isins'].append(isin)
+        issuer['portfolios'].update(company['portfolios'])
+    return [{'name': row['name'], 'isins': row['isins'], 'valuation_isin': row['choice'][1],
+             'company_id': row['choice'][2], 'portfolios': sorted(row['portfolios'], key=str.casefold)}
+            for row in issuers.values()]
 
 
 def refresh_holdings(ctx, *, source='all', all_portfolios=False):

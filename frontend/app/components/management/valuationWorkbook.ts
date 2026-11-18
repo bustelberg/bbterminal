@@ -98,12 +98,18 @@ function buyFromInputs(i: Inputs) {
   return positive(basis) && positive(i.fair_multiple) && finite(i.safety_margin) && i.safety_margin >= 0 && i.safety_margin < 1
     ? basis * i.fair_multiple * (1 - i.safety_margin) : null;
 }
-function scenarioFromInputs(i: Inputs, growthDelta: number, multipleDelta: number, bear = false) {
+function projectedBasis(i: Inputs, growthDelta = 0, bear = false) {
   const basis = basisFromInputs(i);
-  if (!positive(basis) || !finite(i.growth) || i.growth <= -1 || !positive(i.exit_multiple) || !positive(i.years)) return null;
+  if (!positive(basis) || !finite(i.growth) || i.growth <= -1 || !positive(i.years)) return null;
   const growth = bear ? Math.max(-.9, i.growth + growthDelta) : i.growth + growthDelta;
-  if (growth <= -1 || multipleDelta <= -1) return null;
-  const value = basis * (1 + growth) ** i.years * i.exit_multiple * (1 + multipleDelta);
+  const value = growth > -1 ? basis * (1 + growth) ** i.years : null;
+  return finite(value) ? value : null;
+}
+
+function scenarioFromInputs(i: Inputs, growthDelta: number, multipleDelta: number, bear = false) {
+  const basis = projectedBasis(i, growthDelta, bear);
+  if (basis == null || !positive(i.exit_multiple) || multipleDelta <= -1) return null;
+  const value = basis * i.exit_multiple * (1 + multipleDelta);
   return finite(value) ? value : null;
 }
 
@@ -126,6 +132,7 @@ export const VALUATION_FORMULAS = {
   calendarMonths: { inputs: ['fy1_date', 'price_date'], expression: 'CLAMP(calendar months from price_date through fy1_date, 0, 12)', evaluate: calendarMonths },
   months: { inputs: ['months_fy1', 'fy1_date', 'price_date'], expression: M, evaluate: monthsFromInputs },
   basis: { inputs: basisInputs, expression: `${B}; M = ${M}; ${FX}`, evaluate: basisFromInputs },
+  projectedBasis: { inputs: [...basisInputs, 'growth', 'years'], expression: `(${B}) × (1 + growth) ^ years; M = ${M}; ${FX}`, evaluate: (i: Inputs) => projectedBasis(i) },
   currentMultiple: { inputs: [...basisInputs, ...priceInputs], expression: `${P} / (${B}); M = ${M}; ${FX}`, evaluate: (i: Inputs) => {
     const basis = basisFromInputs(i), price = priceFromInputs(i); return positive(basis) && price != null ? price / basis : null;
   } },

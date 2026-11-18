@@ -215,13 +215,19 @@ def _monthly_attribution(source):
             details[month] = {'reason': 'Saved position results do not match the current Leonteq monthly return.'}
             continue
         estimated = bool(report.get('estimated') and monthly_cash_verified(ledger, report))
+        first_buy = {}
+        for trade in ledger.get('transactions') or []:
+            stamp, isin = trade.get('date'), trade.get('isin')
+            if trade.get('booked') and trade.get('event') == 'Buy' and isin and stamp and start < stamp <= end:
+                first_buy[isin] = min(stamp, first_buy.get(isin, stamp))
         details[month] = {'opening_weight_date': start, 'reason': report.get('reason'),
             'estimated_contribution_gap_pp': report['difference_pct'] if estimated else None, 'positions': [
             {'name': item['name'], 'isin': item['isin'], 'return_pct': item['return_pct'],
              'contribution_pp': item['contribution_pct'] if estimated or not report.get('estimated') else None,
-             'start_date': start, 'end_date': end,
+             'start_date': (first_buy.get(identity) or start) if not item['opening'] else start, 'end_date': end,
              'opening_weight_pct': item['opening'] / report['basis_eur'] * 100 if report['basis_eur'] else None,
-             'is_cash': identity.startswith('cash:'), 'status': 'held'}
+             'is_cash': identity.startswith('cash:'),
+             'status': 'bought' if not item['opening'] and identity in first_buy else 'held'}
             for identity, item in report['positions'].items()]}
     return details
 

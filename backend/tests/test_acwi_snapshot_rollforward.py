@@ -52,7 +52,7 @@ def test_active_share_and_concentration_work_for_different_profiles(snapshot, mo
             {"isin": "MSFT", "name": "Microsoft Corp", "bucket": "Equity", "weight_pct": (100 - apple_share) * stock_target / 100},
         ]
         if stock_target < 100:
-            holdings.append({"isin": "BOND", "name": "AGGH.AS", "bucket": "Bonds", "is_fund": True,
+            holdings.append({"isin": "BOND", "name": "SYBA.DE", "bucket": "Bonds", "is_fund": True,
                              "weight_pct": 100 - stock_target})
         share = active.compute_active_share(holdings, "ACWI", benchmark_weights=policy)
         concentration = compute_concentration(holdings, "ACWI", benchmark_weights=policy)

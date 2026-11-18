@@ -16,6 +16,14 @@ import { leonteqPerformanceBundle, type LeonteqPerformanceReturns } from './leon
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
 const ctl = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-xs text-fg-muted hover:border-accent-500/50 disabled:opacity-50';
 const tone = (value?: number | null) => value == null ? 'text-fg-subtle' : value < 0 ? 'text-neg-400' : value > 0 ? 'text-pos-400' : 'text-fg-strong';
+type PositionSortKey = 'name' | 'via' | 'opening_weight_pct' | 'return_pct' | 'contribution_pp' | 'period';
+
+function positionSortValue(position: MonthlyPosition, key: PositionSortKey) {
+  if (key === 'via') return position.certificate ?? position.via?.map(item => item.label).join(', ');
+  if (key === 'period') return position.start_date && position.end_date
+    ? `${position.start_date} ${position.end_date}` : null;
+  return position[key];
+}
 
 export default function MonthlyReportPanel({ portefeuille, name, variant, leonteqPortfolio, leonteqReturns, benchmarkName, refreshSeq }: {
   portefeuille?: string | null; name: string; variant?: string | null;
@@ -28,7 +36,11 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   const [bundle, setBundle] = useState<PerformanceBundle | null>(() => !leonteqPortfolio && portefeuille ? readPerformanceBundle(portefeuille) : null);
   const [yearSelection, setYearSelection] = useState<string | null>(null);
   const [monthSelection, setMonthSelection] = useState<string | null>(null);
-  const [lookThrough, setLookThrough] = useState(() => defaultLookThroughCertificates(name, portefeuille));
+  const [positionSort, setPositionSort] = useState<{ key: PositionSortKey; descending: boolean }>({
+    key: 'contribution_pp', descending: true,
+  });
+  const canLookThrough = !leonteqPortfolio && defaultLookThroughCertificates(name, portefeuille);
+  const [lookThrough, setLookThrough] = useState(canLookThrough);
   const [pending, setPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,9 +81,25 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   const detailsOpen = !!report?.details[month];
   const selectedReport = report?.details[month];
   const perf = report?.rows[month];
-  const expanded = selectedReport?.snapshot?.lookthrough_positions;
+  const expanded = canLookThrough ? selectedReport?.snapshot?.lookthrough_positions : undefined;
   const showConstituents = lookThrough && expanded !== undefined;
   const positions = showConstituents ? expanded : selectedReport?.snapshot?.positions;
+  const sortedPositions = positions?.map((position, index) => ({ position, index,
+    value: positionSortValue(position, positionSort.key) })).sort((left, right) => {
+    const a = left.value, b = right.value;
+    if (a == null || b == null) return a == null && b == null ? 0 : a == null ? 1 : -1;
+    const order = typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), locale);
+    return positionSort.descending ? -order : order;
+  });
+  const positionHeader = (key: PositionSortKey, label: string, numeric = false) => {
+    const active = positionSort.key === key;
+    return <th scope="col" aria-sort={active ? (positionSort.descending ? 'descending' : 'ascending') : undefined}
+      className={`px-3 py-3 text-xs font-medium text-fg-subtle ${numeric ? 'text-right' : 'text-left'}`}>
+      <button type="button" className="cursor-pointer hover:text-fg-strong" onClick={() => setPositionSort(previous => ({
+        key, descending: previous.key === key ? !previous.descending : numeric,
+      }))}>{label}{active && <span aria-hidden="true"> {positionSort.descending ? '↓' : '↑'}</span>}</button>
+    </th>;
+  };
   const reconciliation = selectedReport?.snapshot?.reconciliation;
   const estimatedGap = selectedReport?.estimated_contribution_gap_pp;
   const unavailableCertificates = selectedReport?.snapshot?.lookthrough_unavailable ?? [];
@@ -206,20 +234,6 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
     {pending && !report && <p className="text-sm text-fg-subtle">{text('Loading…', 'Laden…')}</p>}
     {!leonteqPortfolio && historical && report && !summary?.complete && <p className="text-xs text-warn-300">{text('Year-end report incomplete. Figures below run through the dates shown; finalisation will retry during the daily refresh.', 'Jaareindrapport onvolledig. De cijfers lopen tot de getoonde datums; afronding wordt bij de dagelijkse verversing opnieuw geprobeerd.')}</p>}
     {report && <>
-      <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-3" aria-label={text('Compounded returns', 'Samengestelde rendementen')}>
-        {[
-          { label: historical ? text('Annual return · EUR', 'Jaarrendement · EUR') : `${name} (YTD) €`, value: summary?.return_pct },
-          { label: historical ? text('Annual weighted benchmark return · EUR', 'Gewogen benchmarkjaarrendement · EUR') : `${benchmarkLabel} (YTD) €`, value: summary?.benchmark_pct },
-        ].map(({ label, value }) => <div key={label} className={`${box} flex items-center justify-between gap-4 px-5 py-4`}>
-          <div><p className="text-sm text-fg-muted">{label}</p><p className="mt-1 text-xs text-fg-subtle">{summary?.start && summary.end ? `${holdingDate(summary.start)} ${text('to', 't/m')} ${holdingDate(summary.end)}` : year}</p>
-            {value == null && <p className="mt-1 text-xs text-fg-faint">{text('Monthly data incomplete', 'Maandgegevens onvolledig')}</p>}</div>
-          <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(value)}`}>{pct(value)}</span>
-        </div>)}
-        <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}>
-          <span className="text-sm text-fg-muted">{text('Excess', 'Excess')}</span>
-          <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(summary?.excess_pp)}`}>{summary?.excess_pp == null ? '—' : `${new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero' }).format(summary?.excess_pp)}pp`}</span>
-        </div>
-      </div>
       <nav className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5" aria-label={text('Months', 'Maanden')}>
         {report.months.map((key) => { const row = report.rows[key]; const active = detailsOpen && key === month;
           return <button key={key} type="button" disabled={busy} onClick={() => openMonth(key)} aria-expanded={active} aria-pressed={active} aria-controls="monthly-report-details"
@@ -238,12 +252,6 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
         </div><div className="flex gap-2">
           {!leonteqPortfolio && <button type="button" className={ctl} onClick={() => void refreshMonth('monthly-report')} disabled={busy || pending || !!report.warning}>{busy ? text('Reading AIRS…', 'AIRS ophalen…') : selectedReport?.snapshot ? text('Refresh month', 'Maand verversen') : text('Load month from AIRS', 'Maand ophalen uit AIRS')}</button>}
         </div></div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{name}</span>
-            <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(perf?.rendement)}`}>{pct(perf?.rendement)}</span></div>
-          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{benchmarkLabel}<InfoTip className="ml-2" wide content={benchmarkDetails(month)} /></span>
-            <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(benchmarkForMonth(month))}`}>{pct(benchmarkForMonth(month))}</span></div>
-        </div>
         {report.warning && <p className="text-xs text-warn-300">{report.warning}</p>}
         {selectedReport?.benchmark_needs_refresh && <p className="text-xs text-warn-300">
           {text('Benchmark is not available yet.', 'Benchmark is nog niet beschikbaar.')} <button type="button" className="underline" disabled={busy || pending} onClick={() => void refreshMonth('monthly-benchmark')}>{text('Refresh benchmark', 'Benchmark verversen')}</button>
@@ -269,18 +277,16 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
           {showConstituents && unavailableCertificates.length > 0 && <p className="px-5 pt-2 text-xs text-fg-subtle">
             {text('Dated holdings unavailable for', 'Geen gedateerde posities beschikbaar voor')} {unavailableCertificates.join(', ')}.
           </p>}
-          {positions && leonteqPortfolio && selectedReport?.position_error && <p className="px-5 pt-2 text-xs text-fg-subtle">
-            {estimatedGap == null ? text('Contribution unavailable.', 'Bijdrage niet beschikbaar.')
-              : text(`Estimated contributions. Unallocated difference: ${pp(estimatedGap)}.`,
-                  `Geschatte bijdragen. Onverdeeld verschil: ${pp(estimatedGap)}.`)} {selectedReport.position_error}
-          </p>}
           {!positions ? <p className="p-5 text-sm text-fg-subtle">{busy ? text('Reading AIRS position reports…', 'AIRS-positierapporten ophalen…') : selectedReport?.position_error ?? text('Position results are not available yet.', 'De positieresultaten zijn nog niet beschikbaar.')}</p>
             : !positions.length ? <p className="p-5 text-sm text-fg-subtle">{text('No positions were found in the available AIRS reports.', 'Geen posities gevonden in de beschikbare AIRS-rapporten.')}</p>
             : <div className="overflow-auto p-3"><table className="w-full text-sm"><thead><tr>
-              <th className="px-3 py-3 text-left text-xs font-medium text-fg-subtle">{text('Position', 'Positie')}</th>
-              {showConstituents && <th className="px-3 py-3 text-left text-xs font-medium text-fg-subtle">Via</th>}
-              {[text('Opening weight (%)', 'Begingewicht (%)'), text('Return in EUR (%)', 'Rendement in EUR (%)'), text('Contribution (pp)', 'Bijdrage (pp)'), text('Holding period', 'Periode in portefeuille')].map((label, i) => <th key={label} className={`px-3 py-3 text-xs font-medium text-fg-subtle ${i < 3 ? 'text-right' : 'text-left'}`}>{label}</th>)}
-            </tr></thead><tbody>{positions.map((position, i) => <tr key={`${position.isin || position.name}-${i}`} className="border-t border-neutral-800/40">
+              {positionHeader('name', text('Position', 'Positie'))}
+              {showConstituents && positionHeader('via', 'Via')}
+              {positionHeader('opening_weight_pct', text('Opening weight (%)', 'Begingewicht (%)'), true)}
+              {positionHeader('return_pct', text('Return in EUR (%)', 'Rendement in EUR (%)'), true)}
+              {positionHeader('contribution_pp', text('Contribution (pp)', 'Bijdrage (pp)'), true)}
+              {positionHeader('period', text('Holding period', 'Periode in portefeuille'))}
+            </tr></thead><tbody>{sortedPositions?.map(({ position, index }) => <tr key={`${position.isin || position.name}-${index}`} className="border-t border-neutral-800/40">
               <td className="px-3 py-3 font-medium text-fg-muted">{position.attribution_kind === 'opbrengsten'
                 ? `${text('Income', 'Inkomsten')} · ${position.name}`
                 : position.attribution_kind === 'mutatie_opgelopen_rente'

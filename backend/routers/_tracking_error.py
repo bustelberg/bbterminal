@@ -270,7 +270,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             raise SeriesError("The risk-profile benchmark has no positive-weight sleeve.")
         benchmark_label = " + ".join(
             f"{(stocks_weight if name == 'ACWI' else bonds_weight):g}% "
-            f"{'AGGH.AS' if name == 'BONDS' else name}"
+            f"{'SYBA.DE' if name == 'BONDS' else name}"
             for name in active_benchmark_names)
     elif not bench_isin:
         raise SeriesError(
@@ -283,7 +283,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
 
     # Generic baskets retain Active Share's individual-stock sleeve. Risk-profile portfolios
     # instead use their investable Stocks/Bonds sleeve, which is the only like-for-like companion
-    # to their fixed ACWI/AGGH policy benchmark.
+    # to their fixed ACWI/SYBA policy benchmark.
     total_book_w = sum(max(0.0, float(h.get("weight_pct") or 0)) for h in holdings)
     stocks = [h for h in holdings
               if (is_risk_profile_holding(h) if is_policy_benchmark and not equity_only else is_direct_equity_stock(h))
@@ -437,7 +437,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     priced = {i for i in isins if len(p_buckets[i]) >= 2}
     if not priced or len(b_buckets) < 2:
         missing_trackers = [
-            ("AGGH.AS" if name == "BONDS" else name)
+            ("SYBA.DE" if name == "BONDS" else name)
             for name in active_benchmark_names if len(raw_buckets.get(name, {})) < 2
         ]
         if missing_trackers:
@@ -556,7 +556,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             },
             "priced": len(priced), "total": len(isins),
             "benchmark_isin": ", ".join(
-                f"{'AGGH.AS' if name == 'BONDS' else name}: {benchmark_isins[name]}"
+                f"{'SYBA.DE' if name == 'BONDS' else name}: {benchmark_isins[name]}"
                 for name in active_benchmark_names),
             "benchmark_label": benchmark_label, "history_limited": history_limited}
 
@@ -577,7 +577,7 @@ def _benchmark_history(built: dict, years: int) -> dict:
     for name, rows in prices.items():
         growth = rows[end] / rows[start]
         components.append({
-            "name": "AGGH.AS" if name == "BONDS" else name,
+            "name": "SYBA.DE" if name == "BONDS" else name,
             "isin": built["benchmark_component_isins"][name], "weight_pct": weights[name],
             "start_date": start, "end_date": end,
             "start_price_eur": rows[start], "end_price_eur": rows[end],
@@ -711,7 +711,7 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
         stats = annualized_stats(returns, periods_per_year=ppy)
         total = float(np.prod(1.0 + np.asarray(returns, dtype=float)) - 1.0)
         benchmark_components.append({
-            "name": "AGGH.AS" if name == "BONDS" else name,
+            "name": "SYBA.DE" if name == "BONDS" else name,
             "isin": built["benchmark_component_isins"][name],
             "weight_pct": built["benchmark_component_weights"][name],
             "window_return_pct": total * 100.0,

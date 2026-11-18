@@ -133,7 +133,7 @@ def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
     if not policy:
         return {}
     sleeves = [(weight, ticker, _acwi_months(months, ticker, currency))
-               for bucket, ticker, currency in (("Stocks", "ACWI", "USD"), ("Bonds", "AGGH.AS", "EUR"))
+               for bucket, ticker, currency in (("Stocks", "ACWI", "USD"), ("Bonds", "SYBA.DE", "EUR"))
                if (weight := policy[bucket]) > 0]
     source = " / ".join(f"{weight:g}% {ticker}" for weight, ticker, _ in sleeves) + " · EUR"
     result = {}

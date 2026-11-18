@@ -191,7 +191,13 @@
       "isin": "IE00BDBRDM35",
       "symbol": "AGGH.AS",
       "name": "iShares Core Global Aggregate Bond UCITS ETF EUR Hedged Acc",
-      "note": "This is the fixed bond tracker in every risk-profile benchmark. OpenFIGI identifies the ETF but Yahoo's generic ISIN search does not discover its Amsterdam listing, leaving tracking error unavailable. Pin AGGH.AS so a new environment can bootstrap its EUR price history automatically."
+      "note": "Pin the Amsterdam EUR listing for portfolios holding this ETF."
+    },
+    {
+      "isin": "IE00B41RYL63",
+      "symbol": "SYBA.DE",
+      "name": "State Street SPDR Bloomberg Euro Aggregate Bond UCITS ETF",
+      "note": "Use the same EUR Yahoo listing as the Factsheet for the risk-profile bond benchmark."
     },
     {
       "isin": "IE000MEQP5U8",

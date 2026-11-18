@@ -8,8 +8,9 @@ proxy), and HDG (ProShares Hedge Replication ETF, an HFRI-oriented replication p
 
 The bond reference is the user's justETF profile:
 https://www.justetf.com/en/etf-profile.html?isin=IE00B41RYL63#overview
-The verified Yahoo listing is SYBA.DE, quoted in EUR. It replaces AGG on the
-Factsheet only. The snapshot key includes this asset selection, so old AGG
+The verified Yahoo listing is SYBA.DE, quoted in EUR. It is used on the
+Factsheet and as the bond leg of the weighted risk-profile benchmark. The Factsheet
+snapshot key includes this asset selection, so old AGG
 snapshots are never reused. The underlying fund launched in May 2011; shorter
 listing histories are labelled separately rather than filled from another fund.
 

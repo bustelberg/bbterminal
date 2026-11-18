@@ -152,12 +152,9 @@ def _resolve_primary(isin: str, canon: str, *, force: bool,
 
     # Reviewed security/listing identities bypass a missing or broken ISIN bridge,
     # never the provider's exchange-subscription guard or actual financials fetch.
-    import json
-    from pathlib import Path
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
-    overrides = json.loads((Path(__file__).resolve().parents[1] / 'config' /
-                            'gurufocus_listing_overrides.json').read_text(encoding='utf-8'))
-    reviewed = overrides.get(canon) if isin == canon else None
+    from services.gurufocus_listing_overrides import reviewed_listings
+    reviewed = reviewed_listings().get(canon) if isin == canon else None
     if reviewed:
         if not is_gf_subscribed_exchange(reviewed['exchange']):
             return None, None, {'isin': isin, 'status': 'unsubscribed',

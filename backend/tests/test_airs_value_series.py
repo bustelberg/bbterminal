@@ -284,7 +284,7 @@ class TestTheReturnIsAirsOwnAndStartsTheYearAtZero:
                                          eindvermogen=1.01e6, cumulatief_rendement=1.0)])
 
         def benchmark(label, _anchor, dates):
-            return {"label": label, "ticker": {"ACWI": "ACWI", "BONDS": "AGGH.AS"}[label],
+            return {"label": label, "ticker": {"ACWI": "ACWI", "BONDS": "SYBA.DE"}[label],
                     "currency": {"ACWI": "USD", "BONDS": "EUR"}[label],
                     "points": [{"date": day, "cum_pct": float(i), "price_date": day}
                                for i, day in enumerate(dates)],

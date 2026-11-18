@@ -8,6 +8,7 @@ from deps import supabase
 from services import portfolio_valuation as V, valuation_workbook as W
 
 _preparation_lock = Lock()
+ALL_PORTFOLIOS_ID = 0
 
 
 class NotPrepared(HTTPException):
@@ -96,6 +97,8 @@ def holdings(selected):
         if str(group.get('name') or '').casefold() not in ('stock', 'stocks', 'share', 'shares', 'equities', 'equity'):
             continue
         for position in group.get('positions') or []:
+            if V.excluded_valuation_instrument(position.get('name'), position.get('isin')):
+                continue
             isin = position.get('isin')
             weight = V.number(str(position.get('weight') or '').replace('%', ''))
             if not weight or weight <= 0:
@@ -123,6 +126,23 @@ def _saved_bundle(selected, current):
             or {row.get('isin') for row in payload.get('rows', [])} != {row.get('isin') for row in rows}}
 
 
+def read_all():
+    from common.read_cache import read_cache
+    from services.portfolio_membership import all_companies
+
+    with read_cache('valuation-all-companies'):
+        union = all_companies()
+        rows = []
+        for company in union['companies']:
+            isins = company['isins']
+            isin = company['valuation_isin']
+            rows.append({'isin': isin, 'name': company['name'], 'weight_pct': 0, 'status': 'saved',
+                         'valuation_company_id': company['company_id'], 'member_isins': isins})
+        bundle = {'portfolio_id': ALL_PORTFOLIOS_ID, 'ready': bool(rows), 'rows': rows, 'method': V.METHOD,
+                  'evidence': {'unavailable_portfolios': union['unavailable_portfolios']}}
+        return {**bundle, 'workbook': W.read(ALL_PORTFOLIOS_ID, prepared_bundle=bundle)}
+
+
 def read(portfolio_id):
     selected = selection(portfolio_id)
     saved = (supabase.table(V.TABLE).select('payload,prepared_at').eq('portfolio_id', portfolio_id).limit(1).execute().data or [])
@@ -130,6 +150,13 @@ def read(portfolio_id):
         payload = saved[0]['payload']
         expected = 'Leonteq' if selected.get('management_group') == 'topselecties' else 'AIRS'
         if payload.get('evidence', {}).get('source') == expected:
+            excluded = {row.get('isin') for row in payload.get('rows', [])
+                        if V.excluded_valuation_instrument(row.get('name'), row.get('isin'))}
+            if excluded:
+                workbook = payload['workbook']
+                payload = {**payload, 'rows': [row for row in payload['rows'] if
+                    not V.excluded_valuation_instrument(row.get('name'), row.get('isin'))],
+                    'workbook': {**workbook, 'rows': [row for row in workbook['rows'] if row.get('isin') not in excluded]}}
             settings = (supabase.table(W.TABLE).select('payload,updated_at').eq('portfolio_id', portfolio_id).limit(1).execute().data or [])
             workbook = payload['workbook']
             # A complete portfolio bundle can outlive a separately repaired or

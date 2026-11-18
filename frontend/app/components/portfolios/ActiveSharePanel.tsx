@@ -222,7 +222,7 @@ export default function ActiveSharePanel({
   const data = (bundle.views['active-share'] as ActiveShare | undefined) ?? null;
   const error = bundle.error;
 
-  // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
+  // The active-share response names a policy benchmark for people ("60% ACWI + 40% SYBA.DE").
   // The four return endpoints and Concentration still need the canonical ACWI key to resolve
   // their benchmark constituents; their request body carries the policy separately.
   const riskBenchmark = riskBenchmarkWeights ? 'ACWI' : (data?.benchmark ?? benchmark);

@@ -206,7 +206,7 @@ def _index_returns(label: str, starts: list[str], *, end: str | None = None) -> 
     # Version the leg when the direct ACWI feed changes. The cache fingerprint sees data writes,
     # not a code deployment, so retaining the old key would keep returning the former GuruFocus
     # provenance until another table happened to change.
-    key = ("index_returns_yfinance_adjusted_v4", label, tuple(sorted(set(starts))), end, _today())
+    key = ("index_returns_yfinance_adjusted_v5", label, tuple(sorted(set(starts))), end, _today())
     return _leg(key, lambda: _index_returns_now(label, starts, **({'end': end} if end else {})))
 
 

@@ -9,10 +9,12 @@ import WorkbookValuationTable from './WorkbookValuationTable';
 import type { Workbook } from './valuationWorkbook';
 import { ExpectedJobFailure, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
 import { runSSE } from '../../../lib/stream';
+import { valuationControl, valuationField, valuationToolbar } from './valuationControlStyles';
 
 type Portfolio = components['schemas']['ValuationPortfolio'];
 type Bundle = components['schemas']['ValuationBundle'];
 const selectionKey = (portfolio: Portfolio) => portfolio.account ?? String(portfolio.id);
+const ALL_PORTFOLIOS = 'all';
 
 export default function ValuationPanel() {
   const [lang] = useLang();
@@ -22,6 +24,7 @@ export default function ValuationPanel() {
   const [bundle, setBundle] = useState<{ id: string; data: Bundle } | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [allRevision, setAllRevision] = useState(0);
   const refreshing = jobsStore.use(state => state.jobs.some(job =>
     (job.kind === 'valuation.portfolio' || job.kind === 'valuation.prepare') && job.status === 'running'));
   const [refreshingIsin, setRefreshingIsin] = useState<string | null>(null);
@@ -32,6 +35,7 @@ export default function ValuationPanel() {
     return () => { activeSelection.current = ''; };
   }, [selected]);
   const selectedId = portfolios.find(portfolio => selectionKey(portfolio) === selected)?.id;
+  const showAll = selected === ALL_PORTFOLIOS;
   const visiblePortfolios = portfolios.filter(portfolio => !/\b(?:defensief|neutraal|beperkt\s+offensief)$/i.test(portfolio.name.trim()));
   useEffect(() => {
     let active = true;
@@ -44,11 +48,11 @@ export default function ValuationPanel() {
     return () => { active = false; };
   }, []);
   useEffect(() => {
-    if (!selected || selectedId == null) return;
+    if (!selected || (!showAll && selectedId == null)) return;
     let active = true;
     const controller = new AbortController();
     const timeout = setTimeout(() => { controller.abort(); if (active) { setError(nl ? 'Portefeuille laden duurt te lang. Probeer opnieuw.' : 'Portfolio data took too long to load. Select it again to retry.'); setLoading(false); } }, 45000);
-    void apiFetch(`${API_URL}/api/airs/valuation/portfolios/${selectedId}/dashboard`, { cache: 'no-store', noReadCache: true, signal: controller.signal })
+    void apiFetch(`${API_URL}/api/airs/valuation/portfolios/${showAll ? ALL_PORTFOLIOS : selectedId}/dashboard`, { cache: 'no-store', noReadCache: true, signal: controller.signal })
       .then(async response => {
         const body = await response.json();
         if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : `HTTP ${response.status}`);
@@ -61,7 +65,7 @@ export default function ValuationPanel() {
       .catch(cause => { if (active && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); })
       .finally(() => { clearTimeout(timeout); if (active) setLoading(false); });
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
-  }, [selected, selectedId, nl]);
+  }, [selected, selectedId, showAll, nl, allRevision]);
   const data = bundle?.id === selected ? bundle.data : null;
   const workbook = data?.workbook as Workbook | null | undefined;
   const rows = [...(data?.rows ?? [])].sort((a, b) => a.name.localeCompare(b.name));
@@ -80,6 +84,7 @@ export default function ValuationPanel() {
               complete = true;
               setPortfolios(event.portfolios ?? []);
               failure = event.failures?.join('\n') ?? '';
+              if (activeSelection.current === ALL_PORTFOLIOS) setAllRevision(current => current + 1);
             }
             if (event.type === 'error') failure = event.message ?? 'Portfolio preparation failed.';
           }, signal);
@@ -147,26 +152,30 @@ export default function ValuationPanel() {
       } finally { if (current()) setRefreshingIsin(null); }
     });
   };
-  return <section className="space-y-4" aria-label={nl ? 'Waardering' : 'Valuation'}>
-    <div className="flex flex-wrap items-end gap-3">
-      <label className="space-y-1 text-sm"><span className="block">{nl ? 'Portefeuille' : 'Portfolio'}</span>
-        <select disabled={loading || refreshing} value={selected} onChange={event => { activeSelection.current = event.target.value; setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
+  return <section className="space-y-2" aria-label={nl ? 'Waardering' : 'Valuation'}>
+    <div className={valuationToolbar}>
+      <label className={valuationField}><span>{nl ? 'Portefeuille' : 'Portfolio'}</span>
+        <select disabled={loading || refreshing} value={selected} onChange={event => { activeSelection.current = event.target.value; setSelected(event.target.value); setLoading(!!event.target.value); setError(''); }} className={`${valuationControl} min-w-0`}>
           <option value="">{nl ? 'Selecteer een portefeuille…' : 'Select a portfolio…'}</option>
+          <option value={ALL_PORTFOLIOS}>{nl ? 'Alle' : 'All'}</option>
           {visiblePortfolios.map(portfolio => <option key={selectionKey(portfolio)} value={selectionKey(portfolio)}
             disabled={portfolio.id == null} title={portfolio.unavailable_reason ?? undefined}>
             {portfolio.name}{portfolio.id == null ? (nl ? ' — geen gekoppeld AIRS-model' : ' — no linked AIRS model') : ''}
           </option>)}
         </select>
       </label>
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={refreshPortfolio} disabled={loading || refreshing} className="rounded-lg border border-neutral-800/40 px-3 py-2 text-sm disabled:opacity-50">{refreshing ? (nl ? 'Vernieuwen…' : 'Refreshing…') : loading ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
-      </div>
+      <button type="button" onClick={refreshPortfolio} disabled={loading || refreshing} className={`${valuationControl} enabled:cursor-pointer enabled:hover:border-accent-500/50`}>{refreshing ? (nl ? 'Vernieuwen…' : 'Refreshing…') : loading ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Vernieuwen' : 'Refresh')}</button>
     </div>
     {(selected || error) && <>
       {error && <p role="alert" className="text-sm text-neg-300">{error}</p>}
       {data && !workbook && <p role="alert" className="text-sm text-neg-300">{nl ? 'De portefeuillebundel bevat geen werkmapgegevens. Vernieuw de portefeuille.' : 'The portfolio bundle is missing workbook data. Refresh the portfolio.'}</p>}
-      {workbook && selectedId != null && <WorkbookValuationTable key={selected} workbookData={workbook} workbookUpdate={workbookUpdate} refreshingIsin={refreshing ? refreshingIsin : null}
-        portfolioId={selectedId} rows={rows} nl={nl} />}
+      {showAll && data && <p className="text-xs text-fg-muted">{nl
+        ? 'Alle bedrijven in één overzicht met standaardwaarderingsaannames. Wijzig aannames in de afzonderlijke portefeuille.'
+        : 'All companies in one view using default valuation assumptions. Edit assumptions in the individual portfolio.'}</p>}
+      {showAll && data && Array.isArray(data.evidence?.unavailable_portfolios) && data.evidence.unavailable_portfolios.length > 0 &&
+        <p className="text-xs text-fg-muted">{nl ? 'Geen volledige posities voor' : 'Incomplete holdings for'} {data.evidence.unavailable_portfolios.join(', ')}.</p>}
+      {workbook && (showAll || selectedId != null) && <WorkbookValuationTable key={selected} workbookData={workbook} workbookUpdate={workbookUpdate} refreshingIsin={refreshing ? refreshingIsin : null}
+        portfolioId={showAll ? workbook.portfolio_id : selectedId!} rows={rows} nl={nl} readOnly={showAll} />}
     </>}
   </section>;
 }

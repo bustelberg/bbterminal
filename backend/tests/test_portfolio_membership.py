@@ -5,6 +5,46 @@ def entry(name):
     return {'display_name': name, 'leonteq_name': name + ' Index'}
 
 
+def test_all_companies_merges_verified_issuer_across_sources_and_keeps_missing_coverage(monkeypatch):
+    from leonteq import composition_cache, management, portfolio_cache
+    from routers import _airs_portfolio_analysis as analysis
+    from services import portfolio_valuation as valuation
+
+    monkeypatch.setattr(valuation, 'portfolios', lambda: [
+        {'name': 'Bustelberg', 'id': 1, 'management_group': 'bustelberg'},
+        {'name': 'Toppenberg', 'id': 2, 'management_group': 'toppenberg'},
+        {'name': 'Imagine Fund', 'id': None, 'management_group': 'imagine_fund'},
+    ])
+    calls = []
+
+    def holdings(model, *, look_through):
+        calls.append((model, look_through))
+        rows = [{'isin': 'A' if model == 1 else 'B', 'weight_pct': 10}]
+        if look_through:
+            rows += [{'isin': 'C', 'name': 'Booking Holdings Inc.', 'weight_pct': 5},
+                     {'isin': 'XS1002121454', 'name': 'Rabobank Certificaat', 'weight_pct': 5}]
+        return rows, {}
+
+    monkeypatch.setattr(valuation, 'company_holdings', holdings)
+    monkeypatch.setattr(management, 'entries', lambda: [entry('AITopSelectie')])
+    monkeypatch.setattr(portfolio_cache, 'saved_portfolios', lambda: {'portfolios': [{'name': 'AITopSelectie Index'}]})
+    monkeypatch.setattr(composition_cache, 'composition', lambda _, *, saved_only: {'success': saved_only,
+        'groups': [{'name': 'Share', 'positions': [{'isin': 'A', 'weight': '10%'},
+                     {'isin': 'D', 'name': 'Leonteq USD Overnight Return EUR ETN', 'weight': '10%'},
+                     {'isin': 'E', 'name': 'IBM 1 1/4 02/09/34', 'weight': '10%'}]},
+                   {'name': 'Bond', 'positions': [{'isin': 'C', 'weight': '10%'}]}]})
+    monkeypatch.setattr(analysis, '_grid', lambda _: {'A': {'company_id': 101, 'name': 'Example Inc.'},
+                                                     'B': {'company_id': 102, 'name': 'Example Inc. Class A'}})
+    monkeypatch.setattr(analysis, '_is_fund', lambda *_: False)
+    monkeypatch.setattr(M, '_valuation_issuers', lambda holdings, grid: M._merge_valuation_issuers(
+        holdings, grid, {}, {101: {'company_id': 101, 'isin': 'A', 'company_name': 'Example Inc.'},
+                            102: {'company_id': 102, 'isin': 'B', 'company_name': 'Example Inc.', 'gurufocus_ticker': 'EX'}}))
+    assert M.all_companies() == {'companies': [{'name': 'Example Inc.', 'isins': ['A', 'B'],
+        'valuation_isin': 'B', 'company_id': 102,
+        'portfolios': ['AITopSelectie', 'Bustelberg', 'Toppenberg']}], 'unavailable_portfolios': ['Imagine Fund']}
+    assert calls == [(1, False), (2, True)]
+
+
 def test_bustelberg_unions_profiles_but_keeps_bb2_separate_and_ignores_zero_positions():
     roster = [{'id': 1, 'account': 'BUS_Offensief_Dyn', 'name': 'Bustelberg Offensief'},
         {'id': 2, 'account': 'BUS_Defensief_Dyn', 'name': 'Bustelberg Defensief'},

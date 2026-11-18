@@ -14,14 +14,15 @@ export default function LoadingTracker() {
   return (
     // This is global operation feedback, so it must remain above nested dialogs, tooltips and
     // background-job toasts. In particular, Fundamental is a z-60 dialog and used to cover it.
-    <div className="fixed bottom-4 right-4 z-[11000] w-72 max-w-[calc(100vw-2rem)] bg-card border border-neutral-800/60 rounded-xl shadow-xl overflow-hidden">
-      <div className="px-3 py-2 border-b border-neutral-800/60 flex items-center gap-2">
+    <div className="fixed bottom-4 right-4 z-[11000] flex max-h-[calc(100dvh-2rem)] w-72 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-neutral-800/60 bg-card shadow-xl">
+      <div className="px-3 py-2 border-b border-neutral-800/60 flex shrink-0 items-center gap-2">
         <span className="inline-block w-2 h-2 rounded-full bg-accent-400 animate-pulse" />
         <span className="text-xs font-medium text-fg-soft">
           {items.length} request{items.length === 1 ? '' : 's'} in flight
         </span>
       </div>
-      <ul className="divide-y divide-neutral-800/40 max-h-72 overflow-y-auto">
+      <ul tabIndex={0} aria-label="Requests in flight"
+        className="min-h-0 max-h-72 divide-y divide-neutral-800/40 overflow-y-auto overscroll-y-contain">
         {items.map((item) => {
           const elapsed = Math.max(0, Math.floor((now - item.startedAt) / 1000));
           return (

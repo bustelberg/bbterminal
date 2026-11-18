@@ -59,7 +59,7 @@ def _profile(weights_pct: list[float]) -> dict:
 def _policy_benchmark(bench: dict, weights: dict[str, float] | None) -> tuple[dict, str]:
     """Turn ACWI into the reviewed Stocks/Bonds policy benchmark when one is supplied.
 
-    The bond sleeve is deliberately one investable AGGH.AS position.  We have constituent-level
+    The bond sleeve is deliberately one investable SYBA.DE position.  We have constituent-level
     weights for ACWI, but not for the aggregate-bond ETF; pretending its thousands of bonds were
     individual benchmark companies would fabricate precision.  Including the ETF itself makes
     the 40% policy allocation visible and leaves the concentration arithmetic exact.
@@ -81,14 +81,14 @@ def _policy_benchmark(bench: dict, weights: dict[str, float] | None) -> tuple[di
         for key, row in bench.items()
     }
     if bonds > 0:
-        scaled["benchmark:aggh.as"] = {
-            "key": "benchmark:aggh.as",
-            "name": "AGGH.AS",
+        scaled["benchmark:syba.de"] = {
+            "key": "benchmark:syba.de",
+            "name": "SYBA.DE",
             "weight_pct": bonds,
         }
     label = " + ".join(
         f"{weight:g}% {name}"
-        for name, weight in (("ACWI", stocks), ("AGGH.AS", bonds)) if weight > 0
+        for name, weight in (("ACWI", stocks), ("SYBA.DE", bonds)) if weight > 0
     )
     return scaled, label
 

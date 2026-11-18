@@ -122,7 +122,12 @@ const SERIES = {
 const pct = formatPct;
 
 type Axis = NonNullable<ModelPortfolioAnalysis['axes']>[number];
-type Row = import('./etfSectorLookThrough').SectorChartRow;
+type Row = import('./etfSectorLookThrough').SectorChartRow & { has_benchmark_holdings?: boolean };
+type StockEtfAllocations = {
+  sector: { allocations: Record<string, EtfSectorAllocationResponse>; errors: Record<string, string> };
+  region: { allocations: Record<string, EtfRegionAllocationResponse>; errors: Record<string, string> };
+  currency: { allocations: Record<string, EtfCurrencyAllocationResponse>; errors: Record<string, string> };
+};
 type ScorecardBlock = {
   bucket: string; weight_pct: number; portfolio_return_pct: number | null;
   benchmark_return_pct: number | null; benchmark_ticker: string | null;
@@ -732,7 +737,7 @@ function Chip({ label, value, valueClass, hint, prov }: {
 
 export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   portfolioAsOf, benchmarkCapsFrom, benchmarkCapsTo, benchmarkCapsUnstamped = 0, stale = false,
-  benchmarkSnapshotAsOf, benchmarkTotalTarget = 100, etfControl }: {
+  benchmarkSnapshotAsOf, benchmarkTotalTarget = 100, etfControl, breakdownUrl }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
@@ -752,6 +757,7 @@ export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   benchmarkCapsUnstamped?: number;
   benchmarkSnapshotAsOf?: string | null;
   benchmarkTotalTarget?: number;
+  breakdownUrl?: string;
   etfControl?: {
     enabled: boolean;
     count: number;
@@ -763,6 +769,21 @@ export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   const copy = useAnalyseCopy();
   const [selectedBucket, setSelectedSector] = useState<string | null>(null);
   const selectedSector = stale ? undefined : rows.find(row => row.bucket === selectedBucket);
+  const [breakdown, setBreakdown] = useState<{ url: string; row?: Row; error?: boolean } | null>(null);
+  const detailUrl = breakdownUrl && selectedSector ? `${breakdownUrl}&bucket=${encodeURIComponent(selectedSector.bucket)}` : null;
+  useEffect(() => {
+    if (!detailUrl) return;
+    const controller = new AbortController();
+    void apiFetch(detailUrl, { signal: controller.signal }).then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const row = await response.json() as Row;
+      if (!controller.signal.aborted) setBreakdown({ url: detailUrl, row });
+    }).catch(() => {
+      if (!controller.signal.aborted) setBreakdown({ url: detailUrl, error: true });
+    });
+    return () => controller.abort();
+  }, [detailUrl]);
+  const breakdownResult = detailUrl && breakdown?.url === detailUrl ? breakdown : null;
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
   const axisNote = axis === 'sector' ? copy.axes.sectorNote : axis === 'region' ? copy.axes.regionNote : copy.axes.currencyNote;
   const clickable = axis === 'sector' || axis === 'region' || axis === 'currency';
@@ -781,8 +802,9 @@ export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   // something": a bucket the book does not own but the benchmark does is an unowned region/sector,
   // which is a finding, not an empty row. See `composition.ts`.
   const sorted = [...rows].filter(row => visibleBuckets([row]).length > 0
-    || (row.bucket === 'Unclassified' && [...(row.holdings ?? []), ...(row.benchmark_holdings ?? [])]
-      .some(holding => (holding.weight_pct ?? 0) > 0)))
+    || (row.bucket === 'Unclassified' && (row.has_benchmark_holdings
+      || [...(row.holdings ?? []), ...(row.benchmark_holdings ?? [])]
+        .some(holding => (holding.weight_pct ?? 0) > 0))))
     .sort((a, b) => (b.portfolio_pct ?? 0) - (a.portfolio_pct ?? 0) || (b.benchmark_pct ?? 0) - (a.benchmark_pct ?? 0));
   /**
    * The column totals, so the reader can check them.
@@ -923,7 +945,7 @@ export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           const tilt = r.diff_pct ?? (p - b);
           return (
             <button key={r.bucket} type="button"
-              onClick={() => clickable && !stale && setSelectedSector(r.bucket)}
+              onClick={() => { if (clickable && !stale) setSelectedSector(r.bucket); }}
               aria-label={clickable ? `Show holdings in ${copy.bucket(r.bucket)}` : undefined}
               title={copy.allocation.chartRowTitle(copy.bucket(r.bucket), p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
               className={`flex w-full items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left ${clickable ? 'cursor-pointer hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500' : 'cursor-default'}`}>
@@ -955,15 +977,20 @@ export function Chart({ axis, rows, unpricedPct, excluded, benchmark,
               {/* Colour-coded to the series they belong to (portfolio blue / benchmark amber), so
                   the value ties to its bar without reading the legend. */}
               <span className="w-[3.5rem] shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{r.bucket === 'Unclassified' && p < .01 && r.holdings?.some(holding => (holding.weight_pct ?? 0) > 0) ? '<0.01%' : pct(p)}</span>
-              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{r.bucket === 'Unclassified' && b < .01 && r.benchmark_holdings?.some(holding => (holding.weight_pct ?? 0) > 0) ? '<0.01%' : pct(b)}</span>
+              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{r.bucket === 'Unclassified' && b < .01 && (r.has_benchmark_holdings || r.benchmark_holdings?.some(holding => (holding.weight_pct ?? 0) > 0)) ? '<0.01%' : pct(b)}</span>
             </button>
           );
         })}
       </div>
       </>)}
     </section>
-    {selectedSector && (
-      <SectorHoldingsDialog row={selectedSector} benchmark={benchmark} snapshotAsOf={benchmarkSnapshotAsOf}
+    {detailUrl && !breakdownResult?.row && <p role={breakdownResult?.error ? 'alert' : 'status'} className="px-2 text-xs text-fg-muted">
+      {breakdownResult?.error ? 'Could not load the breakdown.' : 'Loading holdings…'}
+    </p>}
+    {selectedSector && (!detailUrl || breakdownResult?.row) && (
+      <SectorHoldingsDialog row={breakdownResult?.row
+        ? { ...selectedSector, benchmark_holdings: breakdownResult.row.benchmark_holdings } : selectedSector}
+        benchmark={benchmark} snapshotAsOf={benchmarkSnapshotAsOf}
         portfolioAsOf={portfolioAsOf} benchmarkAsOf={benchmarkDate}
         onClose={() => setSelectedSector(null)} />
     )}
@@ -2092,7 +2119,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
   lookThrough: boolean;
-  onLookThroughChange: (value: boolean) => void;
+  onLookThroughChange?: (value: boolean) => void;
   /**  THE BETA COLUMN NAMES ITS BASE. A beta with no benchmark on it is not a weaker statement,
    *  it is an unreadable one — and the modal's picker changes it per request, so it cannot be
    *  hardcoded here. */
@@ -2322,12 +2349,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             the table itself: the Via column names every route in. */}
         <h4 className="text-xs font-medium text-fg-strong">{copy.holdings.title}</h4>
         <span className="flex items-center gap-2">
-          {/* Always present: this is a view preference, and hiding it from a book that happens not
-              to have a linked certificate makes the control appear to have vanished. */}
           {/*  STILL A CHECKBOX INSIDE THE CHIP, not a button that changes colour. It is a
               two-state toggle whose state has to be readable at rest, and the box is what says
               which state it is in; the chrome only makes it look like the controls beside it. */}
-          <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
+          {onLookThroughChange && <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
             title={copy.actions.lookThroughTitle}>
             <input type="checkbox" checked={lookThrough}
               onChange={(event) => onLookThroughChange(event.target.checked)}
@@ -2336,7 +2361,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             {lookThroughCertificates > 0 && (
               <span className="font-mono text-fg-faint">({lookThroughCertificates})</span>
             )}
-          </label>
+          </label>}
           <ColumnPicker groups={pickedGroups} toggle={toggle} />
         </span>
       </div>
@@ -3370,7 +3395,10 @@ function SleeveTile({ bucket, slices, asOf }: {
  * an accounting contribution and cannot reconcile to the allocation legend. */
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
-function SleeveBreakdown({ holdings, bucket, groupCash }: { holdings: BookHolding[]; bucket: string; groupCash: boolean }) {
+function SleeveBreakdown({ holdings, bucket, groupCash, asOf, onRefresh }: {
+  holdings: BookHolding[]; bucket: string; groupCash: boolean; asOf?: string | null;
+  onRefresh?: () => Promise<string | null>;
+}) {
   const instrumentReturnLabel = useHoldingReturnLabel();
   const copy = useAnalyseCopy();
   // Sortable table — click a header to toggle direction. Default: weight, largest first.
@@ -3447,7 +3475,7 @@ function SleeveBreakdown({ holdings, bucket, groupCash }: { holdings: BookHoldin
                 <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.holdings.weightNow}{caret('weight')}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{instrumentReturnLabel}{caret('return')}</th>
                 <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}
-                  <Provenance source="airs_volk" kind="formula"
+                  <Provenance source="airs_volk" kind="formula" asOf={asOf} onRefresh={onRefresh}
                     what={copy.lang === 'nl' ? 'Bijdrage aan het gehele portefeuillerendement, in procentpunten.' : 'Contribution to the whole portfolio return, in percentage points.'} />
                 </th>
               </tr>
@@ -3540,7 +3568,7 @@ const HEADER_CTL_BASE = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border bg
 const HEADER_CTL = `${HEADER_CTL_BASE} border-neutral-700 text-fg-soft `
   + 'hover:text-accent-300 hover:border-accent-500/50';
 export default function PortfolioAnalysisModal({
-  id, name, basket, leonteqPortfolio, reportAccount, onRefresh, refreshing = false, refreshTick = null,
+  id, name, basket, leonteqPortfolio, reportAccount, onRefresh, onRefreshContribution, refreshing = false, refreshTick = null,
   refreshSeq = 0, onClose,
 }: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
@@ -3559,6 +3587,7 @@ export default function PortfolioAnalysisModal({
    * a basket, which has no AIRS portfolio behind it to refresh.
    */
   onRefresh?: () => void;
+  onRefreshContribution?: () => Promise<string | null>;
   refreshing?: boolean;
   /** Legacy caller props; the header no longer renders a refresh/cancel control. */
   refreshTitle?: string;
@@ -3599,11 +3628,15 @@ export default function PortfolioAnalysisModal({
    */
   // Toppenberg is normally analysed through the companies inside its linked certificates. This
   // only seeds the modal; the visible checkbox remains the reader's choice afterwards.
-  const [lookThrough, setLookThrough] = useState(() => defaultLookThroughCertificates(name));
+  const canLookThrough = !leonteqPortfolio && defaultLookThroughCertificates(name, reportAccount);
+  const [lookThroughSelected, setLookThrough] = useState(canLookThrough);
+  const lookThrough = canLookThrough && lookThroughSelected;
   // Which allocation class the reader picked, to break down. Null = NOTHING selected — the whole
   // portfolio, where the modal shows the book's return vs the benchmark and prompts the reader to
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
+  const useStocksBundle = !leonteqPortfolio && !isBasket && id != null && assetFilter === EQUITY_BUCKET;
+  const stocksParams = new URLSearchParams({ benchmark, source, weight_by: source, look_through: String(lookThrough) });
   //  The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
   const [sectorFor, setSectorFor] = useState<BookHolding | null>(null);
@@ -3613,7 +3646,7 @@ export default function PortfolioAnalysisModal({
     allocation?: EtfSectorAllocationResponse;
   } | null>(null);
   const initialAnalysisKey = analysisRequestKey(reqKey, benchmark, source, '', lookThrough, refreshSeq);
-  const [data, setData] = useState<ModelPortfolioAnalysis | null>(() =>
+  const [data, setData] = useState<(ModelPortfolioAnalysis & { stock_etfs?: StockEtfAllocations }) | null>(() =>
     readPrefetchedAnalysis<ModelPortfolioAnalysis>(initialAnalysisKey) ?? null);
   // Paint prepared holdings first. Holdings requests optional history after mounting if the
   // reader has risk columns enabled; saved preferences must not block the opening screen.
@@ -3635,21 +3668,27 @@ export default function PortfolioAnalysisModal({
   const eligibleSectorEtfKey = eligibleSectorEtfs.map((holding) => holding.isin).join('|');
   const eligibleRegionEtfs = useMemo(() => eligibleSectorEtfs.filter(holding => !assetFilter || holding.bucket === assetFilter), [eligibleSectorEtfs, assetFilter]);
   const eligibleRegionEtfKey = eligibleRegionEtfs.map(holding => holding.isin).join('|');
-  const [etfRegionResult, setEtfRegionResult] = useState<{
+  const [fallbackRegionResult, setEtfRegionResult] = useState<{
     key: string; allocations: Record<string, EtfRegionAllocationResponse>; unavailable: number; errors: Record<string, string>;
   } | null>(null);
-  const [etfCurrencyResult, setEtfCurrencyResult] = useState<{
+  const [fallbackCurrencyResult, setEtfCurrencyResult] = useState<{
     key: string; allocations: Record<string, EtfCurrencyAllocationResponse>; unavailable: number; errors: Record<string, string>;
   } | null>(null);
   const eligibleCertificateSectorCount = useMemo(
     () => certificateSectorLookThroughCount(data?.book_holdings ?? []),
     [data?.book_holdings],
   );
-  const [etfSectorResult, setEtfSectorResult] = useState<{
+  const [fallbackSectorResult, setEtfSectorResult] = useState<{
     key: string;
     allocations: Record<string, EtfSectorAllocationResponse>;
     unavailable: number; errors: Record<string, string>;
   } | null>(null);
+  const etfSectorResult = useStocksBundle
+    ? data?.stock_etfs && { key: eligibleSectorEtfKey, ...data.stock_etfs.sector } : fallbackSectorResult;
+  const etfRegionResult = useStocksBundle
+    ? data?.stock_etfs && { key: eligibleRegionEtfKey, ...data.stock_etfs.region } : fallbackRegionResult;
+  const etfCurrencyResult = useStocksBundle
+    ? data?.stock_etfs && { key: eligibleRegionEtfKey, ...data.stock_etfs.currency } : fallbackCurrencyResult;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -3765,6 +3804,9 @@ export default function PortfolioAnalysisModal({
               { cache: 'no-store', noReadCache: true })
             : isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
+            : useStocksBundle
+            ? await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/stocks-bundle?${stocksParams}`
+              + `&overview_only=${chartsOnly}&include_holding_risk=${includeHoldingRisk}`)
             : preparedOverview
             ? await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/overview-bundle?look_through=${lookThrough}`)
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
@@ -3781,13 +3823,13 @@ export default function PortfolioAnalysisModal({
           const body = await r.json().catch(() => null);
           if (preparedOverview && r.status === 202) throw new Error('overview-not-prepared');
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
-          return body as ModelPortfolioAnalysis;
+          return body as ModelPortfolioAnalysis & { stock_etfs?: StockEtfAllocations };
         });
         // Keep the existing chart payload visible while this reload settles, but do not surface
         // routine selection/refresh work in the global request popup. The request is background
         // maintenance from the reader's perspective; a popup per superseded selection made normal
         // chart updates look like unrelated work and could stack during quick changes.
-        const b = await analysis;
+        const b = await analysis as ModelPortfolioAnalysis & { stock_etfs?: StockEtfAllocations };
         if (!isBasket && !b.details_pending) holdingDetails.current = { revision, value: b };
         if (cancelled) return;
         //  Where the wait went. `apiFetch` already logs the round-trip total, but this endpoint
@@ -3804,6 +3846,7 @@ export default function PortfolioAnalysisModal({
         setData((current) => chartsOnly && current && !isBasket ? {
           ...current,
           axes: b.axes,
+          stock_etfs: b.stock_etfs,
           timings_ms: b.timings_ms,
           weight_basis: b.weight_basis,
           weight_note: b.weight_note,
@@ -3846,7 +3889,7 @@ export default function PortfolioAnalysisModal({
   // Each endpoint has its own six-hour acquisition cache, and turning the checkbox off only changes
   // the visual — it does not discard the successfully loaded breakdowns or cause another request.
   useEffect(() => {
-    if (assetFilter !== EQUITY_BUCKET || !includeEtfsInSector || !eligibleSectorEtfKey
+    if (useStocksBundle || assetFilter !== EQUITY_BUCKET || !includeEtfsInSector || !eligibleSectorEtfKey
       || etfSectorResult?.key === eligibleSectorEtfKey) return;
     const controller = new AbortController();
     void (async () => {
@@ -3878,10 +3921,10 @@ export default function PortfolioAnalysisModal({
       setEtfSectorResult({ key: eligibleSectorEtfKey, allocations, unavailable, errors });
     })();
     return () => controller.abort();
-  }, [assetFilter, eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
+  }, [assetFilter, eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector, useStocksBundle]);
 
   useEffect(() => {
-    if (assetFilter !== EQUITY_BUCKET || !includeEtfsInRegion || !eligibleRegionEtfKey || etfRegionResult?.key === eligibleRegionEtfKey) return;
+    if (useStocksBundle || assetFilter !== EQUITY_BUCKET || !includeEtfsInRegion || !eligibleRegionEtfKey || etfRegionResult?.key === eligibleRegionEtfKey) return;
     const controller = new AbortController();
     void (async () => {
       const settled = await Promise.all(eligibleRegionEtfs.map(async holding => {
@@ -3904,10 +3947,10 @@ export default function PortfolioAnalysisModal({
       setEtfRegionResult({ key: eligibleRegionEtfKey, allocations, unavailable, errors });
     })();
     return () => controller.abort();
-  }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfRegionResult?.key]);
+  }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfRegionResult?.key, useStocksBundle]);
 
   useEffect(() => {
-    if (assetFilter !== EQUITY_BUCKET || !includeEtfsInRegion || !eligibleRegionEtfKey || etfCurrencyResult?.key === eligibleRegionEtfKey) return;
+    if (useStocksBundle || assetFilter !== EQUITY_BUCKET || !includeEtfsInRegion || !eligibleRegionEtfKey || etfCurrencyResult?.key === eligibleRegionEtfKey) return;
     const controller = new AbortController();
     void (async () => {
       const settled = await Promise.all(eligibleRegionEtfs.map(async holding => {
@@ -3930,7 +3973,7 @@ export default function PortfolioAnalysisModal({
       setEtfCurrencyResult({ key: eligibleRegionEtfKey, allocations, unavailable, errors });
     })();
     return () => controller.abort();
-  }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfCurrencyResult?.key]);
+  }, [assetFilter, includeEtfsInRegion, eligibleRegionEtfs, eligibleRegionEtfKey, etfCurrencyResult?.key, useStocksBundle]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -4166,7 +4209,7 @@ export default function PortfolioAnalysisModal({
                       <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] sm:col-span-3 @[44rem]/overview:row-start-2">
                         {/* Reserve the chart footprint alongside the scorecard. */}
                         <BookReturnChart portfolioId={id ?? 0} name={name} variant={data.variant} refreshSeq={refreshSeq}
-                          daily={Boolean(leonteqPortfolio)}
+                          weekly={Boolean(leonteqPortfolio)}
                           series={leonteqPortfolio || source === 'book' ? ((data.return_series as BookValueSeries | null | undefined) ?? null) : undefined}
                           benchmark={benchmark}
                           benchmarkYtdPct={data.returns?.benchmark_source === 'weighted_etf' ? data.returns.benchmark_ytd_pct : undefined}
@@ -4235,7 +4278,7 @@ export default function PortfolioAnalysisModal({
                   return job.summary ?? 'Could not update this stock price. Please try again.';
                 }}
                 onRiskColumnsChange={setIncludeHoldingRisk}
-                lookThrough={lookThrough} onLookThroughChange={setLookThrough}
+                lookThrough={lookThrough} onLookThroughChange={canLookThrough ? setLookThrough : undefined}
                 onSummary={setNotesFor}
                 onSectorAllocation={(holding) => {
                   const internal = syntheticSectorAllocation(holding);
@@ -4270,6 +4313,7 @@ export default function PortfolioAnalysisModal({
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
               ) : <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve}
+                asOf={data.realised?.book_as_of ?? data.holdings_as_of} onRefresh={onRefreshContribution}
                 groupCash={defaultLookThroughCertificates(name, reportAccount ?? data.book_portefeuille)} />
             ) : (
               /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
@@ -4331,6 +4375,7 @@ export default function PortfolioAnalysisModal({
                       : fallbackRows;
                     return (
                     <Chart key={a.axis} axis={a.axis} rows={rows}
+                      breakdownUrl={useStocksBundle ? `${API_URL}/api/airs/model-portfolios/${id}/stocks-breakdown?${stocksParams}&axis=${encodeURIComponent(a.axis)}` : undefined}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
                       benchmark={data.benchmark ?? benchmark}
                       portfolioAsOf={data.holdings_as_of ?? data.as_of}

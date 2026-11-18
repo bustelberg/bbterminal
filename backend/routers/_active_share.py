@@ -260,10 +260,10 @@ def _risk_profile_holding(holding: dict) -> bool:
 def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
                                 benchmark_start: str | None,
                                 policy_weights: dict[str, float]) -> dict:
-    """Whole Stocks/Bonds book versus its fixed ACWI/AGGH policy benchmark.
+    """Whole Stocks/Bonds book versus its fixed ACWI/SYBA policy benchmark.
 
     Bonds remain in this version: allocation to the bond sleeve is one of the policy decisions
-    being measured. AGGH.AS is a single transparent benchmark position because we do not have
+    being measured. SYBA.DE is a single transparent benchmark position because we do not have
     constituent-level membership data for the aggregate-bond ETF.
     """
     try:
@@ -340,12 +340,12 @@ def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
         for key, row in (direct_built or index)["bench"].items()
     }
     if bond_target > 0:
-        bench["benchmark:aggh.as"] = {
-            "key": "benchmark:aggh.as", "name": "AGGH.AS", "weight_pct": bond_target,
+        bench["benchmark:syba.de"] = {
+            "key": "benchmark:syba.de", "name": "SYBA.DE", "weight_pct": bond_target,
         }
     label = " + ".join(
         f"{weight:g}% {name}"
-        for name, weight in (("ACWI", stock_target), ("AGGH.AS", bond_target)) if weight > 0
+        for name, weight in (("ACWI", stock_target), ("SYBA.DE", bond_target)) if weight > 0
     )
     stocks_w = sum(float(h["weight_pct"]) for h in selected if h.get("bucket") != "Bonds")
     for key, row in _fold(entries).items():
@@ -356,7 +356,7 @@ def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
         port[key]["bucket"] = buckets.get(key, port[key].get("bucket", "Stocks"))
         port[key]["yahoo_symbol"] = symbols.get(key)
     for key, row in bench.items():
-        row["bucket"] = "Bonds" if key == "benchmark:aggh.as" else "Stocks"
+        row["bucket"] = "Bonds" if key == "benchmark:syba.de" else "Stocks"
     return {"port": port, "bench": bench, "stocks_w": stocks_w, "total_all": total,
             "unresolved": unresolved, "coverage": index["coverage"], "label": label,
             "whole_policy": True}
