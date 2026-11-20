@@ -1,6 +1,18 @@
 {
   "overrides": [
     {
+      "isin": "US69932A2042",
+      "symbol": "SKYD",
+      "name": "Skydance Corp Class B",
+      "note": "PSKY changed to SKYD on transfer to NYSE on 2026-10-06. Same Class B security, not a merger-price proxy. Source: https://ir.paramount.com/static-files/6af929e3-2b7a-43d0-a097-faf343b093df ; ISIN confirmed by https://www.fidelity.co.uk/factsheet-data/factsheet/US69932A2042USD-/key-statistics . Existing override application probes and stores the new listing before changing execution identity."
+    },
+    {
+      "isin": "US29476L1070",
+      "symbol": "VMRK",
+      "name": "Vivmark Residential",
+      "note": "Equity Residential changed its name and EQR ticker to VMRK on 2026-08-18; ISIN US29476L1070 was retained. This is the continuing security, not AvalonBay's exchanged shares. Sources: https://www.sec.gov/Archives/edgar/data/906107/000114036126033377/ef20080318_8k.htm and https://spbexchange.ru/about/news/ed151490-6fdd-46b7-b648-68f1db96d09d/ ."
+    },
+    {
       "isin": "IE00B6R52259",
       "symbol": "ISAC.L",
       "name": "iShares MSCI ACWI UCITS ETF USD Acc",

@@ -12,6 +12,12 @@ from scheduler_runtime import admission
 from scheduler_jobs import market as market_jobs
 
 
+@pytest.fixture(autouse=True)
+def production_worker_policy(monkeypatch):
+    monkeypatch.setenv('APP_ENV', 'production')
+    monkeypatch.delenv('DISABLE_SCHEDULER', raising=False)
+
+
 def test_boot_scan_runs_recorded_watchdog_inside_its_existing_maintenance_slot(monkeypatch):
     slots = threading.BoundedSemaphore(1)
     done = threading.Event()

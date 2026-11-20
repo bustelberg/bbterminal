@@ -2861,6 +2861,39 @@
             ],
             "title": "Residual Eur"
           },
+          "returns_coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returns Coverage Pct"
+          },
+          "returns_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returns Fetched At"
+          },
+          "returns_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returns Note"
+          },
           "saved_price_check": {
             "anyOf": [
               {
@@ -8898,8 +8931,258 @@
         "title": "ExternalAssetSearchRow",
         "type": "object"
       },
+      "FactsheetAllocationRow": {
+        "properties": {
+          "cagr_pct": {
+            "title": "Cagr Pct",
+            "type": "number"
+          },
+          "cvar_95_pct": {
+            "title": "Cvar 95 Pct",
+            "type": "number"
+          },
+          "drawdowns_pct": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Drawdowns Pct",
+            "type": "array"
+          },
+          "lower_quartile_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lower Quartile Pct"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "volatility_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility Pct"
+          },
+          "weights": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Weights",
+            "type": "array"
+          },
+          "worst_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Pct"
+          }
+        },
+        "required": [
+          "weights",
+          "cagr_pct",
+          "sharpe",
+          "cvar_95_pct",
+          "drawdowns_pct",
+          "lower_quartile_pct",
+          "worst_pct"
+        ],
+        "title": "FactsheetAllocationRow",
+        "type": "object"
+      },
+      "FactsheetAllocations": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FactsheetAllocationRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "windows",
+          "rows"
+        ],
+        "title": "FactsheetAllocations",
+        "type": "object"
+      },
+      "FactsheetCorrelations": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "matrix": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Matrix",
+            "type": "array"
+          },
+          "observations": {
+            "title": "Observations",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "tickers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tickers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tickers",
+          "start",
+          "end",
+          "observations",
+          "matrix"
+        ],
+        "title": "FactsheetCorrelations",
+        "type": "object"
+      },
+      "FactsheetDownside": {
+        "properties": {
+          "acwi_mean_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acwi Mean Pct"
+          },
+          "correlation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "hdg_mean_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hdg Mean Pct"
+          },
+          "hdg_positive": {
+            "title": "Hdg Positive",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "observations": {
+            "title": "Observations",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "start",
+          "end",
+          "observations",
+          "correlation",
+          "acwi_mean_pct",
+          "hdg_mean_pct",
+          "hdg_positive"
+        ],
+        "title": "FactsheetDownside",
+        "type": "object"
+      },
       "FactsheetResponse": {
         "properties": {
+          "allocations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactsheetAllocations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "calculation_date": {
             "anyOf": [
               {
@@ -8911,9 +9194,33 @@
             ],
             "title": "Calculation Date"
           },
+          "correlations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactsheetCorrelations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "currency": {
             "title": "Currency",
             "type": "string"
+          },
+          "downside": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FactsheetDownside"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downside"
           },
           "method": {
             "anyOf": [
@@ -9058,6 +9365,17 @@
           "cagr_pct": {
             "title": "Cagr Pct",
             "type": "number"
+          },
+          "cvar_95_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 Pct"
           },
           "end": {
             "title": "End",
@@ -11017,6 +11335,48 @@
           "end_price"
         ],
         "title": "IndexMember",
+        "type": "object"
+      },
+      "Indicator": {
+        "properties": {
+          "frequency": {
+            "title": "Frequency",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "frequency",
+          "sources"
+        ],
+        "title": "Indicator",
         "type": "object"
       },
       "IndicatorRequest": {
@@ -13520,6 +13880,41 @@
         "title": "OptimizeResponse",
         "type": "object"
       },
+      "OverviewReading": {
+        "properties": {
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Point"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Trend",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "latest",
+          "trend"
+        ],
+        "title": "OverviewReading",
+        "type": "object"
+      },
       "PercentageEditRequest": {
         "properties": {
           "datum": {
@@ -13762,6 +14157,25 @@
           "years"
         ],
         "title": "PerformanceWindow",
+        "type": "object"
+      },
+      "Point": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "Point",
         "type": "object"
       },
       "PortfolioAllocationSlice": {
@@ -14240,6 +14654,17 @@
             "default": 0.0,
             "title": "Diff Pct",
             "type": "number"
+          },
+          "held_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Return Pct"
           },
           "holdings": {
             "default": [],
@@ -18419,6 +18844,34 @@
           "weight_pct"
         ],
         "title": "SleeveEtf",
+        "type": "object"
+      },
+      "Snapshot": {
+        "properties": {
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "title": "Snapshot",
         "type": "object"
       },
       "SoldCertificatePosition": {
@@ -23446,6 +23899,113 @@
         ]
       }
     },
+    "/api/airs/dashboard/returns/refresh/job": {
+      "post": {
+        "operationId": "dashboard_returns_refresh_job_api_airs_dashboard_returns_refresh_job_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "enum": [
+                "bustelberg",
+                "toppenberg",
+                "topselecties",
+                "imagine_fund",
+                "test_topselecties"
+              ],
+              "title": "Collection",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dashboard Returns Refresh Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/dashboard/toppenberg/{account}/analysis": {
+      "get": {
+        "operationId": "toppenberg_analysis_api_airs_dashboard_toppenberg__account__analysis_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account",
+            "required": true,
+            "schema": {
+              "title": "Account",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_holding_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Holding Risk",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toppenberg Analysis",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/etf/{isin}/currency-allocation": {
       "get": {
         "operationId": "etf_currency_allocation_api_airs_etf__isin__currency_allocation_get",
@@ -24902,6 +25462,209 @@
         ]
       }
     },
+    "/api/airs/model-portfolios/{portfolio_id}/stocks-breakdown": {
+      "get": {
+        "operationId": "airs_model_stocks_breakdown_api_airs_model_portfolios__portfolio_id__stocks_breakdown_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "axis",
+            "required": true,
+            "schema": {
+              "enum": [
+                "sector",
+                "region",
+                "currency"
+              ],
+              "title": "Axis",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": true,
+            "schema": {
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Look Through",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "book",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "weight_by",
+            "required": false,
+            "schema": {
+              "default": "book",
+              "title": "Weight By",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Stocks Breakdown",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/stocks-bundle": {
+      "get": {
+        "operationId": "airs_model_stocks_bundle_api_airs_model_portfolios__portfolio_id__stocks_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Look Through",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "book",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "weight_by",
+            "required": false,
+            "schema": {
+              "default": "book",
+              "title": "Weight By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overview_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Overview Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_holding_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Holding Risk",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Stocks Bundle",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/model-portfolios/{portfolio_id}/value-series": {
       "get": {
         "description": "The paired book's cumulative return through the year, and its value on every date we hold.\n\n THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED \u2014 it is flow-aware,\nand that is what lets a curve be drawn at all: AzTopSelectie is funded EUR 1,000,000 on\n2026-06-30 and its return line stays at 0.00% straight through it, where a value line has a\nvertical. It is the same column the Scorecard's YTD tile reads.\n\n THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro\non 21 of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts\n2026-06-23 \u2014 when we began keeping snapshots. See `routers/_airs_value_series`.\n\n ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its\nwall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The\nchart fetches this itself, exactly as the Risk panels do.",
@@ -25975,6 +26738,26 @@
         ]
       }
     },
+    "/api/airs/portfolios/management-bundle": {
+      "get": {
+        "description": "Saved overview rows for all management collections.",
+        "operationId": "management_portfolios_bundle_api_airs_portfolios_management_bundle_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Management Portfolios Bundle",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/portfolios/overview": {
       "get": {
         "description": "Every AIRS book in one table: named by the Fixed portfolio it runs, valued by AIRS.\n\nThe Fixed side has the ISINs and your nickname and AIRS values none of it; the Dynamic side\nhas the money and no ISIN. Overlap between the two: zero. This is the pair, composed.",
@@ -26272,6 +27055,28 @@
           }
         },
         "summary": "Valuation Portfolios",
+        "tags": [
+          "airs",
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/valuation/portfolios/all/dashboard": {
+      "get": {
+        "operationId": "valuation_all_dashboard_api_airs_valuation_portfolios_all_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuationBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Valuation All Dashboard",
         "tags": [
           "airs",
           "airs"
@@ -36093,6 +36898,16 @@
               "title": "Name",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "refresh_benchmark",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh Benchmark",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -37096,6 +37911,140 @@
         "summary": "Get Longequity Snapshots",
         "tags": [
           "longequity"
+        ]
+      }
+    },
+    "/api/macro-dashboard/indicators": {
+      "get": {
+        "operationId": "indicators_api_macro_dashboard_indicators_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Indicator"
+                  },
+                  "title": "Response Indicators Api Macro Dashboard Indicators Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Indicators",
+        "tags": [
+          "macro-dashboard"
+        ]
+      }
+    },
+    "/api/macro-dashboard/indicators/overview": {
+      "get": {
+        "operationId": "indicator_overview_api_macro_dashboard_indicators_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OverviewReading"
+                  },
+                  "title": "Response Indicator Overview Api Macro Dashboard Indicators Overview Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Indicator Overview",
+        "tags": [
+          "macro-dashboard"
+        ]
+      }
+    },
+    "/api/macro-dashboard/indicators/{key}": {
+      "get": {
+        "operationId": "open_indicator_api_macro_dashboard_indicators__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Indicator",
+        "tags": [
+          "macro-dashboard"
+        ]
+      }
+    },
+    "/api/macro-dashboard/indicators/{key}/fetch": {
+      "post": {
+        "operationId": "fetch_indicator_api_macro_dashboard_indicators__key__fetch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fetch Indicator",
+        "tags": [
+          "macro-dashboard"
         ]
       }
     },

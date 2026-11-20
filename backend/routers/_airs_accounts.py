@@ -74,7 +74,7 @@ _SNAP_COLS = ("as_of_date,holding_name,quantity,currency,weight,start_value_eur,
 # AIRS reports a portfolio's own return; we never recompute it. These are the columns it uses.
 _PERF_COLS = ("portefeuille,periode,beginvermogen,stortingen,onttrekkingen,koersresultaat,"
               "opbrengsten,kosten,mutatie_opgelopen_rente,"
-              "beleggingsresultaat,eindvermogen,rendement,cumulatief_rendement")
+              "beleggingsresultaat,eindvermogen,rendement,cumulatief_rendement,fetched_at")
 
 
 # The money columns are PER PERIOD and therefore summed across the year; everything else is
@@ -187,6 +187,7 @@ def _year_perf() -> dict[str, dict]:
         agg.update({
             "portefeuille": name,
             "periode": last["periode"],
+            "returns_fetched_at": last.get("fetched_at"),
             "months": len(months),
             "ytd_from": ytd_from,
             "beginvermogen": first.get("beginvermogen"),   # the YEAR's opening
@@ -571,6 +572,7 @@ def list_accounts() -> list[dict]:
             # which mis-stated what it is: -8.37% is not a wrong answer for the year, it is the
             # right answer for July. Named for the window it actually measures.
             "latest_month_pct": r.get("rendement_latest_month"),
+            "returns_fetched_at": r.get("returns_fetched_at"),
             "months": r.get("months"),
             # AIRS's own identity, asserted in `_year_perf` and carried so a short year shows
             # up as a discrepancy rather than as a confident total.

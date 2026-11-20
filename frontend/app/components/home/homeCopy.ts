@@ -109,8 +109,8 @@ const EN: HomeCopy = {
       label: 'Request GuruFocus',
       description: 'Trigger GuruFocus indicator fetches for selected companies and exchanges.',
     },
-    '/benchmarks': {
-      label: 'Benchmarks',
+    '/old-benchmarks': {
+      label: 'Old Benchmarks',
       description: 'Manage index benchmarks (SPY, ACWI, …) — add tickers, fetch prices, and '
         + 'inspect coverage.',
     },
@@ -197,8 +197,8 @@ const NL: HomeCopy = {
       label: 'GuruFocus opvragen',
       description: 'Start GuruFocus-indicatorfetches voor geselecteerde bedrijven en beurzen.',
     },
-    '/benchmarks': {
-      label: 'Benchmarks',
+    '/old-benchmarks': {
+      label: 'Oude benchmarks',
       description: 'Beheer indexbenchmarks (SPY, ACWI, …) — voeg tickers toe, haal koersen op en '
         + 'bekijk de dekking.',
     },

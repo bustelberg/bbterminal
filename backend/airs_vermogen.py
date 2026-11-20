@@ -851,6 +851,13 @@ def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) 
     return line
 
 
+def refresh_holding_snapshot(name: str, van: str, through: str) -> tuple[str, int]:
+    from portfolio import parse_airs_excel
+
+    as_of, workbook = _vermogen_most_recent(name, van, through=through)
+    return as_of, _save_holdings(name, as_of, parse_airs_excel(workbook))
+
+
 def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     """Fetch + store ONE account's four AIRS reports. THE only place that work is written.
 
@@ -869,7 +876,6 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     even when its valuation is unavailable.
     """
     from airs_scanner import download_portfolio_sync  # noqa: PLC0415
-    from portfolio import parse_airs_excel  # noqa: PLC0415
     from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
 
     ok: list[str] = []
@@ -944,8 +950,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     def _volk() -> None:
         nonlocal holdings, as_of
         # Most recent VALUED date, not today (which AirSPMS has not valued yet).
-        as_of, vmo = _vermogen_most_recent(name, van, through=att_tot)
-        holdings = _save_holdings(name, as_of, parse_airs_excel(vmo))
+        as_of, holdings = refresh_holding_snapshot(name, van, att_tot)
 
     def _mut() -> None:
         nonlocal mutaties

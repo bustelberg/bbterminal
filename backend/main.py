@@ -19,6 +19,8 @@ the router files are imported by `main`, so the dependency only goes one
 way.
 """
 
+from runtime_policy import production_automation_enabled
+
 import logging
 import os
 import threading
@@ -58,6 +60,7 @@ from routers import (
 from routers._auth_middleware import enforce_api_auth as _enforce_api_auth
 from routers._error_middleware import cors_safe_errors as _cors_safe_errors
 from routers.momentum._helpers import register_startup_hooks as _register_momentum_hooks
+from routers.macro_dashboard import router as _macro_dashboard_router
 from scheduler import register_scheduler as _register_scheduler
 
 # Railway may override Docker's uvicorn command, so `--log-level info` in the
@@ -169,6 +172,7 @@ for _r in (
     _diversifier_router.router,
     _fx_router.router,
     _indicators_router.router,
+    _macro_dashboard_router,
     _airs_router.router,
     _companies_router.router,
     _earnings_router.router,
@@ -210,6 +214,8 @@ _register_momentum_hooks(app)
 # UI would poll them indefinitely.
 @app.on_event("startup")
 def _reset_stale_backfills() -> None:
+    if not production_automation_enabled():
+        return
     _scheduled_strategies_router.reset_stale_backfills()
 
 
@@ -222,6 +228,8 @@ def _apply_reviewed_yahoo_symbol_overrides() -> None:
     step still probes stored Yahoo history and refuses an empty/delisted symbol;
     startup must remain available even if that validation cannot run.
     """
+    if not production_automation_enabled():
+        return
     try:
         from asset_pipeline.symbol_override import apply_symbol_overrides  # noqa: PLC0415
         from routers.leonteq import enqueue_frozen_yahoo_mappings  # noqa: PLC0415
@@ -253,6 +261,8 @@ def _apply_reviewed_yahoo_symbol_overrides() -> None:
 # never start the thread. `BLEND_PREWARM=` in the env disables it. See `routers/_blend_prewarm.py`.
 @app.on_event("startup")
 def _arm_blend_prewarm() -> None:
+    if not production_automation_enabled():
+        return
     from routers import _blend_prewarm  # noqa: PLC0415
     _blend_prewarm.arm()
 
@@ -260,6 +270,8 @@ def _arm_blend_prewarm() -> None:
 @app.on_event("startup")
 def _arm_sector_timeline_prewarm() -> None:
     """Warm /momentum off the request path after a deploy or worker restart."""
+    if not production_automation_enabled():
+        return
     if os.environ.get("SECTOR_TIMELINE_PREWARM", "1").strip().lower() in {"0", "false", "off"}:
         return
 

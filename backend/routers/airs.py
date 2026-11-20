@@ -110,6 +110,7 @@ def _save_performance_to_db(portfolio_name: str, rows: list[dict], *,
     """Upsert performance rows into the airs_performance table."""
     if not rows:
         return
+    fetched_at = datetime.now(UTC).isoformat()
     # A prior request through an unvalued future date can leave a later, synthetic AIRS row in
     # this month's cache. Remove it when a completed report replaces the live tail; otherwise
     # `_year_perf` would correctly select the latest stored row and still show that bad value.
@@ -120,6 +121,7 @@ def _save_performance_to_db(portfolio_name: str, rows: list[dict], *,
         supabase.table("airs_performance").upsert({
             "portefeuille": portfolio_name,
             "periode": r["periode"],
+            "fetched_at": fetched_at,
             "beginvermogen": r["beginvermogen"],
             # The flows. Without these the two returns we store disagree with no stated cause.
             "stortingen": r.get("stortingen"),
@@ -848,6 +850,7 @@ class CompositionHolding(BaseModel):
 
 
 class PortfolioAnalysisRow(BaseModel):
+    held_return_pct: float | None = None
     bucket: str
     portfolio_pct: float = 0.0
     benchmark_pct: float = 0.0
@@ -4155,6 +4158,15 @@ async def force_account_price_checks_job(body: ForcePriceChecksRequest):
     return {'job_id': job.id, 'label': 'Force price checks', 'already_running': reused}
 
 
+@router.post('/api/airs/dashboard/returns/refresh/job')
+async def dashboard_returns_refresh_job(collection: Literal['bustelberg', 'toppenberg', 'topselecties', 'imagine_fund', 'test_topselecties']):
+    import jobs
+    from services.dashboard_returns import refresh
+    label = 'Refresh MTD and YTD'
+    job, reused = jobs.start(f'dashboard.returns.{collection}', label, lambda ctx: refresh(ctx, collection))
+    return {'job_id': job.id, 'label': label, 'reused': reused}
+
+
 @router.post("/api/airs/vermogen/refresh/job")
 async def airs_vermogen_refresh_job(force: bool = False):
     """The fleet re-scan as a CANCELLABLE JOB — the "Refresh all" button.
@@ -4649,6 +4661,9 @@ class AirsAccountLinkRequest(BaseModel):
 
 
 class AirsPortfolioOverview(BaseModel):
+    returns_note: str | None = None
+    returns_coverage_pct: float | None = None
+    returns_fetched_at: str | None = None
     saved_price_check: dict | None = None
     """A portfolio: your name for it, AIRS's numbers for it.
 
@@ -4707,12 +4722,26 @@ class AirsPortfolioOverview(BaseModel):
 
 
 @router.get("/api/airs/portfolios/management-bundle")
-async def management_portfolios_bundle():
+async def management_portfolios_bundle(response: Response):
     """Saved overview rows for all management collections."""
     from leonteq.management import dashboard_overview
+    from time import perf_counter
 
-    sources = await asyncio.gather(airs_portfolios_overview(), asyncio.to_thread(dashboard_overview),
+    timings = {}
+    async def timed(name, load):
+        start = perf_counter()
+        try:
+            return await load()
+        finally:
+            timings[name] = (perf_counter() - start) * 1000
+
+    sources = await asyncio.gather(timed('airs', airs_portfolios_overview),
+                                   timed('leonteq', lambda: asyncio.to_thread(dashboard_overview)),
                                    return_exceptions=True)
+    response.headers['Server-Timing'] = ', '.join(f'{key};dur={value:.1f}' for key, value in timings.items())
+    if max(timings.values(), default=0) > 1000:
+        logging.getLogger(__name__).warning('Slow management bundle sources (ms): %s',
+                                           {key: round(value) for key, value in timings.items()})
     bundle = {}
     for key, rows in zip(('airs', 'leonteq'), sources):
         if isinstance(rows, asyncio.CancelledError):
@@ -4741,7 +4770,16 @@ async def airs_portfolios_overview():
     # measured locally the endpoint goes 1,109ms -> 277ms. A request is exactly the scope over
     # which "the database did not change under us" is safe; see `common/read_cache.py`.
     with read_cache("overview"):
-        return await list_overview_async()
+        from services.toppenberg import overlay_overview
+        return await asyncio.to_thread(overlay_overview, await list_overview_async())
+
+
+@router.get('/api/airs/dashboard/toppenberg/{account}/analysis')
+async def toppenberg_analysis(account: str, benchmark: str = 'ACWI', include_holding_risk: bool = False):
+    from common.read_cache import read_cache
+    from services.toppenberg import analysis
+    with read_cache('toppenberg-analysis'):
+        return await asyncio.to_thread(analysis, account, benchmark, include_holding_risk)
 
 
 class AirsHoldingIsin(BaseModel):

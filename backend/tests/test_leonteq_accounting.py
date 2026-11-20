@@ -167,12 +167,18 @@ def test_missing_opening_snapshot_is_recorded_without_substituting_later_date(mo
             return {'details': {'issueDate': '2025-01-01', 'currency': 'EUR'}, 'history': {
                 'series': [['2025-12-31', 100], ['2026-01-02', 101]],
                 'performances': [{'nameOrIsin': name, 'performanceYTD': {'value': 1}}]}}
-        return {'accounting_valuation': {'rows': [], 'totals': {}, 'closingPriceDate': options['valuation_date']}}
+        stamp = options['valuation_date']
+        if stamp == '2025-12-31':
+            return {'accounting_valuation': {'rows': [], 'totals': {}, 'closingPriceDate': stamp}}
+        return {'accounting_valuation': {'closingPriceDate': stamp,
+            'rows': [{'name': 'Cash EUR', 'instrumentCategory': 'Cash', 'currency': 'EUR', 'amcCurrency': 'EUR',
+                      'totalUnits': {'value': 101}, 'totalValueAmcCcy': {'value': 101}}],
+            'totals': {'totalValueAmcCcy': {'value': 101}}}}
     monkeypatch.setattr(portal_api, 'read', read)
     result = a._collect(None, {}, 'Fund', '2026-01-02', lambda *_: None)
     assert result['success'] is False
     assert '2025-12-31' in result['reason']
-    assert list(result['valuations']) == ['2025-12-31']
+    assert list(result['valuations']) == ['2026-01-02']
     assert not result['result']['available']
 
 

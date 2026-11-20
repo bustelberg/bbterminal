@@ -12,7 +12,7 @@ import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import { analysisRequestKey, prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { defaultLookThroughCertificates } from './portfolios/portfolioDefaults';
-import { cancelJob, isAirsBusy, startJob } from '../../lib/stores/jobs';
+import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
 import { PORTFOLIO_SECTORS } from './portfolios/etfSectorLookThrough';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
@@ -30,7 +30,7 @@ import type {
   AirsPortfolioOverview,
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
-import { canAnalyseAccount as canAnalyse, MIN_REAL_HOLDINGS } from './management/portfolioAccounts';
+import { canAnalyseAccount as canAnalyse } from './management/portfolioAccounts';
 import { LEONTEQ_DASHBOARD, leonteqBasket, type LeonteqDetail } from './management/leonteqDashboard';
 
 // These are substantial, self-contained workspaces that only exist after a row action. Keeping
@@ -89,13 +89,6 @@ const eur = (v: number | null | undefined) =>
 const tone = (v: number | null | undefined) =>
   v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400';
 
-/** The four AIRS reports, by the code the scan records, in AIRS's own words — a badge saying
- *  "volk" would send a reader to the wrong screen. Mirrors `airs_vermogen.REPORTS`. */
-/** One CAUSE of failure, with how many accounts hit it — see the backend's `summarise_errors`. */
-type FailureGroup = {
-  report: string; error_type: string; message: string; count: number; accounts: string[];
-};
-
 /**
  *  The detail goes to the console, not onto the page. The panel gets ONE short line saying what
  * happened; everything needed to diagnose it — the HTTP status, the backend's own error list, the
@@ -109,18 +102,6 @@ type FailureGroup = {
  */
 const logDetail = (what: string, ...detail: unknown[]) =>
   console.warn(`[AIRS portfolios] ${what}`, ...detail);
-
-/** One step of a running scan, as `airs_vermogen._emit` stamps it. `seq` is append-only. */
-type ScanStep = {
-  seq: number; kind: string; message?: string;
-  names?: string[]; todo?: string[]; current?: string[];
-  account?: string; report?: string; status?: string; detail?: string;
-  got?: string[]; failed?: string[]; complete?: boolean; count?: number;
-};
-
-/**  / — /  per report outcome. `no_data` is AIRS ANSWERING (this book has no such report), so it
- *  must not wear the failure mark: 14 of 44 books have no fixed model and never will. */
-const STEP_MARK: Record<string, string> = { ok: '', no_data: '—', failed: '' };
 
 // The overview is a read-only snapshot and takes a noticeable round trip even after the backend
 // cache has done its work. Keep a very short per-tab copy so returning to this page can paint the
@@ -165,36 +146,6 @@ function invalidateOverviewCache() {
 // Preserve the server's loading markup during hydration, then install a cached table before the
 // browser's first client-side paint. A plain useEffect would leave a visible loading flash.
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
-
-/**
- * Print every scan step the console has not seen yet; returns the new high-water mark.
- *
- *  The roster is printed in full, not counted. "44 found" is a number nobody can check; the 44
- * NAMES are what you compare against AIRS's own "44 Items in selectie" to confirm the scan is
- * looking at the Interne/actief population and not some other one.
- */
-function logSteps(log: ScanStep[], from: number): number {
-  let high = from;
-  for (const s of log) {
-    if (s.seq < from) continue;
-    high = Math.max(high, s.seq + 1);
-    if (s.kind === 'discovered') {
-      console.warn(`[AIRS scan] ${s.message}`);
-      // A table, so the names are readable and sortable rather than a wrapped comma list.
-      console.table((s.names ?? []).map((n, i) => ({ '#': i + 1, portfolio: n })));
-    } else if (s.kind === 'plan') {
-      console.warn(`[AIRS scan] ${s.message}`);
-      if (s.current?.length) console.warn('[AIRS scan]   already current (skipped):', s.current);
-      if (s.todo?.length) console.warn('[AIRS scan]   to scan:', s.todo);
-    } else if (s.kind === 'report') {
-      console.warn(`[AIRS scan]     ${STEP_MARK[s.status ?? ''] ?? '?'} ${s.report}`
-        + (s.detail ? ` — ${s.detail}` : ''));
-    } else {
-      console.warn(`[AIRS scan] ${s.message ?? s.kind}`);
-    }
-  }
-  return high;
-}
 
 //  Keep in step with `airs_vermogen.REPORTS` — a code with no label here renders as a bare
 // mnemonic in the "missing reports" gap list, which reads as a bug rather than as a named report.
@@ -241,7 +192,8 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
   readBundledRows?: (leonteq: boolean) => OverviewRow[] | null;
 }) {
   const leonteq = collection === 'topselecties';
-  const canOpen = (row: AirsPortfolioOverview) => leonteq || canAnalyse(row);
+  const toppenberg = collection === 'toppenberg';
+  const canOpen = (row: AirsPortfolioOverview) => leonteq || toppenberg || canAnalyse(row);
   const currentMonth = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit' }).format(new Date());
   const monthToDate = (row: AirsPortfolioOverview) => row.periode?.slice(0, 7) === currentMonth ? row.latest_month_pct ?? null : null;
   //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
@@ -290,7 +242,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
   /** `pf` is the AIRS portefeuille code — what `refreshOne` is keyed on, carried so the modal's
    *  Refresh fires the identical scan the row's does. */
   const [analyse, setAnalyse] = useState<
-    { id?: number; name: string; basket?: Basket; pf?: string; leonteqPortfolio?: string } | null>(null);
+    { id?: number; name: string; basket?: Basket; pf?: string; leonteqPortfolio?: string; toppenbergAccount?: string } | null>(null);
   const [fundamental, setFundamental] = useState<
     { id?: number; name: string; basket?: Basket; bookPortfolio?: string } | null>(null);
   const [earnings, setEarnings] = useState<
@@ -358,13 +310,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
   };
   /** Bumped when a row refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
   const [refreshSeq, setRefreshSeq] = useState(0);
-  const [scanningModels, setScanningModels] = useState(false);
-  /** Phase two's job id — the same shape as `fleetJob`, so the one button can offer Cancel for
-   *  whichever half of "Refresh all" is currently running. */
-  const [modelsJob, setModelsJob] = useState<string | null>(null);
-  /** Whichever half of "Refresh all" is in flight. They run in sequence, never together, so one
-   *  id is the whole truth — and the  has to mean the same thing in both. */
-  const allJob = fleetJob ?? modelsJob;
+  const allJob = fleetJob;
   const [opening, setOpening] = useState<string | null>(null);
 
   /**
@@ -424,6 +370,10 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
    */
   const openModal = async (r: AirsPortfolioOverview,
     destination: 'analyse' | 'fundamental' | 'earnings' = 'analyse') => {
+    if (collection === 'toppenberg' && destination === 'analyse') {
+      setAnalyse({ name: r.name, leonteqPortfolio: r.name, toppenbergAccount: r.dynamic_portefeuille });
+      return;
+    }
     if (leonteq) {
       if (destination === 'analyse') {
         setAnalyse({ name: r.name, leonteqPortfolio: r.name });
@@ -494,74 +444,6 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
     }
   };
 
-  /**
-   * Run the MODEL-PORTFOLIO scan — the prerequisite this page has no other way to satisfy.
-   *
-   *  It is a separate scan from "Refresh all", AND THAT IS THE WHOLE TRAP. Refresh all scans the
-   * ACCOUNTS (returns, holdings, mutations); this one scans the MODEL portfolios that give an
-   * account its name, its ISINs and — the part you notice — its Analyse button.
-   * Until 2026-07-30 it had no button anywhere in the app, so a fresh deployment could never get
-   * past "0 analysable" from inside the UI.
-   *
-   *  A job, not an SSE stream into the console (2026-08-17). It is minutes long — the list lands
-   * in ~6s, then an edit-page GET and an XLS download for each of ~58 fixed portfolios — and it
-   * used to report ONLY via `console.warn`. So for the whole slow half of "Refresh all" the single
-   * thing on screen saying anything was happening was this button's own label: no `i/n`, no name of
-   * the portfolio in flight, nothing at all after a route change or a reload, and no way to stop
-   * it. Phase one had been a proper job since 2026-08-13; the two halves of one button reported
-   * two different ways, and the silent way was the one that took the minutes.
-   *
-   * Now it lands in the shared toast stack beside every other job on this page, re-attaches after a
-   * reload via `attachRunningJobs`, and its Cancel reaches the scan (which stops between
-   * portfolios, keeping everything already counted).
-   *
-   *  The console narration is kept, deliberately reduced to the outcome. The toast answers "is it
-   * moving"; the console answers "what did it do". What is gone is the per-event `console.warn`
-   * relay, which was only ever a stand-in for the progress line this now has.
-   */
-  const scanModels = async (force: boolean) => {
-    //  Skipped only when every real book has a model. One existing pairing says nothing about
-    // another account whose model's composition was never stored: TOPS_DEF_BEH_DYN was exactly
-    // that case — several other rows were paired, so this used to skip the scan forever and
-    // Analyse fell back to an empty basket. An unpaired account with real holdings is therefore
-    // a missing-model signal, not a reason to call the whole fleet "already scanned".
-    //
-    // A full AIRS refresh re-reads populated models too, so their composition and the account
-    // reports always describe the same run.
-    const needsModel = (rows ?? []).some((r) =>
-      r.fixed_portfolio_id == null && (r.holdings ?? 0) >= MIN_REAL_HOLDINGS);
-    if (needsModel || force) {
-      setScanningModels(true);
-      console.warn('[AIRS models] scanning Stamgegevens → Model portefeuilles (minutes)…');
-      try {
-        const { id, done } = await startJob(
-          `${API_URL}/api/airs/model-portfolios/scan/job?force=${force ? 'true' : 'false'}`,
-          t.overview.scanningModels);
-        setModelsJob(id);
-        const job = await done;
-        //  `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
-        // outcome; this is the copy you can scroll back to after the card has dismissed itself.
-        if (job.status === 'failed') logDetail('model scan failed', job.summary);
-        else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
-        // `Refresh all` must honour Cancel across its phases. Starting the valuation pass after a
-        // cancelled composition scan would turn a working Cancel into more minutes of work.
-        if (job.status !== 'done') return;
-      } catch (e) {
-        // A scan failure is reported separately: the account refresh has already stored its work.
-        console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
-      } finally {
-        setScanningModels(false);
-        setModelsJob(null);
-      }
-    } else {
-      console.warn('[AIRS models] all substantial accounts are already paired');
-    }
-
-    // AIRS supplies the overview return and dates. Stock-price calculations are
-    // maintained by scheduled jobs, separately from this refresh.
-
-  };
-
   // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
   // a refresh has to be able to re-fetch a row that is ALREADY open: clearing the caches without
   // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
@@ -593,14 +475,14 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
   }, []);
 
   const loadOverview = useCallback(async (completedAccount?: string, force = true) => {
-    await traceScope('overview', 'loading the portfolios table', async () => {
+    return await traceScope('overview', 'loading the portfolios table', async () => {
       try {
         let body: OverviewRow[];
-        if (loadBundledRows) {
+        if (loadBundledRows && !completedAccount) {
           body = await loadBundledRows(leonteq, force);
         } else {
           const r = await apiFetch(`${API_URL}${leonteq ? `${LEONTEQ_DASHBOARD}/dashboard` : '/api/airs/portfolios/overview'}`,
-            leonteq ? { cache: 'no-store', noReadCache: true } : undefined);
+            force || leonteq ? { cache: 'no-store', noReadCache: true } : undefined);
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           body = await r.json() as OverviewRow[];
         }
@@ -629,6 +511,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
           // Publish the whole completed row together. Other accounts may still be
           // between reports, so their partially written values must stay off-screen.
           const updated = body.find((row) => row.dynamic_portefeuille === completedAccount);
+          if (!updated) return false;
           if (updated) setRows((previous) => {
             const current = previous ?? [];
             return current.some((row) => row.dynamic_portefeuille === completedAccount)
@@ -640,9 +523,11 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
           setRows(body);
         }
         setErr(null);
+        return true;
       } catch (e) {
         traceError('overview', 'the portfolios table could not be loaded', e);
         setErr(e instanceof Error ? e.message : String(e));
+        return false;
       }
     });
   }, [leonteq, loadBundledRows]);
@@ -742,126 +627,34 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
     }
   };
 
-  /**
-   * Scan every live portfolio that NEEDS scanning — as a CANCELLABLE JOB.
-   *
-   *  Incremental, and the backend decides. Discovery always runs against AIRS, so an account that
-   * is new or was deleted is always fetched; one whose last pass got all four reports recently is
-   * skipped. A full pass is minutes, a no-op pass is seconds — hence `force` for when you actually
-   * want the four downloads again.
-   *
-   *  This was a poll loop and that is why the button kept reading as broken (2026-08-11). It
-   * POSTed `/vermogen/refresh`, then re-read `/vermogen/status` every 2.5s and painted its own
-   * banner. Three consequences, all of them the reader's problem rather than the code's:
-   *   * the work was INVISIBLE the moment you navigated away or reloaded — it carried on, with
-   *     nothing on screen to say so;
-   *   * there was NO WAY TO STOP IT, so a full re-scan started by accident ran its minutes out;
-   *   * the panel carried a second progress vocabulary that had to be kept in step with the toast
-   *     every other button on this page already used.
-   * As a job it reports into the shared toast stack, survives the route change, re-attaches on
-   * reload (`attachRunningJobs`), and Cancel reaches the scan.
-   *
-   *  The inline `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately — the same rule
-   * `refreshOne` follows. Two places reporting one job is two places to keep in step, and the
-   * toast already carries the outcome, the failure and the countdown. `refreshMsg` stays for
-   * everything on this panel that is NOT a job.
-   *
-   *  The step-by-step console narration is kept, but printed once at the end. It used to come
-   * from the polled `log` array via a high-water mark on `seq`; there is no poll any more, so it
-   * is read from `/vermogen/status` in a single request after the job resolves. That log is the
-   * only place the ROSTER appears in full (44 names to compare against AIRS's own "44 Items in
-   * selectie") and the only per-report /—/ breakdown — the comments on `logSteps` record that
-   * this is where the bugs kept being found, so dropping it to save one request would have been a
-   * real loss of diagnosability disguised as cleanup. The toast carries `i/n: name` live, which is
-   * what answers "is it moving"; this answers "what did it actually do".
-   */
-  // Completed accounts are published in scan order. Narration and account-start
-  // events never reload rows that AIRS is still writing.
-  // Both modes stay within the dashboard collections and their model dependencies.
-  // A manual press must re-read AIRS, even if the incremental scheduler would skip it.
-  const refreshAll = async (force = true) => {
+  // One manual returns-only job for the active collection.
+  const refreshAll = async () => {
     if (refreshingAll) return;
-    if (leonteq) {
-      setRefreshingAll(true);
-      setRefreshMsg(null);
-      try {
-        for (const [index, row] of (rows ?? []).entries()) {
-          const benchmark = index === 0 ? '?refresh_benchmark=true' : '';
-          const { id, done } = await startJob(`${API_URL}${LEONTEQ_DASHBOARD}/${encodeURIComponent(row.name)}/refresh/job${benchmark}`, row.name);
-          setFleetJob(id);
-          const job = await done;
-          await loadOverview();
-          if (job.status === 'cancelled') break;
-        }
-      } catch (error) {
-        setRefreshMsg({ text: String(error), kind: 'error' });
-      } finally { setRefreshingAll(false); setFleetJob(null); setRefreshSeq(seq => seq + 1); }
-      return;
-    }
-    setRefreshMsg(null);
-    // See refreshOne: this run changes the source of every overview row.
-    invalidateOverviewCache();
     setRefreshingAll(true);
+    setRefreshMsg(null);
     try {
       let completedRows = Promise.resolve();
       const { id, done } = await startJob(
-        `${API_URL}/api/airs/vermogen/refresh/job${force ? '?force=true' : ''}`,
-        t.overview.refreshAll,
+        `${API_URL}/api/airs/dashboard/returns/refresh/job?collection=${collection}`,
+        'Refresh MTD and YTD',
         undefined,
-        (e) => {
-          if (!e.accountDone || !e.account) return;
-          const account = e.account;
+        ({ account, accountDone }) => {
+          if (!accountDone || !account) return;
           completedRows = completedRows.then(async () => {
             await loadOverview(account);
-            if (open === account) await loadDetail(account);
-          }).catch((error) => logDetail(`could not update ${account}`, error));
+          });
         });
       setFleetJob(id);
       const job = await done;
       await completedRows;
-      //  Cleared the moment phase one resolves, not in the `finally`. Phase two is a job of its
-      // own now, and `allJob = fleetJob ?? modelsJob` is only the LIVE one if the finished half
-      // stops claiming to be running — otherwise the  would spend the whole model scan wired to a
-      // job that had already ended. The `finally` still clears it; setting null twice is free.
-      setFleetJob(null);
-      //  Reload on anything that reached the server — done, failed OR cancelled. The scan stores
-      // each account as it goes, so a run stopped after 30 of 44 wrote 30 books; leaving the
-      // pre-refresh figures on screen would hide real work that was really done.
-      if (job.status === 'failed') logDetail('fleet refresh failed', job.summary);
-      //  Best-effort, and never a reason to fail the refresh. The scan is already finished and
-      // its rows are already stored; a console diagnostic that could not be fetched must not turn
-      // a completed run into an error on screen.
-      try {
-        const st = await (await apiFetch(`${API_URL}/api/airs/vermogen/status`)).json() as
-          { detail?: string; errors?: string[]; error_summary?: FailureGroup[];
-            log?: ScanStep[] } | null;
-        logSteps(st?.log ?? [], 0);
-        if (st?.detail) logDetail('scan detail', st.detail);
-        // The REASON grouped by cause, not 27 individual lines nobody reads looking for a pattern.
-        if (st?.error_summary?.length) {
-          logDetail('reports that failed, grouped by cause', st.error_summary);
-        }
-        if (st?.errors?.length) logDetail('raw scan errors', st.errors);
-      } catch (e) {
-        logDetail('could not read the scan log (the scan itself finished)', e);
+      if (job.status === 'failed') logDetail('returns refresh failed', job.summary);
+      invalidateOverviewCache();
+      const reloaded = await loadOverview();
+      if (job.status === 'done' && !reloaded) {
+        setRefreshMsg({ text: 'Returns were saved, but the dashboard could not reload them.', kind: 'warn' });
       }
-      setDetail({});
-      setIsins({});
-      await loadOverview();
-      //  Phase two of the same button, and it is skipped on cancel. Front-Office → the four
-      // reports per book is the whole workflow; this adds the model portfolios, which supply the
-      // readable nickname and the id-only views. Running it after the reader pressed Cancel would
-      // be minutes more of exactly what they asked to stop.
-      if (job.status === 'done' && !isAirsBusy(job)) {
-        await scanModels(false);
-        setDetail({});
-        setIsins({});
-        await loadOverview();
-      }
-      if (open) await loadDetail(open);   // same trap as refreshOne — an open row must re-fetch
-    } catch (e) {
-      logDetail('fleet refresh threw', e);
-      setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+    } catch (error) {
+      setRefreshMsg({ text: error instanceof Error ? error.message : String(error), kind: 'error' });
     } finally {
       setRefreshingAll(false);
       setFleetJob(null);
@@ -910,14 +703,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
     await cancelJob(id);
   };
 
-  /**
-   *  Whichever half is running. "Refresh all" is two jobs in sequence and only one of them can be
-   * in flight, so ONE id is enough — but it must be the live one. Keying this on `fleetJob` alone
-   * left the button reading "Cancel scan" through phase two and cancelling nothing, which is the
-   * decorative-Cancel failure the job registry exists to prevent.
-   */
   const cancelRefreshAll = async () => {
-    if (modelsJob) { await cancelJob(modelsJob); return; }
     if (!fleetJob) return;
     await cancelJob(fleetJob);
   };
@@ -1017,35 +803,21 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-          {/* A manual refresh re-reads AIRS reports; stock-price work runs separately. */}
+          {/* This manual action refreshes only the active tab’s source returns. */}
           <button type="button"
             onClick={() => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(); } }}
             // Inert only in the gap between the press and the job id arriving — see the row button.
             disabled={refreshingAll && !allJob}
             title={allJob
-              ? (modelsJob
-                ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
-                : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
-              : leonteq ? 'Updates each TopSelectie directly from Leonteq.'
-                : 'Updates each portfolio from AIRS, in tab order. Each row updates as soon as its AIRS data is saved.'}
+              ? 'Stop after the portfolio currently being read. Saved returns are kept.'
+              : 'Refresh month-to-date and year-to-date returns for portfolios in this tab.'}
             className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
                 : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-            {/*  BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
-                resolved, so `fleetJob` was already null and the label was the only thing left
-                saying the button was busy — a control that reads "Scanning models…" for minutes
-                with no way to stop it. It is a job of its own now, so `allJob` is whichever half
-                is live and Cancel means the same thing throughout. */}
-            {allJob ? (modelsJob ? t.overview.cancelModelScan : t.overview.cancelScan)
-              : refreshingAll ? (scanningModels ? t.overview.scanningModels
-                                                : t.overview.refreshing)
-              : t.overview.refreshAll}
+            {allJob ? t.overview.cancelScan
+              : refreshingAll ? t.overview.refreshing : t.overview.refreshAll}
           </button>
-          {/*  ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
-              control — which put an implementation rule (keep the two scans' error verdicts apart)
-              in front of the operator as a chore. They are phases of one action now; only the
-              reporting stays separate. */}
         </div>
       </div>
 
@@ -1085,11 +857,9 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
       )}
 
       {rows && (
-        <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
-          {/* Narrow fixed action/numeric columns, with the remaining width for names.
-              The table scrolls within this card on small screens. */}
-          <table className="w-full min-w-[66rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[9rem]" /><col className="w-[7rem]" /><col className="w-[11rem]" /><col className="w-[11rem]" /><col className="w-[6rem]" /></colgroup>
+        <div className="min-w-0 rounded-xl border border-neutral-800/40">
+          <table className="w-full table-fixed text-[13px] [overflow-wrap:anywhere] max-sm:[&_td]:px-0.5 max-sm:[&_th]:px-0.5">
+            <colgroup><col className="w-[4%]" /><col className="w-[12%]" /><col /><col className="w-[14%]" /><col className="w-[14%]" /><col className="w-[13%]" /><col className="w-[13%]" /><col className="w-[8%]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1123,7 +893,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
                       {/* Analyse, leftmost. Describes the FIXED portfolio (composition +
                           attribution), which is why it needs `fixed_portfolio_id` and an unlinked
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
-                      <td className="px-2 py-2.5 whitespace-nowrap">
+                      <td className="px-2 py-2.5">
                         <div className="flex flex-wrap items-stretch gap-1.5">
                           {canOpen(r) && (
                             <button
@@ -1147,7 +917,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
                               }}
                               onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
-                              className="inline-flex h-8 min-w-[4.5rem] items-center justify-center rounded-lg border border-accent-500/25 bg-accent-500/[0.06] px-2 text-[12px] font-medium text-accent-300 transition-colors hover:border-accent-500/50 hover:bg-accent-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 disabled:opacity-50"
+                              className="min-h-8 max-w-full rounded-lg border border-accent-500/25 bg-accent-500/[0.06] px-1 text-[12px] font-medium text-accent-300 transition-colors hover:border-accent-500/50 hover:bg-accent-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 disabled:opacity-50"
                             >
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
@@ -1292,18 +1062,8 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
                             says "matched to this book by name" when the pairing was inferred, and
                             names the deliberate link when it was not. Dropping the `how` must not
                             drop the fact that most of these pairings are inferred.
-                             AND IT NOW CARRIES A DATE. With neither `asOf` nor `fetchedAt` the
-                            card read "no dated source (a structural / computed value)" — which was
-                            wrong twice over: it IS dated, by the scan that read it, and calling a
-                            fetched string computed is the same mistake `formula` was making. The
-                            name has no valuation date of its own, so `fetchedAt` alone is right:
-                            the card badges it and prices its own freshness from it. */}
+                             The name and pairing have no valuation date. */}
                         <Provenance source={leonteq ? 'leonteq' : r.fixed_name ? 'airs_model' : 'airs_volk'} kind="copied"
-                          /* The paired model supplies a structural display name, but its catalogue
-                             scan is not a prerequisite for a current account. Tie freshness to the
-                             book scan that Refresh all actually performs; otherwise a stale fixed-
-                             model catalogue leaves a freshly refreshed account orange. */
-                          fetchedAt={r.fetched_at}
                           what={leonteq ? `Leonteq portfolio: ${r.name}.` : r.fixed_name
                             ? `AIRS model portfolio: ${r.fixed_name}. AIRS account: ${r.dynamic_portefeuille}.`
                             : `AIRS account: ${r.dynamic_portefeuille}.`}
@@ -1316,24 +1076,25 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
                       </td>
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(monthToDate(r))}`}>
                         {pct(monthToDate(r))}
-                        <Provenance source={leonteq ? 'leonteq' : 'airs_att'} asOf={leonteq ? r.month_as_of : r.periode}
-                          fetchedAt={leonteq ? r.month_fetched_at : r.fetched_at} kind="copied"
-                          onRefresh={async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
-                          what={leonteq ? "This month's return, as Leonteq reports it." : "This month's return, as AIRS reports it."}
+                        <Provenance source={toppenberg ? 'derived' : leonteq ? 'leonteq' : 'airs_att'} asOf={leonteq ? r.month_as_of : r.periode}
+                          fetchedAt={leonteq ? r.month_fetched_at : r.returns_fetched_at} kind="copied"
+                          onRefresh={toppenberg ? undefined : async () => { await refreshOne(r.dynamic_portefeuille, r.name, false); return null; }}
+                          what={toppenberg ? r.returns_note ?? undefined : leonteq ? "This month's return, as Leonteq reports it." : "This month's return, as AIRS reports it."}
                           staleReason={r.periode?.slice(0, 7) !== currentMonth ? `${leonteq ? 'Leonteq' : 'AIRS'} has not reported a return for this month yet`
-                            : r.missing_reports?.includes('att') ? 'Rendement was missing from the latest AIRS scan' : undefined} />
+                            : undefined} />
                       </td>
                       <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
-                        <Provenance source={leonteq ? 'leonteq' : 'airs_att'} asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
-                          onRefresh={async () => {
+                        <Provenance source={toppenberg ? 'derived' : leonteq ? 'leonteq' : 'airs_att'} asOf={leonteq ? r.as_of : r.periode}
+                          fetchedAt={leonteq ? r.fetched_at : r.returns_fetched_at} kind="copied"
+                          onRefresh={toppenberg ? undefined : async () => {
                             await refreshOne(r.dynamic_portefeuille, r.name, false);
                             return null;
                           }}
-                          staleReason={r.missing_reports?.includes('att')
+                          staleReason={!toppenberg && r.missing_reports?.includes('att')
                             ? 'Rendement was missing from the latest AIRS scan' : undefined}
-                          what={leonteq ? "This portfolio's year-to-date return, as Leonteq reports it." : "This account's return so far this year, as AIRS itself reports it."}
-                          note={leonteq ? undefined : "cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing"} />
+                          what={toppenberg ? r.returns_note ?? undefined : leonteq ? "This portfolio's year-to-date return, as Leonteq reports it." : "This account's return so far this year, as AIRS itself reports it."}
+                          note={leonteq || toppenberg ? undefined : "cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing"} />
                       </td>
                       <td className="px-2 py-2.5 text-right text-[13px] text-fg-muted">
                         {r.ytd_from ? new Intl.DateTimeFormat('en-GB', {
@@ -1345,13 +1106,15 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
                           day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
                         }).format(new Date(`${r.as_of}T00:00:00Z`)) : '—'}
                       </td>
-                      <td className="px-2 py-2.5 text-left text-[13px] text-fg-muted">{leonteq ? 'Leonteq' : 'AIRS'}</td>
+                      <td className="px-2 py-2.5 text-left text-[13px] text-fg-muted" title={r.returns_note ?? undefined}>
+                        {toppenberg || leonteq ? 'Leonteq' : 'AIRS'}
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
                         <td colSpan={8} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
-                            <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
+                            <PortfolioIdentityEditor row={r} onSaved={async () => { await loadOverview(); }} />
                           )}
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins}
@@ -1393,6 +1156,7 @@ export default function PortfolioOverviewPanel({ collection, loadBundledRows, re
         // when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
           leonteqPortfolio={analyse.leonteqPortfolio}
+          toppenbergAccount={analyse.toppenbergAccount}
           name={analyse.name}
           reportAccount={analyse.pf}
           onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!, analyse.name) : undefined}

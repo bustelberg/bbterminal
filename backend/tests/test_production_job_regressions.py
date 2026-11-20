@@ -294,3 +294,23 @@ def test_price_availability_rejects_substituted_listing(monkeypatch):
     monkeypatch.setattr(yahoo, 'chart_window', lambda *a, **k: {'meta': {'symbol': 'OTHER'}})
     with pytest.raises(RuntimeError, match='identifies OTHER, requested EQR'):
         price_refresh._unavailable_close('EQR', '2026-08-21', '2026-11-12')
+
+
+@pytest.mark.parametrize('symbol', ['EQR', 'AVB'])
+@pytest.mark.parametrize('empty_bars', [True, False])
+def test_metadata_only_availability_retries_and_preserves_recovery_bars(monkeypatch, symbol, empty_bars):
+    from unittest.mock import Mock
+    empty = {'meta': {'symbol': symbol, 'exchangeName': 'NYQ'}}
+    if not empty_bars:
+        empty.update(timestamp=[stamp('2026-11-02T14:30:00+00:00')],
+                     indicators={'quote': [{'close': [None]}]})
+    valid = {'meta': {'symbol': symbol},
+             'timestamp': [stamp('2026-11-02T14:30:00+00:00')],
+             'indicators': {'quote': [{'close': [100]}]}}
+    fetch = Mock(side_effect=[empty, valid])
+    monkeypatch.setattr(yahoo, 'chart_window', fetch)
+    with pytest.raises(price_refresh.NewerCloseAvailable) as caught:
+        price_refresh._unavailable_close(symbol, '2026-08-21', '2026-11-12')
+    assert fetch.call_count == 2
+    assert caught.value.available == '2026-11-02'
+    assert caught.value.window is valid

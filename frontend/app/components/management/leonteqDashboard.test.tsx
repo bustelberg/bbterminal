@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import PortfolioOverviewPanel from '../PortfolioOverviewPanel';
+import PortfolioOverviewPanel, { type PortfolioCollection } from '../PortfolioOverviewPanel';
 import ManagementDashboard from '../../management-dashboard/page';
 import { apiFetch } from '../../../lib/apiFetch';
 import { startJob } from '../../../lib/stores/jobs';
@@ -18,6 +18,56 @@ vi.mock('../../../lib/stores/jobs', () => ({ startJob: vi.fn(), cancelJob: vi.fn
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 afterEach(() => { vi.clearAllMocks(); window.sessionStorage.clear(); });
+
+it('paints a completed portfolio before the refresh job finishes', async () => {
+  const row = { name: 'Bustelberg Offensief', dynamic_portefeuille: 'BUS_Offensief_Dyn',
+    management_group: 'bustelberg', ytd_pct: 1 };
+  let ytd = 1;
+  let completeRow: Parameters<typeof startJob>[3];
+  let finish!: (job: Awaited<Awaited<ReturnType<typeof startJob>>['done']>) => void;
+  const done = new Promise<Awaited<Awaited<ReturnType<typeof startJob>>['done']>>(resolve => { finish = resolve; });
+  vi.mocked(apiFetch).mockImplementation(async () => new Response(JSON.stringify([{ ...row, ytd_pct: ytd }])));
+  vi.mocked(startJob).mockImplementation(async (_url, _title, _init, onProgress) => {
+    completeRow = onProgress;
+    return { id: 'returns', done, body: {} };
+  });
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<PortfolioOverviewPanel collection="bustelberg" />));
+    expect(host.textContent).toContain('+1.00%');
+    const button = [...host.querySelectorAll('button')].find(el => el.textContent?.trim() === 'Refresh all')!;
+    await act(async () => button.click());
+    ytd = 2;
+    await act(async () => completeRow?.({ account: row.dynamic_portefeuille, accountDone: true }));
+    expect(host.textContent).toContain('+2.00%');
+  } finally {
+    await act(async () => finish({ status: 'done' } as Awaited<typeof done>));
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
+it.each<PortfolioCollection>(['bustelberg', 'toppenberg', 'topselecties', 'imagine_fund', 'test_topselecties'])(
+  'refreshes only MTD and YTD for the %s tab', async collection => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response('[]'));
+    vi.mocked(startJob).mockResolvedValue({ id: 'returns', done: Promise.resolve({ status: 'done' }), body: {} } as Awaited<ReturnType<typeof startJob>>);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<PortfolioOverviewPanel collection={collection} />));
+      const button = [...host.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Refresh all')!;
+      await act(async () => button.click());
+      expect(startJob).toHaveBeenCalledExactlyOnceWith(
+        expect.stringContaining(`/api/airs/dashboard/returns/refresh/job?collection=${collection}`),
+        'Refresh MTD and YTD', undefined, expect.any(Function));
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
 
 it('loads all management collections from a single overview request', async () => {
   const collections = [
@@ -98,7 +148,7 @@ it('uses the identical overview table and Analyse control with Leonteq data and 
     expect(modal.getAttribute('data-leonteq')).toBe('AITopSelectie');
     expect(modal.hasAttribute('data-account')).toBe(false);
     await act(async () => findButton('Refresh all').click());
-    expect(vi.mocked(startJob).mock.calls[0][0]).toContain('/api/leonteq/management/topselecties/AITopSelectie/refresh/job');
+    expect(vi.mocked(startJob).mock.calls[0][0]).toContain('/api/airs/dashboard/returns/refresh/job?collection=topselecties');
     expect(requests.every(path => path.includes('/api/leonteq/management/topselecties'))).toBe(true);
     await act(async () => root.render(<PortfolioOverviewPanel key="airs" collection="toppenberg" />));
     expect(host.querySelector('table')!.className).toBe(tableClass);

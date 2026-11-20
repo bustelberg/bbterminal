@@ -476,6 +476,39 @@ def test_freshness_repairs_publication_only_failure_and_reaudits(monkeypatch):
     repair.assert_called_once()
 
 
+def test_freshness_repairs_bundles_despite_independent_source_failure(monkeypatch):
+    from unittest.mock import Mock
+    from routers import _prepared_analyse as prepared
+    source_issue = 'fund NAV has not been published'
+    stale = {'incomplete': 1, 'checked': 1, 'empty_roster': False,
+             'global_issues': ['asset_price_refresh: no successful source refresh today'],
+             'accounts': [{'portefeuille': 'BOOK', 'issues': ['Analyse: older bundle', source_issue],
+                           'unmapped_isins': ['UNMAPPED']}]}
+    repaired = {**stale, 'accounts': [{**stale['accounts'][0], 'issues': [source_issue]}]}
+    audit = Mock(side_effect=[stale, repaired])
+    repair = Mock(return_value={'holdings': 2})
+    monkeypatch.setattr(D, 'freshness', audit)
+    monkeypatch.setattr(prepared, 'run_controlled', repair)
+    with pytest.raises(D.IncompleteRefresh) as caught:
+        S._body_dashboard_freshness()
+    repair.assert_called_once()
+    assert caught.value.summary['accounts'][0]['issues'] == [source_issue]
+    assert caught.value.summary['global_issues'] == stale['global_issues']
+    assert caught.value.summary['analyse_repair'] == {'holdings': 2}
+
+
+def test_retired_listing_freshness_requests_corporate_action_reconciliation():
+    source = {'started_at': '2026-11-20T10:00:00Z', 'summary': {'results': [{
+        'isin': 'TEST', 'symbol': 'OLD', 'analysis_id': 42, 'latest_close': '2026-06-30',
+        'listing_ended': True, 'last_trading_date': '2026-06-30',
+        'status': 'unavailable', 'reason': 'Converted into ordinary shares'}]}}
+    issue = D._price_freshness_issue('TEST', {'yahoo_symbol': 'OLD', 'analysis_id': 42},
+                                   '2026-06-30', '2026-11-19', source, '2026-11-20')
+    assert 'reconcile the corporate action' in issue
+    assert 'no matching provider' not in issue
+    assert 'newer close not published' not in issue
+
+
 def test_missing_position_marks_trigger_month_repair_even_when_all_sections_are_ok(monkeypatch):
     from routers import _airs_monthly_report as monthly
     db = FakeSupabase({

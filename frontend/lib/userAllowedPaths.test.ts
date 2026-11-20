@@ -13,6 +13,7 @@ describe('isUserAllowedPath', () => {
     expect(isUserAllowedPath('/management-dashboard')).toBe(true)
     expect(isUserAllowedPath('/valuation')).toBe(true)
     expect(isUserAllowedPath('/factsheet')).toBe(true)
+    expect(isUserAllowedPath('/benchmarks')).toBe(true)
     expect(isUserAllowedPath('/research-dashboard')).toBe(true)
     expect(isUserAllowedPath('/log-dashboard')).toBe(true)
     expect(isUserAllowedPath('/momentum')).toBe(true)
@@ -28,7 +29,7 @@ describe('isUserAllowedPath', () => {
     //  And the removal half is pinned by the cases below. Taking a page away leaves any API path
     // it alone needed open — a permission nobody can see, because it grants no reachable screen.
     expect([...USER_ALLOWED_PATHS].sort()).toEqual([
-      '/', '/account', '/debet-calculation', '/etf-comparison', '/factsheet', '/forbidden', '/log-dashboard', '/management-dashboard', '/market', '/mfa', '/momentum', '/research-dashboard', '/valuation',
+      '/', '/account', '/benchmarks', '/debet-calculation', '/etf-comparison', '/factsheet', '/forbidden', '/log-dashboard', '/macro-dashboard', '/management-dashboard', '/market', '/mfa', '/momentum', '/research-dashboard', '/valuation',
     ])
   })
 
@@ -68,7 +69,7 @@ describe('isUserAllowedPath', () => {
   })
 
   it('blocks admin-only pages', () => {
-    for (const p of ['/airs-check', '/airs-check/details', '/companies', '/airs-portfolio', '/backtest', '/acwi', '/leonteq', '/leonteq-portfolios', '/leonteq-portfolios/details', '/benchmarks', '/api']) {
+    for (const p of ['/airs-check', '/airs-check/details', '/companies', '/airs-portfolio', '/backtest', '/acwi', '/leonteq', '/leonteq-portfolios', '/leonteq-portfolios/details', '/old-benchmarks', '/api']) {
       expect(isUserAllowedPath(p)).toBe(false)
     }
   })

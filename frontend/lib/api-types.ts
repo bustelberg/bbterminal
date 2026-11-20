@@ -1268,6 +1268,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/dashboard/returns/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dashboard Returns Refresh Job */
+        post: operations["dashboard_returns_refresh_job_api_airs_dashboard_returns_refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/dashboard/toppenberg/{account}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Toppenberg Analysis */
+        get: operations["toppenberg_analysis_api_airs_dashboard_toppenberg__account__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/etf/{isin}/currency-allocation": {
         parameters: {
             query?: never;
@@ -1953,6 +1987,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/stocks-breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Airs Model Stocks Breakdown */
+        get: operations["airs_model_stocks_breakdown_api_airs_model_portfolios__portfolio_id__stocks_breakdown_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/stocks-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Airs Model Stocks Bundle */
+        get: operations["airs_model_stocks_bundle_api_airs_model_portfolios__portfolio_id__stocks_bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/value-series": {
         parameters: {
             query?: never;
@@ -2336,6 +2404,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolios/management-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Management Portfolios Bundle
+         * @description Saved overview rows for all management collections.
+         */
+        get: operations["management_portfolios_bundle_api_airs_portfolios_management_bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolios/overview": {
         parameters: {
             query?: never;
@@ -2533,6 +2621,23 @@ export interface paths {
         };
         /** Valuation Portfolios */
         get: operations["valuation_portfolios_api_airs_valuation_portfolios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/valuation/portfolios/all/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valuation All Dashboard */
+        get: operations["valuation_all_dashboard_api_airs_valuation_portfolios_all_dashboard_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8123,6 +8228,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/macro-dashboard/indicators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Indicators */
+        get: operations["indicators_api_macro_dashboard_indicators_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/macro-dashboard/indicators/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Indicator Overview */
+        get: operations["indicator_overview_api_macro_dashboard_indicators_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/macro-dashboard/indicators/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open Indicator */
+        get: operations["open_indicator_api_macro_dashboard_indicators__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/macro-dashboard/indicators/{key}/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch Indicator */
+        post: operations["fetch_indicator_api_macro_dashboard_indicators__key__fetch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/acwi": {
         parameters: {
             query?: never;
@@ -10758,6 +10931,12 @@ export interface components {
             reconciles?: boolean | null;
             /** Residual Eur */
             residual_eur?: number | null;
+            /** Returns Coverage Pct */
+            returns_coverage_pct?: number | null;
+            /** Returns Fetched At */
+            returns_fetched_at?: string | null;
+            /** Returns Note */
+            returns_note?: string | null;
             /** Saved Price Check */
             saved_price_check?: {
                 [key: string]: unknown;
@@ -12914,12 +13093,82 @@ export interface components {
             /** Symbol */
             symbol: string;
         };
+        /** FactsheetAllocationRow */
+        FactsheetAllocationRow: {
+            /** Cagr Pct */
+            cagr_pct: number;
+            /** Cvar 95 Pct */
+            cvar_95_pct: number;
+            /** Drawdowns Pct */
+            drawdowns_pct: number[];
+            /** Lower Quartile Pct */
+            lower_quartile_pct: number | null;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Volatility Pct */
+            volatility_pct?: number | null;
+            /** Weights */
+            weights: [
+                number,
+                number,
+                number
+            ];
+            /** Worst Pct */
+            worst_pct: number | null;
+        };
+        /** FactsheetAllocations */
+        FactsheetAllocations: {
+            /** End */
+            end: string;
+            /** Rows */
+            rows: components["schemas"]["FactsheetAllocationRow"][];
+            /** Start */
+            start: string;
+            /** Windows */
+            windows: number;
+        };
+        /** FactsheetCorrelations */
+        FactsheetCorrelations: {
+            /** End */
+            end: string;
+            /** Matrix */
+            matrix: (number | null)[][];
+            /** Observations */
+            observations: number;
+            /** Start */
+            start: string;
+            /** Tickers */
+            tickers: string[];
+        };
+        /** FactsheetDownside */
+        FactsheetDownside: {
+            /** Acwi Mean Pct */
+            acwi_mean_pct: number | null;
+            /** Correlation */
+            correlation: number | null;
+            /** End */
+            end: string;
+            /** Hdg Mean Pct */
+            hdg_mean_pct: number | null;
+            /** Hdg Positive */
+            hdg_positive: number;
+            /** Key */
+            key: string;
+            /** Observations */
+            observations: number;
+            /** Start */
+            start: string;
+        };
         /** FactsheetResponse */
         FactsheetResponse: {
+            allocations?: components["schemas"]["FactsheetAllocations"] | null;
             /** Calculation Date */
             calculation_date?: string | null;
+            correlations?: components["schemas"]["FactsheetCorrelations"] | null;
             /** Currency */
             currency: string;
+            /** Downside */
+            downside?: components["schemas"]["FactsheetDownside"][] | null;
             /** Method */
             method?: string | null;
             /**
@@ -12964,6 +13213,8 @@ export interface components {
         FactsheetStatistics: {
             /** Cagr Pct */
             cagr_pct: number;
+            /** Cvar 95 Pct */
+            cvar_95_pct?: number | null;
             /** End */
             end: string;
             /** Observations */
@@ -13688,6 +13939,19 @@ export interface components {
             ticker?: string | null;
             /** Weight Pct */
             weight_pct: number;
+        };
+        /** Indicator */
+        Indicator: {
+            /** Frequency */
+            frequency: string;
+            /** Key */
+            key: string;
+            /** Method */
+            method?: string | null;
+            /** Name */
+            name: string;
+            /** Sources */
+            sources: string[];
         };
         /** IndicatorRequest */
         IndicatorRequest: {
@@ -14705,6 +14969,15 @@ export interface components {
             /** Ytd Before */
             ytd_before?: number | null;
         };
+        /** OverviewReading */
+        OverviewReading: {
+            comparison?: components["schemas"]["Point"] | null;
+            /** Key */
+            key: string;
+            latest: components["schemas"]["Point"];
+            /** Trend */
+            trend: components["schemas"]["Point"][];
+        };
         /** PercentageEditRequest */
         PercentageEditRequest: {
             /**
@@ -14769,6 +15042,16 @@ export interface components {
             up_days_pct?: number | null;
             /** Years */
             years: number;
+        };
+        /** Point */
+        Point: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number;
         };
         /**
          * PortfolioAllocationSlice
@@ -14921,6 +15204,8 @@ export interface components {
              * @default 0
              */
             diff_pct?: number;
+            /** Held Return Pct */
+            held_return_pct?: number | null;
             /**
              * Holdings
              * @default []
@@ -16426,6 +16711,13 @@ export interface components {
             benchmark_id: number;
             /** Weight Pct */
             weight_pct: number;
+        };
+        /** Snapshot */
+        Snapshot: {
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Points */
+            points: components["schemas"]["Point"][];
         };
         /** SoldCertificatePosition */
         SoldCertificatePosition: {
@@ -18858,6 +19150,71 @@ export interface operations {
             };
         };
     };
+    dashboard_returns_refresh_job_api_airs_dashboard_returns_refresh_job_post: {
+        parameters: {
+            query: {
+                collection: "bustelberg" | "toppenberg" | "topselecties" | "imagine_fund" | "test_topselecties";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    toppenberg_analysis_api_airs_dashboard_toppenberg__account__analysis_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                include_holding_risk?: boolean;
+            };
+            header?: never;
+            path: {
+                account: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     etf_currency_allocation_api_airs_etf__isin__currency_allocation_get: {
         parameters: {
             query?: never;
@@ -19705,6 +20062,82 @@ export interface operations {
             };
         };
     };
+    airs_model_stocks_breakdown_api_airs_model_portfolios__portfolio_id__stocks_breakdown_get: {
+        parameters: {
+            query: {
+                axis: "sector" | "region" | "currency";
+                bucket: string;
+                benchmark?: string;
+                look_through?: boolean;
+                source?: string;
+                weight_by?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_stocks_bundle_api_airs_model_portfolios__portfolio_id__stocks_bundle_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                look_through?: boolean;
+                source?: string;
+                weight_by?: string;
+                overview_only?: boolean;
+                include_holding_risk?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_model_portfolio_value_series_api_airs_model_portfolios__portfolio_id__value_series_get: {
         parameters: {
             query?: {
@@ -20234,6 +20667,26 @@ export interface operations {
             };
         };
     };
+    management_portfolios_bundle_api_airs_portfolios_management_bundle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     airs_portfolios_overview_api_airs_portfolios_overview_get: {
         parameters: {
             query?: never;
@@ -20449,6 +20902,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValuationPortfolio"][];
+                };
+            };
+        };
+    };
+    valuation_all_dashboard_api_airs_valuation_portfolios_all_dashboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValuationBundle"];
                 };
             };
         };
@@ -27062,7 +27535,9 @@ export interface operations {
     };
     refresh_management_topselectie_api_leonteq_management_topselecties__name__refresh_job_post: {
         parameters: {
-            query?: never;
+            query?: {
+                refresh_benchmark?: boolean;
+            };
             header?: never;
             path: {
                 name: string;
@@ -27863,6 +28338,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    indicators_api_macro_dashboard_indicators_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Indicator"][];
+                };
+            };
+        };
+    };
+    indicator_overview_api_macro_dashboard_indicators_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewReading"][];
+                };
+            };
+        };
+    };
+    open_indicator_api_macro_dashboard_indicators__key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fetch_indicator_api_macro_dashboard_indicators__key__fetch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

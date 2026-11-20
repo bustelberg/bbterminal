@@ -124,7 +124,7 @@ def overview():
     return rows
 
 
-def detail(display_name, refresh=False, progress=None, benchmark=None):
+def detail(display_name, refresh=False, progress=None, benchmark=None, *, compact_accounting=False):
     from leonteq.progress import report
 
     entry = next((row for row in entries() if row['display_name'] == display_name), None)
@@ -152,32 +152,54 @@ def detail(display_name, refresh=False, progress=None, benchmark=None):
         if window:
             returns = {**returns, 'return_window': window}
     from leonteq import accounting
-    ledger = accounting.refresh(name, holdings.get('as_of') or matched.get('as_of'), progress) if refresh and holdings.get('success') and not holdings.get('refresh_error') else accounting.saved(name)
-    response = _snapshot_detail(display_name, catalogue, matched, holdings, returns, ledger)
+    if refresh and holdings.get('success') and not holdings.get('refresh_error'):
+        ledger = accounting.refresh(name, holdings.get('as_of') or matched.get('as_of'), progress)
+    elif compact_accounting:
+        try:
+            rows = supabase.rpc('leonteq_dashboard_accounting_inputs', {
+                'p_account_key': portfolio_cache._account_key(), 'p_names': [name],
+            }).execute().data or []
+            ledger = rows[0]['payload'] if rows else None
+            if ledger and ledger.get('version') != accounting.VERSION:
+                ledger = None
+        except Exception:
+            ledger = accounting.saved(name)
+    else:
+        ledger = accounting.saved(name)
+    response = _snapshot_detail(display_name, catalogue, matched, holdings, returns, ledger,
+                                prefer_accounting_snapshot=compact_accounting)
     if benchmark:
         response['monthly_benchmark'] = _monthly_benchmark(response, benchmark)
         response['monthly_attribution'] = _monthly_attribution(response)
     return response
 
 
-def _snapshot_detail(display_name, catalogue, matched, holdings, returns, ledger):
+def _snapshot_detail(display_name, catalogue, matched, holdings, returns, ledger, *, prefer_accounting_snapshot=False):
     name = matched['name']
     ledger = ledger or {}
     result = ledger.get('result') or {}
     verified_window = return_windows.cached({'leonteq_name': name, 'accounting': ledger})
     reference_ytd = verified_window['ytd_pct'] if verified_window else _number(matched.get('ytd'))
+    closing = (ledger.get('valuations') or {}).get(result.get('to'))
+    # Analyse uses the ledger's own closing holdings for attribution. A later
+    # catalogue/holdings read must not invalidate contributions for that dated book.
+    dated_accounting = bool(prefer_accounting_snapshot and closing and verified_window
+                            and verified_window['to'] == result.get('to')
+                            and (matched.get('as_of') or result['to'])[:4] == result['to'][:4])
     # Do not blend a previous accounting run into newer holdings or returns. Only a
     # source-consistent reconciled ledger can replace the current display boundary.
     eligible = bool(ledger.get('success') and result.get('available')
-        and (ledger.get('retrieved_at') or '') >= (holdings.get('retrieved_at') or '')
+        and closing
+        and (dated_accounting or (ledger.get('retrieved_at') or '') >= (holdings.get('retrieved_at') or '')
+             or (verified_window and holdings.get('as_of') == result.get('to')))
         and (not verified_window or verified_window['to'] == result.get('to'))
         and reference_ytd is not None and abs(reference_ytd - result['reported_ytd_pct']) <= .0051)
-    if eligible and not holdings.get('refresh_error') and holdings.get('snapshot_saved') is not False:
+    if eligible and (dated_accounting or (not holdings.get('refresh_error') and holdings.get('snapshot_saved') is not False)):
         from leonteq.portal_api import composition as shape_composition
-        closing = ledger['valuations'][result['to']]
         holdings = {**shape_composition(closing, name), 'success': True,
                     'retrieved_at': ledger['retrieved_at']}
-        matched = {**matched, 'as_of': result['to'], 'ytd': f"{result['reported_ytd_pct']}%"}
+        if (matched.get('as_of') or '') <= result['to']:
+            matched = {**matched, 'as_of': result['to'], 'ytd': f"{result['reported_ytd_pct']}%"}
     elif result.get('available'):
         ledger = {**ledger, 'success': False, 'reason': 'Leonteq accounting predates the current holdings/return snapshot', 'result': {'available': False}}
     return {'success': bool(holdings.get('success')), 'source': 'Leonteq', 'name': display_name,
@@ -210,10 +232,13 @@ def _monthly_attribution(source):
             continue
         end = max((stamp for stamp in dates if stamp[:7] == month), default=None)
         start = max((stamp for stamp in dates if stamp[:7] < month), default=window['from'])
-        if (report['from'] != start or report['to'] != end or row.get('return_pct') is None
-                or abs(report['reported_ytd_pct'] - row['return_pct']) > .01):
+        partial = bool(end and report['from'] == start and start < report['to'] < end
+                       and report['to'][:7] == month)
+        if not partial and (report['from'] != start or report['to'] != end or row.get('return_pct') is None
+                            or abs(report['reported_ytd_pct'] - row['return_pct']) > .01):
             details[month] = {'reason': 'Saved position results do not match the current Leonteq monthly return.'}
             continue
+        end = report['to']
         estimated = bool(report.get('estimated') and monthly_cash_verified(ledger, report))
         first_buy = {}
         for trade in ledger.get('transactions') or []:
@@ -221,6 +246,8 @@ def _monthly_attribution(source):
             if trade.get('booked') and trade.get('event') == 'Buy' and isin and stamp and start < stamp <= end:
                 first_buy[isin] = min(stamp, first_buy.get(isin, stamp))
         details[month] = {'opening_weight_date': start, 'reason': report.get('reason'),
+            'positions_through': end if partial else None,
+            'positions_return_pct': report['reported_ytd_pct'],
             'estimated_contribution_gap_pp': report['difference_pct'] if estimated else None, 'positions': [
             {'name': item['name'], 'isin': item['isin'], 'return_pct': item['return_pct'],
              'contribution_pp': item['contribution_pct'] if estimated or not report.get('estimated') else None,
@@ -229,6 +256,16 @@ def _monthly_attribution(source):
              'is_cash': identity.startswith('cash:'),
              'status': 'bought' if not item['opening'] and identity in first_buy else 'held'}
             for identity, item in report['positions'].items()]}
+    positions = [position for month in details.values() for position in month.get('positions', [])
+                 if position.get('isin')]
+    if positions:
+        from routers._airs_portfolio_analysis import _grid
+
+        instruments = _grid(sorted({position['isin'] for position in positions}))
+        for position in positions:
+            internal = instruments.get(position['isin']) or {}
+            if internal.get('company_id') and internal.get('name'):
+                position['name'] = internal['name']
     return details
 
 
@@ -293,7 +330,7 @@ def _month_return(window, month):
     return ((1 + current[-1]['cum_pct'] / 100) / basis - 1) * 100 if basis > 0 else None
 
 
-def refresh_returns(context):
+def refresh_returns(context, *, on_saved=None, configured=None):
     """Refresh source returns independently of expensive position accounting."""
     from jobs import JobCancelled
     from scheduler_runtime.execution import Cancelled
@@ -302,10 +339,11 @@ def refresh_returns(context):
     if not catalogue.get('success') or catalogue.get('refresh_error'):
         return {'saved': [], 'errors': {'catalogue': 'Leonteq catalogue refresh failed.'}}
     result = {'saved': [], 'errors': {}}
-    for index, entry in enumerate(entries()):
+    selected = entries() if configured is None else configured
+    for index, entry in enumerate(selected):
         context.check()
         label = entry['display_name']
-        context.progress(index, len(entries()), f'{label} — refreshing Leonteq MTD and YTD')
+        context.progress(index, len(selected), f'{label} — refreshing Leonteq MTD and YTD')
         matched = resolve(entry, catalogue.get('portfolios') or [])
         if not matched:
             result['errors'][label] = 'Leonteq portfolio identity is unavailable.'
@@ -327,6 +365,8 @@ def refresh_returns(context):
             raise
         except Exception as exc:
             result['errors'][label] = f'Leonteq return refresh failed ({type(exc).__name__}).'
+        if on_saved and label in result['saved']:
+            on_saved(index + 1, len(selected), label)
     return result
 
 
@@ -335,9 +375,13 @@ def prepare_contributions(context):
     from leonteq import accounting
     from jobs import JobCancelled
     from scheduler_runtime.execution import Cancelled
+    from services.toppenberg import ALTERNATIVES
     catalogue = portfolio_cache.saved_portfolios()
     result = {'saved': [], 'estimated': [], 'errors': {}}
-    for entry in entries():
+    configured = entries()
+    if resolve(ALTERNATIVES, catalogue.get('portfolios') or []):
+        configured = [*configured, ALTERNATIVES]
+    for entry in configured:
         context.check()
         label = entry['display_name']
         matched = resolve(entry, catalogue.get('portfolios') or [])
@@ -386,7 +430,14 @@ def _dashboard_snapshots(configured, *, strict=False):
 
     compositions = load(composition_cache.TABLE)
     performances = load('leonteq_performance_snapshot')
-    ledgers = load(accounting.TABLE)
+    try:
+        ledger_rows = supabase.rpc('leonteq_dashboard_accounting_inputs',
+            {'p_account_key': account, 'p_names': names}).execute().data or []
+        ledgers = {row['portfolio_name']: row['payload'] for row in ledger_rows}
+    except Exception:
+        # Rolling deployments still return correct data before the migration arrives.
+        log.warning('Compact dashboard accounting RPC unavailable; using full saved snapshots')
+        ledgers = load(accounting.TABLE)
     snapshots = {}
     for label, summary in matched.items():
         if not summary:
@@ -476,17 +527,32 @@ def _build_dashboard_overview(current_month, *, strict=False):
     return rows
 
 
-def _return_series(window, benchmark):
+def _return_series(window, benchmark, *, policy_weights=None):
     if not window or not window.get('returns'):
         return None
     from routers._benchmark_etf import etf_return_series
     points = window['returns']
-    comparison = etf_return_series(benchmark, window['from'], [p['date'] for p in points], read_only=True)
+    dates = [point['date'] for point in points]
+    if policy_weights:
+        from routers._airs_value_series import _weighted_benchmark_series
+        comparison = _weighted_benchmark_series(policy_weights, window['from'], dates, read_only=True)
+    else:
+        comparison = etf_return_series(benchmark, window['from'], dates, read_only=True)
     return {'returns': points, 'return_from': window['from'], 'return_pct': points[-1]['cum_pct'],
         'first_date': window['from'], 'last_date': window['to'], 'points': [], 'flows': [],
-        'benchmark': benchmark, 'benchmark_ticker': comparison.get('ticker'),
+        'benchmark': comparison.get('label') or benchmark, 'benchmark_ticker': comparison.get('ticker'),
+        'benchmark_components': comparison.get('components') or [],
         'benchmark_source': comparison.get('source'), 'benchmark_returns': comparison.get('points') or [],
         'benchmark_return_pct': comparison.get('return_pct'), 'benchmark_as_of': comparison.get('as_of')}
+
+
+def _held_group_return(members):
+    """Same profit / (opening value + buys) basis as Leonteq position returns."""
+    if not members or any(row.get('result_eur') is None or row.get('avg_capital_eur') is None
+                          for row in members):
+        return None
+    capital = sum(row['avg_capital_eur'] for row in members)
+    return 100 * sum(row['result_eur'] for row in members) / capital if capital > 0 else None
 
 
 def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
@@ -495,12 +561,12 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
     from routers._airs_holding_isin import classify_bucket
     from routers._benchmark_etf import PROXY, etf_returns
 
-    source = detail(display_name)
+    source = detail(display_name, compact_accounting=True)
     composition = source.get('composition') or {}
     if not source.get('success') or not composition.get('groups'):
         raise HTTPException(409, 'Leonteq holdings are unavailable. Refresh this portfolio.')
     summary = source.get('summary') or {}
-    as_of = summary.get('as_of') or composition.get('as_of')
+    as_of = composition.get('as_of') or summary.get('as_of')
     inception = summary.get('inception_date')
     if not inception and summary.get('start_date'):
         try:
@@ -590,7 +656,7 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
                     own_return_source='leonteq_transactions', own_return_from=measured['from'],
                     own_return_as_of=measured['to'], avg_capital_eur=capital,
                     money_weighted_return_pct=item['return_pct'], contribution_pct=item['contribution_pct'])
-            elif row['bucket'] == 'Cash':
+            elif identity == 'cash:EUR':
                 cash = measured.get('cash') or {}
                 row.update(result_eur=0, contribution_pct=0, own_return_pct=0,
                     own_return_source='leonteq_transactions', start_value_eur=cash.get('opening'),
@@ -615,10 +681,19 @@ def analysis(display_name, benchmark='ACWI', include_holding_risk=False):
             'note': ('Estimated contributions using daily opening capital where cash-flow timing is unresolved. '
                      'The unallocated source difference is shown separately.' if estimated else
                      'Leonteq net transactions and daily valuations; contributions are geometrically linked.')
+                    + f" Contributions cover {measured['from']} to {measured['to']}."
                     + (f" AMC fees: EUR {abs(fee['profit']):.2f} ({fee['contribution_pct']:+.4f} pp), included separately." if fee else '')}
         for bucket, group in allocation.items():
             members = [row for row in valued if row['bucket'] == bucket]
-            group['contribution_pct'] = sum(row.get('contribution_pct') or 0 for row in members)
+            contributions = [row['contribution_pct'] for row in members if row['contribution_pct'] is not None]
+            group['contribution_pct'] = sum(contributions) if len(contributions) == len(members) else None
+            group['return_pct'] = _held_group_return(members)
+        for axis in result.get('axes', []):
+            if axis['axis'] == 'sector':
+                for sector in axis['rows']:
+                    stocks = [row for row in valued if row['bucket'] == 'Equity' and not row['is_fund']
+                              and row['sector'] == sector['bucket']]
+                    sector['held_return_pct'] = _held_group_return(stocks)
     accounting_note = realised['note']
     return {**result, 'source': 'Leonteq', 'weight_basis': 'book', 'as_of': as_of,
             'holdings_as_of': as_of, 'holdings_fetched_at': composition.get('retrieved_at'),

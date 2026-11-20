@@ -33,15 +33,13 @@ const navItems: NavEntry[] = [
   { href: '/' },
   // The AIRS books, their models and the analysis built on them.
   { href: '/management-dashboard' },
+  { href: '/macro-dashboard' },
+  { href: '/research-dashboard' },
   { href: '/valuation' },
-  { href: '/factsheet' },
+  { href: '/benchmarks' },
   { href: '/airs-check' },
   { href: '/leonteq-portfolios' },
   { href: '/market' },
-  //  Beside the dashboard. It is a reading tool rather than a pipeline tool: two companies'
-  // fundamentals side by side, off the same view the Fundamental button opens. Filed with the
-  // one-off admin tools near the bottom it would read as one of them.
-  { href: '/research-dashboard' },
   { href: '/research' },
   { href: '/log-dashboard' },
   //  Near the top, not near the bottom (moved up 2026-08-13; Research Dashboard came in above it
@@ -70,7 +68,7 @@ const navItems: NavEntry[] = [
   { href: '/airs-portfolio' },
   { href: '/debet-calculation' },
   { href: '/request_gurufocus' },
-  { href: '/benchmarks' },
+  { href: '/old-benchmarks' },
   { href: '/isin-compare' },
   { href: '/asset-pipeline' },
   { href: '/alphalab' },

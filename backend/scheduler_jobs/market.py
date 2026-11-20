@@ -98,16 +98,20 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False, ru
                 "%s: %s", trigger, type(proxy_error).__name__, proxy_error,
             )
 
-        if raise_on_failure and (backfill.get("failed") or nav_fallback.get("failed") or not proxies_refreshed):
-            nav_errors = '; '.join(f"{row['isin']} / {row['provider']} issue {row['issue_id']}: {row['error']}"
-                                  for row in nav_fallback.get('results', []) if row.get('error'))
-            require_complete(f"Price source preparation incomplete: missing-series failures={backfill.get('failed', 0)}, "
-                             f"NAV failures={nav_fallback.get('failed', 0)}, benchmark proxies={proxies_refreshed}. "
-                             f"{nav_errors} Completed prices are saved; retry asset_price_refresh after resolving the source error.",
-                             {'backfill': backfill, 'nav_fallback': nav_fallback,
-                              'analyse_benchmark_proxies_refreshed': proxies_refreshed})
+        source_failure = raise_on_failure and (backfill.get("failed") or nav_fallback.get("failed") or not proxies_refreshed)
+
+        def require_sources_complete(prices=None):
+            if source_failure:
+                nav_errors = '; '.join(f"{row['isin']} / {row['provider']} issue {row['issue_id']}: {row['error']}"
+                                      for row in nav_fallback.get('results', []) if row.get('error'))
+                require_complete(f"Price source preparation incomplete: missing-series failures={backfill.get('failed', 0)}, "
+                                 f"NAV failures={nav_fallback.get('failed', 0)}, benchmark proxies={proxies_refreshed}. "
+                                 f"{nav_errors} Completed prices are saved; retry asset_price_refresh after resolving the source error.",
+                                 {**(prices or {}), 'backfill': backfill, 'nav_fallback': nav_fallback,
+                                  'analyse_benchmark_proxies_refreshed': proxies_refreshed})
 
         if not stale:
+            require_sources_complete()
             _log.info(
                 "[scheduler] asset price refresh (%s): all %s watched instrument(s) current as of "
                 "%s — nothing to do", trigger, considered, latest,
@@ -156,6 +160,9 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False, ru
         # instruments in the durable receipt, including on startup, without crashing startup.
         unavailable = sum(bool(row.get('still_stale')) and row.get('status') == 'unavailable' for row in r.get('results', []))
         r['vendor_unavailable'] = unavailable
+        # Repair independent holdings even when another source failed, and
+        # preserve their outcomes together in the failed job's receipt.
+        require_sources_complete(r)
         if r["failed"] or remaining > unavailable or r.get("skipped"):
             require_complete(f"Watched instrument price refresh incomplete: {detail}", r)
         if proxies_refreshed is not None:
@@ -219,14 +226,16 @@ def _body_benchmark_price_slice(ctx=None, *, runtime: JobRuntime) -> tuple[str, 
     fetched = sum(int(s.get("prices_fetched") or 0) for s in summaries.values())
     moved = sum(int(s.get("prices_moved") or 0) for s in summaries.values())
     failed = sum(int(s.get("prices_failed") or 0) for s in summaries.values())
+    deferred = sum(int(s.get("prices_deferred") or 0) for s in summaries.values())
     reused = sum(int(s.get("prices_skipped_overlap") or 0) for s in summaries.values())
     current = sum(int(s.get("prices_skipped_current") or 0) for s in summaries.values())
     _log.info("[benchmark-prices] %s; %d price series fetched, %d updated, %d failed",
               {label: s.get("priceable", 0) for label, s in summaries.items()}, fetched, moved, failed)
     rank_detail, rank_summary = runtime.relative_momentum(ctx)
-    if failed or any(s.get("failed") or s.get("universe_members") == 0 for s in summaries.values()) or rank_summary.get("failed"):
+    if failed or deferred or any(s.get("failed") or s.get("universe_members") == 0 for s in summaries.values()) or rank_summary.get("failed"):
         require_complete("Dashboard benchmark prices or momentum ranks are incomplete",
-                          {"benchmarks": summaries, "relative_momentum": rank_summary, "prices_failed": failed})
+                          {"benchmarks": summaries, "relative_momentum": rank_summary, "prices_failed": failed,
+                           "prices_deferred": deferred})
     return (f"{fetched} unique price series checked; {reused} overlapping constituent(s) reused; "
             f"{current} already current; {moved} updated; {rank_detail}",
             {"benchmarks": summaries, "prices_fetched": fetched, "prices_moved": moved,

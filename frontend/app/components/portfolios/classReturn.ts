@@ -25,6 +25,8 @@ export type ClassReturnRow = {
   start_value_eur?: number | null;
   /** The same AIRS return rendered on the position row, in percent. */
   own_return_pct?: number | null;
+  weight_start_pct?: number | null;
+  weight_now_pct?: number | null;
 };
 
 export type ClassReturn = {
@@ -62,7 +64,19 @@ export function classWeightedReturn(
    * unknown to be ignored — where a 0% states the drag.
    */
   zeroWhenNoOpening = false,
+  usePortfolioWeights = false,
 ): ClassReturn {
+  if (usePortfolioWeights) {
+    const measured = rows.filter(row => (row.weight_start_pct ?? 0) > 0 && row.own_return_pct != null);
+    const openingWeight = measured.reduce((sum, row) => sum + row.weight_start_pct!, 0);
+    const currentWeight = (positions: readonly ClassReturnRow[]) =>
+      positions.reduce((sum, row) => sum + Math.max(0, row.weight_now_pct ?? 0), 0);
+    const total = currentWeight(rows);
+    return { ...EMPTY, rows: rows.length, legs: measured.length, missing: rows.length - measured.length,
+      pct: openingWeight > 0
+        ? measured.reduce((sum, row) => sum + row.weight_start_pct! * row.own_return_pct!, 0) / openingWeight : null,
+      coveredPct: total > 0 ? currentWeight(measured) / total * 100 : 0 };
+  }
   if (rows.length && rows.every(row => row.own_return_source === 'leonteq_transactions')) {
     const measured = rows.filter(row => (row.avg_capital_eur ?? 0) > 0 && row.result_eur != null);
     const capital = measured.reduce((sum, row) => sum + row.avg_capital_eur!, 0);

@@ -24,6 +24,11 @@ def _entries() -> list[dict]:
 
 
 class TestTheOverridesFileIsWellFormed:
+    def test_reviewed_ticker_changes_keep_the_same_security(self):
+        got = {entry['isin']: entry['symbol'] for entry in _entries()}
+        assert got['US69932A2042'] == 'SKYD'
+        assert got['US29476L1070'] == 'VMRK'
+
     def test_it_parses(self):
         """The whole point: `load_file_overrides` cannot tell you this, because it is written to
         keep going when it is false."""

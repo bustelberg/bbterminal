@@ -138,8 +138,8 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     ),
     JobSpec(
         id="job_watchdog",
-        label="Watchdog — re-run broken jobs",
-        fills="nothing directly; it re-runs the jobs the automatic-jobs page reports as broken",
+        label="Watchdog — retry overdue or interrupted jobs",
+        fills="No data directly. Retries eligible overdue or interrupted jobs.",
         cadence="Every day, 11:00 UTC",
         #  11:00 UTC, WHICH IS SIX HOURS AFTER THE PIPELINE IT MOSTLY EXISTS FOR. Late enough
         # that a 05:00 run has certainly either finished or died, and late enough that a re-run of
@@ -163,7 +163,7 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     JobSpec(
         id="daily_price_slice",
         label="Daily price slice (most-stale companies)",
-        fills="metric_data for the most-stale companies — the whole book every ~19 days",
+        fills="Yahoo closes and volumes in asset_price for the most-stale companies",
         cadence="Every day, 12:00 UTC",
         trigger={"hour": 12, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "misfire_grace_time": 3600},
@@ -245,6 +245,16 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
         max_age_hours=30,
         note='Adjusted ETF histories in EUR: ACWI, QAI and HDG converted from USD; SYBA (IE00B41RYL63) quoted in EUR. QAI and HDG are hedge-fund replication proxies. Short histories are labelled separately; no synthetic backfill.',
+    ),
+    JobSpec(
+        id='macro_dashboard_daily',
+        label='Daily Macro Dashboard refresh',
+        fills='Saved OECD and FRED indicator histories',
+        cadence='Daily, 08:30 Amsterdam',
+        trigger={'hour': 8, 'minute': 30, 'timezone': 'Europe/Amsterdam'},
+        options={'coalesce': True, 'max_instances': 1, 'misfire_grace_time': 21600},
+        max_age_hours=30,
+        note='Checks all macro sources independently. Failed sources keep their saved observations.',
     ),
     JobSpec(
         id='acwi_weekly_coverage',

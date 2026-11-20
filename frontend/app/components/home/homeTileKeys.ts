@@ -35,7 +35,7 @@ export type HomeTileKey =
   | '/airs-portfolio'
   | '/debet-calculation'
   | '/request_gurufocus'
-  | '/benchmarks';
+  | '/old-benchmarks';
 
 /**
  * Display order, and the ONE list of what exists.
@@ -61,5 +61,5 @@ export const HOME_TILE_ORDER: readonly HomeTileKey[] = [
   '/airs-portfolio',
   '/debet-calculation',
   '/request_gurufocus',
-  '/benchmarks',
+  '/old-benchmarks',
 ];

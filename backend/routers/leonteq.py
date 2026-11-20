@@ -50,8 +50,11 @@ async def management_topselectie(name: str, benchmark: str | None = None):
 
 @router.get('/api/leonteq/management/topselecties/{name}/analysis')
 async def management_topselectie_analysis(name: str, benchmark: str = 'ACWI', include_holding_risk: bool = False):
+    from common.read_cache import read_cache
     from leonteq.management import analysis
-    return await asyncio.to_thread(analysis, name, benchmark, include_holding_risk)
+
+    with read_cache('leonteq-analysis'):
+        return await asyncio.to_thread(analysis, name, benchmark, include_holding_risk)
 
 
 @router.post('/api/leonteq/management/topselecties/{name}/refresh/job')

@@ -95,6 +95,7 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 _USER_READ_PREFIXES: tuple[str, ...] = (
     '/api/leonteq/management/topselecties',
     "/api/market/",
+    "/api/macro-dashboard/indicators",
     "/api/log-dashboard/",
     "/api/companies",
     "/api/earnings",
@@ -249,6 +250,7 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
 # overrides, and renaming a book. Those CHANGE what the page says; a refresh only makes it current.
 # That is the line, and it is the one the frontend's remaining `isAdmin` guards draw too.
 _USER_REFRESH_PATHS: frozenset[str] = frozenset({
+    '/api/airs/dashboard/returns/refresh/job',
     '/api/benchmarks/factsheet/refresh',
     # Overview → "Refresh all from AIRS", both halves (accounts, then model portfolios).
     "/api/airs/vermogen/refresh/job",
@@ -281,6 +283,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
 _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/macro-dashboard/indicators/[a-z0-9-]+/fetch$"),
     re.compile(r"^/api/leonteq/management/topselecties/[^/]+/refresh/job$"),
     re.compile(r"^/api/airs/valuation/portfolios/\d+/refresh$"),
     re.compile(r"^/api/airs/valuation/portfolios/\d+/dashboard/refresh$"),

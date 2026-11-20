@@ -12,9 +12,9 @@ export function useHoldingReturnLabel() {
 }
 
 /** Shared by position rows, asset classes and sold-position totals. */
-export default function HoldingsColumnExplanation({ kind, amount, total, value, asOf }: {
+export default function HoldingsColumnExplanation({ kind, amount, total, value, asOf, toppenberg }: {
   kind: 'weight' | 'contribution'; amount?: number | null; total?: number | null;
-  value?: number | null; asOf?: string | null;
+  value?: number | null; asOf?: string | null; toppenberg?: boolean;
 }) {
   const [lang] = useLang();
   const source = useContext(HoldingsColumnSource);
@@ -26,6 +26,17 @@ export default function HoldingsColumnExplanation({ kind, amount, total, value, 
     style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(number);
   const result = !available ? '—' : `${kind === 'contribution' && value >= 0 ? '+' : ''}${value.toFixed(2)}${kind === 'weight' ? '%' : 'pp'}`;
+  if (toppenberg) {
+    const explanation = kind === 'weight'
+      ? (nl ? 'Het TopSelectie-gewicht komt uit AIRS. Bij doorkijk telt ook het Leonteq-gewicht van de onderliggende positie mee.'
+        : 'The TopSelectie weight comes from AIRS. Expanded positions also use their weight within the Leonteq sleeve.')
+      : (nl ? 'Genormaliseerd AIRS-gewicht maal het Leonteq-rendement over de gezamenlijke periode. Voor cash rekenen we met 0%.'
+        : 'Normalized AIRS weight times the Leonteq return over the shared period. Cash assumes a 0% return.');
+    return <SimpleExplanation details={<>
+      <p>{result}</p>
+      <p>{facts.weights(asOf)}</p>
+    </>}>{explanation}</SimpleExplanation>;
+  }
   const text = !available
     ? source === 'Leonteq' && kind === 'contribution'
       ? accounting?.note ?? (nl ? 'Leonteq-bijdrage niet beschikbaar: openingswaarderingen of netto transacties ontbreken.'

@@ -562,7 +562,17 @@ def _unavailable_close(symbol: str, stored: str, expected: str) -> dict:
         # retry loop. Throttling propagates immediately to the caller.
         raw = yahoo.chart_window(symbol, start, end, '1d', diagnostics=diagnostics)
         if raw:
-            break
+            meta = raw.get('meta') or {}
+            # A metadata-only HTTP 200 is not evidence that history is absent.
+            # Retry it just like a missing response, but reject another listing
+            # immediately rather than using it as recovery evidence.
+            if meta.get('symbol') and meta['symbol'].upper() != symbol.upper():
+                break
+            closes = (((raw.get('indicators') or {}).get('quote') or [{}])[0]).get('close') or []
+            if any(i < len(closes) and closes[i] is not None
+                   and yahoo.is_completed_daily_bar(stamp, meta)
+                   for i, stamp in enumerate(raw.get('timestamp') or [])):
+                break
     if not raw:
         raise RuntimeError(
             f'Yahoo did not return a price-availability response for {symbol} after 2 attempts '
@@ -606,6 +616,7 @@ def refresh_stale(
     `isins` scopes it to one caller's instruments — see `find_stale`.
     """
     from asset_pipeline import store  # noqa: PLC0415
+    from asset_pipeline.listing_lifecycle import ended_listing  # noqa: PLC0415
     from asset_pipeline.yahoo import YahooThrottled  # noqa: PLC0415
 
     stale, latest_all, considered = find_stale(held_only, stale_days, isins=isins)
@@ -627,6 +638,19 @@ def refresh_stale(
         outcome = {"isin": r.get("isin"), "symbol": sym, "analysis_id": aid,
                    "previous_close": was, "latest_close": was, "expected_close": latest_all}
         results.append(outcome)
+        ended = ended_listing(r.get('isin'), sym, latest_all)
+        if ended and was >= ended['last_trading_date']:
+            # Historical prices remain dated and stale for holdings audits. The
+            # daily fetch itself has no work after a reviewed trading end date.
+            # Never label this as provider availability or manufacture a close.
+            outcome.update(status='unavailable', listing_ended=True, still_stale=True,
+                           last_trading_date=ended['last_trading_date'], source=ended['source'],
+                           reason=f"Listing ended: {ended['event']}. No subsequent daily close is expected; "
+                                  'reconcile any remaining holdings and corporate-action proceeds. Saved history is retained.')
+            unchanged += 1
+            if on_progress:
+                on_progress(f"[{i}/{len(stale)}] {sym}: {outcome['reason']}")
+            continue
         try:
             if store.extend_series(aid, sym, was) is None:
                 store.store_series(aid, sym, None)      # no COPY path: slow, correct, never wrong

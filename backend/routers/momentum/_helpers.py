@@ -44,6 +44,9 @@ def register_startup_hooks(app) -> None:
         from `gurufocus_exchange`. Holdings on missing codes are silently
         dropped during ACWI sync — that bug ate MSFT once already, this
         check is so it doesn't happen again."""
+        from runtime_policy import production_automation_enabled
+        if not production_automation_enabled():
+            return
         try:
             from index_universe.acwi import expected_db_exchange_codes
 

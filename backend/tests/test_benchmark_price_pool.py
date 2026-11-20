@@ -193,6 +193,10 @@ class TestOneDeadSymbolDoesNotEndTheRun:
         rig["raise_for"] = {"SYM3", "SYM17"}
         out = br._prices(companies, isins, grid, "2026-08-10", rig["emit"])
         assert out["failed"] == 2
+        assert sorted(out['errors'], key=lambda row: row['symbol']) == [
+            {'isin': _isin(17), 'symbol': 'SYM17', 'analysis_id': 1017, 'error': 'RuntimeError: boom'},
+            {'isin': _isin(3), 'symbol': 'SYM3', 'analysis_id': 1003, 'error': 'RuntimeError: boom'},
+        ]
         assert out["fetched"] == _TOTAL - 2
         # Every constituent still got its line, failures included — they carry the exception.
         assert sorted(_steps(rig["lines"])) == list(range(1, _TOTAL + 1))
@@ -234,3 +238,36 @@ class TestNothingToDo:
         assert out["total"] == 0
         assert out["fetched"] == 0
         assert "stopped_at" not in out
+
+
+def test_throttling_defers_queue_with_one_warning_and_no_further_fetches(rig, monkeypatch, caplog):
+    from asset_pipeline import store
+    from asset_pipeline.yahoo import YahooThrottled
+    from unittest.mock import Mock
+    monkeypatch.setattr(br, '_PRICE_WORKERS', 1)
+    fetch = Mock(side_effect=YahooThrottled('Yahoo recovery probe already running; retry later'))
+    monkeypatch.setattr(store, 'extend_series', fetch)
+    companies, isins, grid = _fixture()
+    out = br._prices(companies, isins, grid, '2026-08-10', rig['emit'])
+    fetch.assert_called_once()
+    assert out['failed'] == 0
+    assert out['fetched'] == 0
+    assert out['deferred'] == _TOTAL
+    assert {row['isin'] for row in out['deferred_instruments']} == set(isins)
+    assert 'recovery probe' in out['throttle_reason']
+    assert sum('refresh paused' in line for line in rig['lines']) == 1
+    assert sum('refresh paused' in record.message for record in caplog.records) == 1
+
+
+def test_scheduler_does_not_mark_deferred_benchmark_refresh_successful(monkeypatch):
+    from scheduler_jobs import market
+    from dashboard_daily import IncompleteRefresh
+    from types import SimpleNamespace
+    monkeypatch.setattr(br, 'refresh_benchmark', lambda *a, **kw: {
+        'universe_members': 40, 'prices_failed': 0, 'prices_deferred': 40})
+    runtime = SimpleNamespace(reporter=lambda ctx: lambda *a: None,
+                              relative_momentum=lambda ctx: ('ranked', {}))
+    with pytest.raises(IncompleteRefresh) as caught:
+        market._body_benchmark_price_slice(runtime=runtime)
+    assert caught.value.summary['prices_deferred'] == 120
+    assert caught.value.summary['prices_failed'] == 0

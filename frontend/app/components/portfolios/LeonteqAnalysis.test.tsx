@@ -72,7 +72,9 @@ it.each([false, true, 'estimated'])('keeps the same source-only holdings table w
     if (estimated) {
       expect(text).not.toContain('Estimated contributions');
       expect(text).not.toContain('Unallocated source difference: 0.15 pp');
-      expect([...document.querySelectorAll('th')].some(cell => cell.textContent?.includes('Contribution ≈'))).toBe(true);
+      const contribution = [...document.querySelectorAll('th')].find(cell => cell.textContent?.includes('Contribution'));
+      expect(contribution).toBeDefined();
+      expect(contribution?.textContent).not.toContain('≈');
       expect(text).toContain('Difference to reported return');
       expect(host.querySelector('[aria-label="Fees"]')?.textContent).toContain('-0.24pp');
       expect(host.querySelector('tfoot tr:last-child td:last-child')?.textContent).toContain('+8.39pp');

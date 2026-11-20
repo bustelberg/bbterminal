@@ -415,11 +415,17 @@ def _run_recorded_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str
 
 
 def _submit_scheduled_work(name: str, work) -> bool:
+    from runtime_policy import production_automation_enabled
+    if not production_automation_enabled():
+        return False
     return admission.submit(name, work)
 
 
 def _spawn_body(job_id: str) -> None:
     """The scheduler tick: run a declared body on bounded background capacity."""
+    from runtime_policy import production_automation_enabled
+    if not production_automation_enabled():
+        return
     def _go() -> None:
         try:
             _run_body(job_id)
@@ -668,6 +674,9 @@ def list_scheduled_jobs() -> list[dict]:
 def _fire_job(job_name: str) -> None:
     """Wrapper passed to APScheduler — guards against an uncaught exception
     inside the dispatcher killing the scheduler thread."""
+    from runtime_policy import production_automation_enabled
+    if not production_automation_enabled():
+        return
     try:
         run_id = kick_off_refresh(job_name, "auto")
         _log.info("[scheduler] fired %s → run_id=%s", job_name, run_id)
@@ -748,6 +757,9 @@ def _fire_price_update_retry() -> None:
 
 
 def maybe_schedule_price_retry(*, reason: str = "") -> None:
+    from runtime_policy import production_automation_enabled
+    if not production_automation_enabled():
+        return
     retries.schedule_price_retry(_scheduler, _fire_price_update_retry, reason=reason)
 
 
@@ -1120,6 +1132,11 @@ def _body_benchmark_factsheet(ctx=None):
     return run(ctx)
 
 
+def _body_macro_dashboard(ctx=None):
+    from scheduler_jobs.macro import run
+    return run(ctx, report=_reporter(ctx))
+
+
 def _register_bodies() -> None:
     """Fill `JOB_BODIES` once every body is defined.
 
@@ -1129,6 +1146,7 @@ def _register_bodies() -> None:
     """
     JOB_BODIES.update({
         "benchmark_factsheet_daily": _body_benchmark_factsheet,
+        "macro_dashboard_daily": _body_macro_dashboard,
         "portfolio_valuation_daily": _body_portfolio_valuation,
         "airs_weekly_returns": _body_airs_weekly_returns,
         "dashboard_market": _body_dashboard_market,
@@ -1405,8 +1423,9 @@ def register_scheduler(app) -> None:
         # Allow operators to disable the in-process scheduler via env var —
         # useful when running multiple replicas, during a manual ingest test,
         # or in CI where we don't want background jobs touching real data.
-        if os.environ.get("DISABLE_SCHEDULER", "").lower() in ("1", "true", "yes"):
-            _log.info("[scheduler] DISABLE_SCHEDULER set — in-process jobs not started")
+        from runtime_policy import production_automation_enabled
+        if not production_automation_enabled():
+            _log.info("[scheduler] automatic jobs disabled: production worker required")
             return
 
         # These threads only dispatch; long work has separate bounded capacity.
@@ -1527,6 +1546,7 @@ def register_scheduler(app) -> None:
         _register("airs_weekly_returns", _fire_airs_weekly_returns)
         _register("portfolio_valuation_daily", lambda: _spawn_body("portfolio_valuation_daily"))
         _register("benchmark_factsheet_daily", lambda: _spawn_body("benchmark_factsheet_daily"))
+        _register("macro_dashboard_daily", lambda: _spawn_body("macro_dashboard_daily"))
         _register("acwi_weekly_coverage", _fire_acwi_weekly_coverage)
         _register("acwi_monthly_fundamentals", lambda: _spawn_body("acwi_monthly_fundamentals"))
         # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week

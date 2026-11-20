@@ -155,14 +155,20 @@ def read(page, ids, name=None, performance=False, transactions=False, *, account
          valuation_date=None, history=False, end=None, instructions=False, cash_history=False,
          previous_cash_history=None):
     def get(path):
-        try:
-            response = page.request.get(f'{BASE}/{path}', headers={'Cache-Control': 'no-cache'}, timeout=10000)
-        except Exception:
-            # Browser transport errors can contain authenticated request headers.
-            raise ApiUnavailable('The authenticated source API request failed; retry the refresh') from None
-        if not response.ok:
-            raise ApiUnavailable('The authenticated source API is unavailable')
-        return response.json()
+        attempts = 3 if valuation_date else 1
+        for attempt in range(attempts):
+            try:
+                response = page.request.get(f'{BASE}/{path}', headers={'Cache-Control': 'no-cache'}, timeout=10000)
+            except Exception:
+                # Browser transport errors can contain authenticated request headers.
+                if attempt == attempts - 1:
+                    raise ApiUnavailable('The authenticated source API request failed; retry the refresh') from None
+                continue
+            if response.ok:
+                return response.json()
+            if getattr(response, 'status', None) not in {429, 500, 502, 503, 504}:
+                break
+        raise ApiUnavailable('The authenticated source API is unavailable')
 
     if name is None or name not in ids:
         payload = get('amc?sort=%2Bname')

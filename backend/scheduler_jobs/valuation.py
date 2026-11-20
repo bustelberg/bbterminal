@@ -6,6 +6,7 @@ from scheduler_runtime.execution import cancel_requested, require_complete
 def run(ctx=None, *, report=None):
     from services.valuation_dashboard import prepare_all
     from leonteq.management import prepare_dashboard_overview, refresh_returns
+    from services.toppenberg import configured_entries
     from routers._benchmark_etf import ensure_fresh
     context = LogContext(cancelled=lambda: cancel_requested(ctx), step=report, label='Portfolio valuation')
     context.check()
@@ -15,7 +16,7 @@ def run(ctx=None, *, report=None):
             benchmark_error = 'No Yahoo Finance ACWI benchmark prices are available.'
     except Exception as exc:
         benchmark_error = f'Yahoo Finance ACWI refresh failed ({type(exc).__name__}).'
-    returns = refresh_returns(context)
+    returns = refresh_returns(context, configured=configured_entries())
     summary = prepare_all(context)
     if not prepare_dashboard_overview():
         summary['errors']['leonteq_dashboard'] = 'The prepared TopSelecties dashboard was not saved.'

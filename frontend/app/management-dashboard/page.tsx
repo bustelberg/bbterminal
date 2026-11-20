@@ -68,6 +68,8 @@ export default function Page() {
     if (!force && cached?.data[source] && Date.now() - cached.fetchedAt < 60_000) {
       return cached.data[source];
     }
+    // A request started before the refresh finished may contain the old returns.
+    if (force && pending.current) await pending.current.catch(() => undefined);
     pending.current ??= apiFetch(`${API_URL}/api/airs/portfolios/management-bundle`,
       { cache: 'no-store', noReadCache: true }).then(async response => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);

@@ -420,7 +420,8 @@ class _Throttle:
         self._open_until = 0.0
         self._recovering = False
         self.canary = os.environ.get("YAHOO_CANARY", "AAPL")
-        rps = _envf("YAHOO_RPS", 10.0)
+        # Leave more room for long benchmark runs before Yahoo throttles the shared client.
+        rps = _envf("YAHOO_RPS", 5.0)
         self.delay = max(self.min_delay, (1.0 / rps) if rps > 0 else self.min_delay)
         self._next_ok = 0.0  # earliest monotonic time the next request may START
         self._sem = threading.Semaphore(max(1, int(_envf("YAHOO_CONCURRENCY", 4))))

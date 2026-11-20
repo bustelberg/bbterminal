@@ -74,12 +74,12 @@ def _body_dashboard_freshness(ctx=None, *, runtime: JobRuntime) -> tuple[str, di
 
     from dashboard_daily import freshness
     result = freshness(dashboard_only=True)
-    # If source coverage is complete and only publication lags, catch up now
-    # rather than failing repeatedly while two-model background batches run.
+    # Catch up outdated publications independently of source coverage issues.
+    # A single delayed fund must not leave all other Analyse bundles outdated
+    # after the midday price refresh changes their source version.
     publication_issues = [issue for account in result['accounts'] for issue in account['issues']]
-    if (result['incomplete'] and not result['empty_roster'] and not result['global_issues']
-            and publication_issues and all(issue.startswith('Analyse:') for issue in publication_issues)
-            and not any(account.get('unmapped_isins') for account in result['accounts'])):
+    if (result['incomplete'] and not result['empty_roster']
+            and any(issue.startswith('Analyse:') for issue in publication_issues)):
         from routers._prepared_analyse import run_controlled
         try:
             repair = run_controlled(busy=runtime.sources_busy, should_stop=lambda: cancel_requested(ctx),

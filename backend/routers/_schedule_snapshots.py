@@ -657,7 +657,8 @@ def ensure_snapshot_fresh(strategy_id: int) -> int | None:
     """
     import os  # noqa: PLC0415
 
-    if os.getenv("DISABLE_LAZY_REPRICE"):
+    from runtime_policy import production_automation_enabled
+    if not production_automation_enabled() or os.getenv("DISABLE_LAZY_REPRICE"):
         return None
     newest = (
         supabase.table("current_picks_snapshot")

@@ -262,6 +262,9 @@ def _price_freshness_issue(isin, mapped, close, expected, source, day):
         return (message + '; no matching provider-availability receipt today' + context
                 + '; next: run asset_price_refresh, then dashboard_freshness; inspect the instrument receipt if still stale')
     receipt = receipts[0]
+    if receipt.get('listing_ended'):
+        return (message + f"; listing ended after {receipt.get('last_trading_date')}: {receipt.get('reason')}" + context
+                + '; next: reconcile the corporate action and remaining AIRS holdings; a newer close for the retired listing is not expected')
     if receipt.get('status') == 'error':
         return (message + f"; price refresh failed: {str(receipt.get('error') or 'unknown error')[:300]}" + context
                 + '; next: resolve the provider/storage error in asset_price_refresh, retry that job, then dashboard_freshness')

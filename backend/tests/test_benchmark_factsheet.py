@@ -9,6 +9,36 @@ import pytest
 from services import benchmark_factsheet as F
 
 
+def test_largest_drawdowns_counts_each_episode_once_and_includes_open_drawdown():
+    assert F.largest_drawdowns([100, 85, 90, 70, 100, 80, 110, 99]) == pytest.approx([-30, -20, -10])
+
+
+def test_daily_cvar_weights_the_fractional_tail_observation():
+    returns = [-.08, -.02] + [.01] * 28
+    assert F.historical_cvar(returns) == pytest.approx(6)
+
+
+def test_selloff_metrics_exclude_acwi_up_days():
+    days = ['2025-04-02', '2025-04-03', '2025-04-04', '2025-04-07', '2025-04-08']
+    rows = [{'ticker': ticker, 'source_prices_eur': dict(zip(days, values))}
+            for ticker, values in [('ACWI', [100, 95, 90, 99, 98]), ('HDG', [100, 102, 103, 95, 96])]]
+    tariff = next(row for row in F.downside_comparison(rows) if row['key'] == 'tariffs')
+    assert tariff['observations'] == 3
+    assert tariff['hdg_positive'] == 3
+    assert tariff['acwi_mean_pct'] < 0 < tariff['hdg_mean_pct']
+    assert tariff['correlation'] is not None
+
+
+def test_correlations_use_only_shared_price_dates_for_the_three_displayed_etfs():
+    prices = {'2026-11-16': 100, '2026-11-18': 100, '2026-11-19': 110}
+    rows = [{'ticker': ticker, 'end': '2026-11-19', 'source_prices_eur': dict(prices)}
+            for ticker in ('ACWI', 'SYBA.DE', 'HDG')]
+    rows[0]['source_prices_eur']['2026-11-17'] = 200
+    result = F.benchmark_correlations(rows)
+    assert result['observations'] == 2
+    assert result['matrix'][0][1] == pytest.approx(1)
+
+
 def series(start, end, growth=1.0001):
     result = {}
     value = 100

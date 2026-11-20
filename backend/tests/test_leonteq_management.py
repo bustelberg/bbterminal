@@ -61,6 +61,24 @@ def test_previous_accounting_cannot_leak_into_a_newer_source_snapshot(sources):
     assert 'predates' in result['accounting']['reason']
 
 
+def test_analysis_uses_dated_accounting_without_replacing_newer_headline(monkeypatch):
+    from leonteq import portal_api
+
+    monkeypatch.setattr(portal_api, 'composition', lambda closing, name: {
+        'as_of': '2026-11-17', 'groups': closing['groups']})
+    monkeypatch.setattr(m.return_windows, 'cached', lambda source: {
+        'to': '2026-11-17', 'ytd_pct': 3.0})
+    ledger = {'success': True, 'retrieved_at': '2026-11-18',
+              'result': {'available': True, 'to': '2026-11-17', 'reported_ytd_pct': 3.0},
+              'valuations': {'2026-11-17': {'groups': [{'name': 'dated holdings'}]}}}
+    result = m._snapshot_detail('EuropaTopSelectie', {}, {'name': 'Source', 'as_of': '2026-11-19', 'ytd': '3.46%'},
+                                {'retrieved_at': '2026-11-20', 'as_of': '2026-11-19'},
+                                {}, ledger, prefer_accounting_snapshot=True)
+    assert result['accounting']['result']['available']
+    assert result['composition']['as_of'] == '2026-11-17'
+    assert result['summary']['as_of'] == '2026-11-19'
+
+
 def test_reconciled_ledger_selects_its_actual_dated_closing_composition(sources):
     m.portfolio_cache.saved_portfolios.return_value['portfolios'][0]['ytd'] = '0.00%'
     sources[1].return_value['retrieved_at'] = '2026-11-16T08:00:00Z'

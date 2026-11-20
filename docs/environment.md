@@ -5,9 +5,10 @@ For job failures, stale data, and partial results, see
 
 Start with a local Supabase stack and an isolated local database. Do not copy
 production environment files or connect a development server to production.
-Even with the scheduler disabled, startup hooks can update mappings, enqueue
-resolver entries, and reset interrupted backfills. Manual refresh actions also
-write data and may contact external providers.
+Local startup does not register scheduled jobs, refresh data, apply mappings,
+enqueue resolver entries, reset database rows, or prewarm caches. This is enforced
+in code even when disable flags are absent. Manual refresh actions still write
+data and may contact external providers.
 
 ## First setup
 
@@ -32,7 +33,8 @@ blank values in the template deliberately clear matching defaults from `.env`.
 Next.js loads the frontend's `.env.local`; `NEXT_PUBLIC_*` values are public
 browser configuration, not secrets. A root `.env.local` is not a substitute for
 these two files. Remove inherited deployment markers such as
-`RAILWAY_PUBLIC_DOMAIN` from your local shell.
+`RAILWAY_PUBLIC_DOMAIN` from your local shell. Set `APP_ENV=local` explicitly
+to keep automatic work disabled even if deployment markers are inherited.
 
 ## Required configuration
 
@@ -89,3 +91,21 @@ unit tests do not require these integrations.
 
 Yahoo price downloads do not require an API key but still use the network and
 provider rate limits. The templates do not authorize production access.
+
+## Production automation boundary
+
+Automatic startup work and scheduled jobs require `APP_ENV=production`, or a
+Railway production environment (`RAILWAY_ENVIRONMENT_NAME=production`). For older
+Railway deployments without an environment name, `RAILWAY_PUBLIC_DOMAIN` remains
+the fallback. An explicit `APP_ENV` takes precedence. Staging and unmarked local
+processes stay quiet, even with `DISABLE_SCHEDULER=0`. `DISABLE_SCHEDULER=1` disables
+all automatic startup work on additional production replicas as well.
+
+Local jobs run only through explicit manual actions. Automatic tick dispatch,
+delayed price retries, background prewarming, and snapshot repricing triggered
+by page reads are blocked in code. Manually started jobs can complete their
+requested stages, but do not schedule later automatic retries.
+
+Production keeps the existing source refreshes, startup catch-up, durable receipts,
+and bounded watchdog recovery. These do not guarantee recovery from arbitrary
+invalid data or unavailable providers: incomplete results remain visible failures.

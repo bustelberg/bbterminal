@@ -89,7 +89,7 @@ _log = logging.getLogger(__name__)
 # How many constituents are priced at once — and, in `_caps`, how many cap writes are in flight.
 #
 #  The pool is not the rate limit. `asset_pipeline.yahoo` is, and always was: it paces every
-# request START through a token bucket (`YAHOO_RPS`, default 10/s), caps in-flight requests with a
+# request START through a token bucket (`YAHOO_RPS`, default 5/s), caps in-flight requests with a
 # semaphore (`YAHOO_CONCURRENCY`, default 4), then detects a ban with a canary probe and cools
 # down. This loop used to run strictly serially AND sleep 0.4s per constituent on top of that — so
 # it held one of the four permitted slots, paced itself twice, and spent ~3 minutes of the S&P's
@@ -397,6 +397,7 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     price that is in no database and on no exchange.
     """
     from asset_pipeline import store
+    from asset_pipeline.yahoo import YahooThrottled
     from asset_pipeline.price_refresh import latest_close_by_analysis
 
     lookback, start_anchor = window_bounds()
@@ -461,13 +462,20 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     # hold, which is an ANSWER (a venue with no close that day, a delisted line, a session still
     # open) and is why it is counted apart from a failure.
     out = {"total": total, "fetched": 0, "moved": 0, "unchanged": 0,
-           "failed": 0, "no_start": 0, "no_end": 0,
+           "failed": 0, "errors": [], "deferred": 0, "deferred_instruments": [], "no_start": 0, "no_end": 0,
            "skipped_overlap": skipped_overlap, "skipped_current": skipped_current}
     #  One lock over the tally *AND* THE COUNTER. They are read together to build a line, and a
     # count that is incremented outside the lock can be reported twice under the same `n`.
     tally = threading.Lock()
     counter = itertools.count(1)
     stopped = threading.Event()
+    throttled = threading.Event()
+
+    def defer(item):
+        isin, aid, sym = item
+        with tally:
+            out['deferred'] += 1
+            out['deferred_instruments'].append({'isin': isin, 'symbol': sym, 'analysis_id': aid})
 
     def _one(item: tuple[str, int, str]) -> None:
         # ThreadPoolExecutor starts with an empty ContextVar context. Name this worker explicitly
@@ -479,6 +487,9 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
 
     def _one_inner(item: tuple[str, int, str]) -> None:
         isin, aid, sym = item
+        if throttled.is_set():
+            defer(item)
+            return
         if should_stop and should_stop():
             #  Said once, by whichever thread sees it first. Every queued constituent passes
             # through here after a Cancel, and one line each would be hundreds of them.
@@ -498,9 +509,23 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
             # has nothing there at all.
             if store.extend_series(aid, sym, lookback) is None:
                 store.store_series(aid, sym, None)   # no COPY path: slow, correct, never wrong
+        except YahooThrottled as e:
+            with tally:
+                first = not throttled.is_set()
+                throttled.set()
+                if first:
+                    out['throttle_reason'] = str(e)
+            defer(item)
+            if first:
+                message = f'Yahoo benchmark refresh paused: {e}; pending instruments deferred until retry'
+                emit('progress', message=message)
+                _log.warning('[benchmark_refresh] %s', message)
+            return
         except Exception as e:  # noqa: BLE001 — one dead symbol must not end the run
             with tally:
                 out["failed"] += 1
+                out["errors"].append({"isin": isin, "symbol": sym, "analysis_id": aid,
+                                      "error": f"{type(e).__name__}: {e}"})
                 n = next(counter)
             emit("progress", message=(
                 f"  [{n}/{total}] {sym:<12} {name:<28} FAILED {type(e).__name__}: {e}"))
@@ -622,6 +647,10 @@ def refresh_benchmark(label: str, emit, should_stop=None, *,
         "prices_moved": px["moved"],
         "prices_unchanged": px["unchanged"],
         "prices_failed": px["failed"],
+        "prices_deferred": px.get('deferred', 0),
+        "deferred_instruments": sorted(px.get('deferred_instruments', []), key=lambda row: (row['symbol'], row['isin'])),
+        "throttle_reason": px.get('throttle_reason'),
+        "price_errors": sorted(px.get("errors", []), key=lambda row: (row['symbol'], row['isin'])),
         "no_start_price": px["no_start"],
         "market_anchor": anchor,
         "seconds": round(took, 1),
@@ -634,7 +663,8 @@ def refresh_benchmark(label: str, emit, should_stop=None, *,
            if px["skipped_overlap"] else "")
         + (f", {px['skipped_current']} already current and not requested"
            if px["skipped_current"] else "")
-        + (f", {px['failed']} failed" if px["failed"] else "")))
+        + (f", {px['failed']} failed" if px["failed"] else "")
+        + (f", {px['deferred']} deferred after Yahoo throttling" if px.get('deferred') else "")))
     return summary
 
 

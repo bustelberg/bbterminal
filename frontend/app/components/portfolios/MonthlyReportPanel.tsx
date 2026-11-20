@@ -11,7 +11,7 @@ import ViaChips from './ViaChips';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { invalidatePerformanceBundle, loadPerformanceBundle, readPerformanceBundle } from './monthlyReportPrefetch';
 import { apiFetch } from '../../../lib/apiFetch';
-import { leonteqPerformanceBundle, type LeonteqPerformanceReturns } from './leonteqPerformanceBundle';
+import { leonteqPerformanceBundle, type LeonteqPerformanceReturns, type LeonteqPerformanceSource } from './leonteqPerformanceBundle';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
 const ctl = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-xs text-fg-muted hover:border-accent-500/50 disabled:opacity-50';
@@ -25,12 +25,15 @@ function positionSortValue(position: MonthlyPosition, key: PositionSortKey) {
   return position[key];
 }
 
-export default function MonthlyReportPanel({ portefeuille, name, variant, leonteqPortfolio, leonteqReturns, benchmarkName, refreshSeq }: {
+export default function MonthlyReportPanel({ portefeuille, name, variant, leonteqPortfolio, leonteqReturns, toppenbergPerformance, benchmarkName, refreshSeq, onRefreshLeonteq, refreshingLeonteq }: {
   portefeuille?: string | null; name: string; variant?: string | null;
   leonteqPortfolio?: string; leonteqReturns?: LeonteqPerformanceReturns; benchmarkName?: string; refreshSeq?: number;
+  toppenbergPerformance?: LeonteqPerformanceSource;
+  onRefreshLeonteq?: () => void; refreshingLeonteq?: boolean;
 }) {
   const [lang] = useLang();
-  const benchmarkLabel = leonteqPortfolio ? benchmarkName ?? 'ACWI' : profileBenchmarkLabel(lang, variant);
+  const benchmarkLabel = leonteqPortfolio && !(toppenbergPerformance && variant)
+    ? benchmarkName ?? 'ACWI' : profileBenchmarkLabel(lang, variant);
   const nl = lang === 'nl', locale = nl ? 'nl-NL' : 'en-GB';
   const text = (en: string, dutch: string) => nl ? dutch : en;
   const [bundle, setBundle] = useState<PerformanceBundle | null>(() => !leonteqPortfolio && portefeuille ? readPerformanceBundle(portefeuille) : null);
@@ -52,7 +55,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
-    if (!portefeuille && !leonteqPortfolio) return;
+    if (toppenbergPerformance || (!portefeuille && !leonteqPortfolio)) return;
     let active = true;
     setError(null);
     setPending(true);
@@ -71,9 +74,10 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-  }, [portefeuille, leonteqPortfolio, leonteqReturns, benchmarkLabel, reload, refreshSeq]);
+  }, [portefeuille, leonteqPortfolio, leonteqReturns, toppenbergPerformance, benchmarkLabel, reload, refreshSeq]);
 
-  const data = bundle?.portefeuille === (leonteqPortfolio ?? portefeuille) ? bundle : null;
+  const data = toppenbergPerformance ? leonteqPerformanceBundle(name, toppenbergPerformance, leonteqReturns)
+    : bundle?.portefeuille === (leonteqPortfolio ?? portefeuille) ? bundle : null;
   const today = data?.current_month ?? '';
   const year = yearSelection && data?.years[yearSelection] ? yearSelection : today.slice(0, 4);
   const report = data?.years[year];
@@ -84,7 +88,9 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   const expanded = canLookThrough ? selectedReport?.snapshot?.lookthrough_positions : undefined;
   const showConstituents = lookThrough && expanded !== undefined;
   const positions = showConstituents ? expanded : selectedReport?.snapshot?.positions;
-  const sortedPositions = positions?.map((position, index) => ({ position, index,
+  const sortedPositions = positions?.filter(position =>
+    !(leonteqPortfolio && month === '2026-08' && position.name === 'Leonteq AMC fees')
+  ).map((position, index) => ({ position, index,
     value: positionSortValue(position, positionSort.key) })).sort((left, right) => {
     const a = left.value, b = right.value;
     if (a == null || b == null) return a == null && b == null ? 0 : a == null ? 1 : -1;
@@ -153,6 +159,9 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   const eurPrice = (value: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   const shortDate = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }).replaceAll('.', '').replace(' sep ', ' sept ');
   const contributionDetails = (position: MonthlyPosition) => {
+    if (toppenbergPerformance) return <p className="text-xs">{text(
+      'The month’s opening weight times the TopSelectie return. All sleeve returns come from Leonteq.',
+      'Het maandelijkse begingewicht maal het TopSelectie-rendement. Alle rendementen komen van Leonteq.')}</p>;
     if (leonteqPortfolio && estimatedGap != null) return <p className="text-xs">{text(
       'Estimated from Leonteq daily position P&L using opening portfolio value where cash-flow timing could not be verified. The difference from the published return remains unallocated.',
       'Geschat uit dagelijkse Leonteq-positieresultaten met het beginvermogen als kasstroomtiming niet kon worden geverifieerd. Het verschil met het gepubliceerde rendement blijft onverdeeld.')}</p>;
@@ -182,6 +191,9 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
   };
   const benchmarkDetails = (key: string) => {
     const benchmark = report?.weighted_benchmark[key];
+    if (toppenbergPerformance && benchmark) return <p className="text-xs">
+      {benchmarkLabel} · {shortDate(benchmark.start_date)} – {shortDate(benchmark.end_date)} · {pct(benchmark.return_pct)}
+    </p>;
     if (leonteqPortfolio && !benchmark) return <p className="text-xs">{text(
       'Monthly benchmark details are not available in this saved Leonteq report. The YTD comparison uses the aligned dates shown above.',
       'Maandelijkse benchmarkdetails zijn niet beschikbaar in dit opgeslagen Leonteq-rapport. De YTD-vergelijking gebruikt de hierboven getoonde gelijke datums.')}</p>;
@@ -250,6 +262,10 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
           <h3 className="text-lg font-medium capitalize text-fg-strong">{monthLabel(month)}</h3>
           <p className="mt-1 text-xs text-fg-subtle">{perf?.periode ? `${text('Through', 'T/m')} ${shortDate(perf.periode)}` : leonteqPortfolio ? text('Leonteq monthly return', 'Maandrendement van Leonteq') : text('Return unavailable', 'Rendement ontbreekt')}{month === today ? ` · ${text('Month to date', 'Lopende maand')}` : ''}</p>
         </div><div className="flex gap-2">
+          {leonteqPortfolio && onRefreshLeonteq && (selectedReport?.positions_through || !positions) &&
+            <button type="button" className={ctl} disabled={refreshingLeonteq} onClick={onRefreshLeonteq}>
+              {refreshingLeonteq ? text('Refreshing…', 'Verversen…') : text('Refresh Leonteq positions', 'Leonteq-posities verversen')}
+            </button>}
           {!leonteqPortfolio && <button type="button" className={ctl} onClick={() => void refreshMonth('monthly-report')} disabled={busy || pending || !!report.warning}>{busy ? text('Reading AIRS…', 'AIRS ophalen…') : selectedReport?.snapshot ? text('Refresh month', 'Maand verversen') : text('Load month from AIRS', 'Maand ophalen uit AIRS')}</button>}
         </div></div>
         {report.warning && <p className="text-xs text-warn-300">{report.warning}</p>}
@@ -269,6 +285,9 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
         <div className={`${box} overflow-hidden`}>
           <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
             <h4 className="text-sm font-medium text-fg-strong">{text('Individual positions', 'Individuele posities')}</h4>
+            {selectedReport?.positions_through && <span className="text-xs text-fg-muted">
+              {text('Positions through', 'Posities t/m')} {shortDate(selectedReport.positions_through)}
+            </span>}
             {expanded && <label className="flex items-center gap-2 text-xs text-fg-muted">
               <input type="checkbox" checked={lookThrough} onChange={(event) => setLookThrough(event.target.checked)} />
               {text('Look through certificates', 'Door certificaten heen kijken')}
@@ -296,7 +315,7 @@ export default function MonthlyReportPanel({ portefeuille, name, variant, leonte
                 weights={position.via} weightTitle={position.certificate
                   ? text(`This row: ${position.certificate}. Percentages are opening weights within each selection.`, `Deze regel: ${position.certificate}. Percentages zijn begingewichten binnen elke selectie.`)
                   : undefined} /></td>}
-              <td className="px-3 py-3 text-right font-mono tabular-nums text-fg-muted">{weight(position.opening_weight_pct)}{position.opening_weight_pct != null && openingWeightDate && <InfoTip className="ml-2" text={`${leonteqPortfolio ? text('Opening weight · Leonteq valuation', 'Begingewicht · Leonteq-waardering') : text('Opening weight · AIRS valuation', 'Begingewicht · AIRS-waardering')}\n${shortDate(openingWeightDate)}`} />}</td>
+              <td className="px-3 py-3 text-right font-mono tabular-nums text-fg-muted">{weight(position.opening_weight_pct)}{position.opening_weight_pct != null && openingWeightDate && <InfoTip className="ml-2" text={`${toppenbergPerformance ? text('Calculated opening weight', 'Berekend begingewicht') : leonteqPortfolio ? text('Opening weight · Leonteq valuation', 'Begingewicht · Leonteq-waardering') : text('Opening weight · AIRS valuation', 'Begingewicht · AIRS-waardering')}\n${shortDate(openingWeightDate)}`} />}</td>
               <td className={`px-3 py-3 text-right font-mono tabular-nums ${tone(position.return_pct)}`}>{pct(position.return_pct)}{position.start_price_eur != null && position.end_price_eur != null && <InfoTip className="ml-2" content={<div className="space-y-2 text-xs">
                 <p className="font-medium text-fg-strong">{text('AIRS price per unit in EUR', 'AIRS-prijs per stuk in EUR')}</p>
                 <table className="w-full"><tbody>

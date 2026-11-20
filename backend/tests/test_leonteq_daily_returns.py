@@ -30,7 +30,7 @@ def test_daily_job_refreshes_returns_before_portfolio_preparation(monkeypatch):
         return (1, ('2026-11-16', 100))
 
     monkeypatch.setattr(_benchmark_etf, 'ensure_fresh', refresh_benchmark)
-    monkeypatch.setattr(m, 'refresh_returns', lambda _: calls.append('returns') or {'saved': ['One'], 'errors': {}})
+    monkeypatch.setattr(m, 'refresh_returns', lambda _, **kwargs: calls.append('returns') or {'saved': ['One'], 'errors': {}})
     monkeypatch.setattr(valuation_dashboard, 'prepare_all', lambda _: calls.append('valuations') or {'saved': [1], 'errors': {}})
     monkeypatch.setattr(m, 'prepare_dashboard_overview', lambda: calls.append('dashboard') or True)
     message, result = valuation.run()

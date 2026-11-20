@@ -18,6 +18,7 @@ class FactsheetStatistics(BaseModel):
     total_return_pct: float
     cagr_pct: float
     volatility_pct: float
+    cvar_95_pct: float | None = None
 
 
 class FactsheetRow(BaseModel):
@@ -33,6 +34,43 @@ class FactsheetRow(BaseModel):
     reason: str | None = None
 
 
+class FactsheetCorrelations(BaseModel):
+    tickers: list[str]
+    start: str
+    end: str
+    observations: int
+    matrix: list[list[float | None]]
+
+
+class FactsheetDownside(BaseModel):
+    key: str
+    start: str
+    end: str
+    observations: int
+    correlation: float | None
+    acwi_mean_pct: float | None
+    hdg_mean_pct: float | None
+    hdg_positive: int
+
+
+class FactsheetAllocationRow(BaseModel):
+    weights: tuple[int, int, int]
+    cagr_pct: float
+    sharpe: float | None
+    volatility_pct: float | None = None
+    cvar_95_pct: float
+    drawdowns_pct: list[float]
+    lower_quartile_pct: float | None
+    worst_pct: float | None
+
+
+class FactsheetAllocations(BaseModel):
+    start: str
+    end: str
+    windows: int
+    rows: list[FactsheetAllocationRow]
+
+
 class FactsheetResponse(BaseModel):
     ready: bool
     period_years: int = 15
@@ -42,6 +80,9 @@ class FactsheetResponse(BaseModel):
     calculation_date: str | None = None
     method: str | None = None
     rows: list[FactsheetRow]
+    correlations: FactsheetCorrelations | None = None
+    downside: list[FactsheetDownside] | None = None
+    allocations: FactsheetAllocations | None = None
 
 
 @router.get('/api/benchmarks/factsheet', response_model=FactsheetResponse)

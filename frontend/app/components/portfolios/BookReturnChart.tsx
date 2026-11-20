@@ -220,13 +220,32 @@ export default function BookReturnChart(
   const anchorDate = data.return_from ?? all[0].date;
   if (points[0]?.date !== anchorDate) points.unshift({ ...all[0], date: anchorDate, cum_pct: 0 });
   if (points.at(-1)?.date !== last.date) points.push(last);
-  const benchmarkComponents = (data as BookValueSeries & {
+  const { benchmark_components: benchmarkComponents = [], return_start_details: startDetails } = data as BookValueSeries & {
     benchmark_components?: WeightedBenchmarkComponent[];
-  }).benchmark_components ?? [];
+    return_start_details?: {
+      first_possible_date: string;
+      limiting_sleeves: { name: string; source: string }[];
+      previous_observation_date: string | null;
+      missing_sleeves: string[];
+    };
+  };
   const dateLabel = (value: string | null | undefined) => value
-    ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+    ? new Intl.DateTimeFormat(copy.lang === 'nl' ? 'nl-NL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
       .format(new Date(`${value}T00:00:00Z`))
     : 'n/a';
+  const nl = copy.lang === 'nl';
+  const startExplanation = startDetails && (
+    <div className="mb-3 space-y-1 border-b border-neutral-800/40 pb-3 text-xs text-fg-soft">
+      <p className="font-semibold text-fg-strong">{nl ? 'Waarom begint de grafiek op' : 'Why the chart starts on'} {dateLabel(anchorDate)}</p>
+      <p>{nl ? 'Dit is de eerste datum waarop alle TopSelecties een opgeslagen waarneming hebben in de bronnen die deze grafiek gebruikt.'
+        : 'This is the first date on which every TopSelectie has a saved observation in the sources used by this chart.'}</p>
+      <p>{startDetails.limiting_sleeves.map(sleeve => `${sleeve.name} (${sleeve.source})`).join(', ')}
+        {' · '}{nl ? 'eerste opgeslagen waarneming' : 'first saved observation'} {dateLabel(startDetails.first_possible_date)}.</p>
+      {startDetails.previous_observation_date && <p>
+        {dateLabel(startDetails.previous_observation_date)} · {nl ? 'Geen waarneming voor' : 'No observation for'} {startDetails.missing_sleeves.join(', ')}.
+      </p>}
+    </div>
+  );
   const weightedBenchmarkReturn = benchmarkComponents.every((component) =>
     component.weight_pct === 0 || component.return_pct != null)
     ? benchmarkComponents.reduce((sum, component) => sum + component.weight_pct * Number(component.return_pct ?? 0) / 100, 0)
@@ -302,14 +321,15 @@ export default function BookReturnChart(
             carries now is the one figure this chart exists to state, and a chip the reader has to
             step over to reach it is a cost with no reader. */}
         {/* AIRS publishes this cumulative return directly. The card names its start and end values, rather than inventing a formula. */}
-        <InfoTip wide className="ml-auto" content={benchmarkComponents.length ? <AspectCard
+        <InfoTip wide className="ml-auto" content={<>{startExplanation}{benchmarkComponents.length ? <AspectCard
           what="Weighted stock-and-bond benchmark return for this risk profile."
           where="Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation."
           how="ACWI and the bond proxy are combined at the configured risk-profile weights; alternatives and cash are excluded."
           calculation={weightedBenchmarkTable} /> : <AspectCard
           what="Portfolio and benchmark cumulative returns in EUR."
           where="Saved portfolio return history and benchmark prices over the same dates."
-          how="Both lines start at zero on the portfolio's opening date; benchmark observations use the latest available close on or before each date." />} />
+          how={startDetails ? 'Both lines start at zero on the first shared observation date.'
+            : "Both lines start at zero on the portfolio's opening date; benchmark observations use the latest available close on or before each date."} />}</>} />
       </div>
       {/* The hover is docked below the plot without reserving permanent empty space. */}
       <div>

@@ -122,6 +122,9 @@ def arm() -> None:
     blend alone, ~20s for the tab's whole fan-out.
     """
     global _armed, _boot_fast_path
+    from runtime_policy import production_automation_enabled
+    if not production_automation_enabled():
+        return
     with _lock:
         if _armed:
             return

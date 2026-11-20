@@ -10,20 +10,40 @@ const pct = (value?: number | null) => value == null ? '—' : `${value >= 0 ? '
 
 export default function HoldingReturnExplanation({ holding: h, asOf, parentBook }: { holding: Holding; asOf?: string | null; parentBook?: string | null }) {
   const [lang] = useLang();
-  const source = useContext(HoldingsColumnSource);
+  const defaultSource = useContext(HoldingsColumnSource);
+  const source = h.own_return_source === 'airs' || h.own_return_source === 'airs_sleeve' ? 'AIRS' : defaultSource;
   const nl = lang === 'nl', facts = useInfoFacts();
   const legs = (h.sources ?? []).filter((leg) => leg.blend_weight_pct != null && leg.return_pct != null);
   const yahoo = h.own_return_source === 'yfinance';
   const legDates = legs.map((leg) => dayOf(leg.as_of)).filter((date): date is string => date != null).sort();
   const canUseParentDate = !yahoo && legs.length <= 1 && (!h.own_return_book || h.own_return_book === parentBook);
   const end = h.own_return_as_of ?? legDates[0] ?? (canUseParentDate ? asOf : null);
+  if (h.own_return_source === 'airs_sleeve') return <SimpleExplanation details={<>
+    <p>{h.name} · {pct(h.own_return_pct)}</p>
+    {h.own_return_from && h.own_return_as_of && <p>{facts.window(h.own_return_from, h.own_return_as_of)}</p>}
+  </>}>{nl ? 'AIRS-rendement van de TopSelectie, herberekend over de gezamenlijke meetperiode.'
+    : 'AIRS return of the TopSelectie, rebased to the shared measurement period.'}</SimpleExplanation>;
+  if (h.own_return_source === 'leonteq_sleeve') {
+    const explanation = h.own_return_pct == null
+      ? (nl ? 'Geen gezamenlijke Leonteq-rendementsperiode beschikbaar.' : 'No shared Leonteq return period is available.')
+      : h.name === 'Cash'
+        ? (nl ? 'Voor cash rekenen we met 0% rendement.' : 'Cash assumes a 0% return.')
+        : (nl ? 'Rendement uit de Leonteq-indexreeks over de gezamenlijke periode.' : 'Return from the Leonteq index series over the shared period.');
+    return <SimpleExplanation details={<>
+      <p>{h.name} · {pct(h.own_return_pct)}</p>
+      {h.own_return_from && h.own_return_as_of && <p>{facts.window(h.own_return_from, h.own_return_as_of)}</p>}
+    </>}>{explanation}</SimpleExplanation>;
+  }
   const explanation = h.own_return_pct == null
     ? source === 'Leonteq'
       ? nl ? 'Deze Leonteq-momentopname bevat geen positierendement voor de meetperiode. AVG Performance wordt niet als YTD-rendement gebruikt.'
         : 'This Leonteq snapshot has no position return for the reporting period. AVG Performance is not substituted for a YTD return.'
       : nl ? 'Onvoldoende waarderingsgegevens om dit rendement te berekenen.' : 'Not enough valuation data to calculate this return.'
     : source === 'Leonteq'
-      ? h.own_return_source === 'leonteq_average'
+      ? h.own_return_source === 'leonteq_sleeve_position'
+        ? nl ? 'Netto positieresultaat gedeeld door openingswaarde plus aankopen, uit de Leonteq-administratie van deze TopSelectie.'
+          : 'Net position profit divided by opening value plus purchases, from this TopSelectie’s Leonteq accounting.'
+      : h.own_return_source === 'leonteq_average'
         ? nl ? 'AVG Performance zoals gerapporteerd door Leonteq. Dit kan een andere meetperiode hebben dan het YTD-portefeuillerendement en wordt niet gebruikt om bijdrage te berekenen.'
           : 'AVG Performance reported by Leonteq. This may cover a different period from the portfolio YTD return and is not used to calculate contribution.'
       : h.own_return_source === 'leonteq_transactions'
@@ -41,6 +61,8 @@ export default function HoldingReturnExplanation({ holding: h, asOf, parentBook 
     <p>{h.name} · {pct(h.own_return_pct)}{h.own_return_source === 'leonteq_average' ? ' · Leonteq AVG Performance' : ' · EUR'}</p>
     <p>{yahoo ? 'Yahoo Finance' : source}{h.own_return_book ? ` · ${h.own_return_book}` : ''} · {facts.window(h.own_return_from, end)}</p>
     {legs.length > 1 && legs.map((leg, index) => <p key={index}>{leg.label ?? leg.book ?? 'AIRS'}: {leg.blend_weight_pct?.toFixed(2)}% × {pct(leg.return_pct)} · {facts.date(leg.as_of)}</p>)}
-    {h.own_return_estimated && <p>{nl ? 'De beginkoers is geschat.' : 'The opening price is estimated.'}</p>}
+    {h.own_return_estimated && <p>{h.own_return_source === 'leonteq_sleeve_position'
+      ? (nl ? 'De Leonteq-administratie voor deze periode bevat schattingen.' : 'Leonteq accounting for this period includes estimates.')
+      : (nl ? 'De beginkoers is geschat.' : 'The opening price is estimated.')}</p>}
   </>}>{explanation}</SimpleExplanation>;
 }

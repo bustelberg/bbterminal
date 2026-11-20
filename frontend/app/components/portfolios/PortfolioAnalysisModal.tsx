@@ -30,6 +30,7 @@ import {
 import { trace, traceError } from '../../../lib/debugTrace';
 import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { BookValueSeries, EtfSectorAllocationResponse, EtfRegionAllocationResponse, EtfCurrencyAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
+import type { LeonteqPerformanceSource } from './leonteqPerformanceBundle';
 import { addEtfRegionWeights } from './etfRegionLookThrough';
 import { currentExposureRows } from './currentExposureRows';
 import { sectorHoldingsCompanies } from './sectorHoldingsRows';
@@ -288,7 +289,7 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
   const r2 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100) / 100);
   const p = r2(r?.portfolio_ytd_pct);
   const b = r2(r?.benchmark_ytd_pct);
-  const comparisonUnavailable = r?.source === 'leonteq' && r.ytd_excess_pct == null;
+  const comparisonUnavailable = (r?.source === 'leonteq' || r?.source === 'mixed') && r.ytd_excess_pct == null;
   const excess = comparisonUnavailable ? null : p == null || b == null ? r?.ytd_excess_pct : p - b;
   //  Which benchmark this is. The tile reads the index ETF's own price series where one exists;
   // the Attribution panel below still decomposes the constituent reconstruction, because an ETF
@@ -306,7 +307,8 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
   }, copy.lang as 'en' | 'nl');
   // The portfolio leg's own source follows the Book/Strategy toggle — AIRS's flow-aware account
   // return, or our yfinance reconstruction of the model.
-  const pSrc: SourceKey = r?.source === 'leonteq' ? 'leonteq' : r?.source === 'book' ? 'airs_att' : 'yfinance';
+  const pSrc: SourceKey = r?.source === 'mixed' ? 'derived'
+    : r?.source === 'leonteq' ? 'leonteq' : r?.source === 'book' ? 'airs_att' : 'yfinance';
   const reportedReturn = r?.source === 'book' || r?.source === 'leonteq';
   // Chips stretch to equal height; operators keep their own vertical centre.
   const op = 'text-base font-mono text-fg-faint shrink-0 self-center';
@@ -331,9 +333,11 @@ function Scorecard({ returns, benchmark, name, variant, onReload, fillWidth = fa
       <Chip label={`${name} (YTD) €`} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
         prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of}
           kind={reportedReturn ? undefined : 'formula'}
-          what={r?.source === 'leonteq' ? 'Year-to-date return reported by Leonteq LYNQS.' : copy.score.portfolioWhat}
-          note={r?.source === 'leonteq' ? undefined : copy.score.portfolioNote}
-          how={reportedReturn ? undefined : copy.score.portfolioHowModel} />} />
+          what={r?.source === 'mixed' ? 'Leonteq stock sleeves combined with AIRS bond and alternatives returns over shared dates.'
+            : r?.source === 'leonteq' ? 'Year-to-date return reported by Leonteq LYNQS.' : copy.score.portfolioWhat}
+          note={r?.source === 'leonteq' || r?.source === 'mixed' ? r.book_reason ?? undefined : copy.score.portfolioNote}
+          how={r?.source === 'mixed' ? 'Each sleeve’s return multiplied by its normalized AIRS weight.'
+            : reportedReturn ? undefined : copy.score.portfolioHowModel} />} />
       <span className={op} aria-hidden>−</span>
       {/*  `at={undefined}` SO THIS BADGE DOES NOT INHERIT THE HOLDINGS' SCAN TIME. The subtree is
           wrapped in `ProvenanceFetchedAt at={holdings_fetched_at}` — which is when we last read
@@ -438,9 +442,10 @@ function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
 
 type CertificateAdjustments = NonNullable<NonNullable<ModelPortfolioAnalysis['realised']>['certificate_adjustments']>;
 
-function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateAdjustments = [],
+function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateAdjustments = [], holdings,
   reportedReturn, comparable = false }: {
   slices: AllocSlice[];
+  holdings?: BookHolding[];
   /**  The year's contribution from positions SOLD OUT during it. They have no asset class, so no
    *  bar can carry them — without this the slices are a set of parts that misses its own total. */
   soldContribution?: number | null;
@@ -529,6 +534,9 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
       <div className="flex flex-col gap-0.5">
         {ordered.map((s) => {
           const active = selected === s.bucket;
+          const members = holdings?.filter(row => row.bucket === s.bucket);
+          const covered = members?.filter(row => row.contribution_pct != null).length ?? 0;
+          const partial = members && covered > 0 && covered < members.length;
           const Row = toggle ? 'button' : 'div';
           return (
             <Row key={s.bucket} {...(toggle ? { type: 'button' as const, onClick: () => toggle(s.bucket) } : {})}
@@ -664,7 +672,9 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   capital, which is the thing that legitimately adds. Its own return is still in
                   the Holdings table below, in the column labelled Return. */}
               <span className={`w-16 shrink-0 text-right font-mono text-[12px] tabular-nums ${retTone(s.contribution_pct)}`}
-                title={copy.allocation.contributionTitle(copy.bucket(bucketLabel(s.bucket)), ppt(s.contribution_pct), fmtRet(s.return_pct))}>
+                title={partial ? (copy.lang === 'nl' ? `Bijdrage van ${covered} van ${members.length} posities.`
+                  : `Contribution from ${covered} of ${members.length} positions.`)
+                  : copy.allocation.contributionTitle(copy.bucket(bucketLabel(s.bucket)), ppt(s.contribution_pct), fmtRet(s.return_pct))}>
                 {ppt(s.contribution_pct)}
               </span>
             </Row>
@@ -684,9 +694,16 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             </span>
           </div>
         )}
-        {certificateAdjustments.filter(item => item.contribution_pct != null && Math.abs(item.contribution_pct) >= 0.005).map(item => {
-          const label = item.label === 'Leonteq AMC fees' ? (copy.lang === 'nl' ? 'Kosten' : 'Fees') : item.label;
-          return <div key={item.label} aria-label={label} className="flex items-center gap-2 pt-1 text-[11px]">
+        {certificateAdjustments.filter(item => item.contribution_pct != null
+          && (Math.abs(item.contribution_pct) >= 0.005 || item.label === 'Total unallocated')).map(item => {
+          const unallocated = item.label === 'Total unallocated';
+          const label = unallocated && copy.lang === 'nl' ? 'Totaal niet toegerekend'
+            : item.label === 'Leonteq AMC fees' ? (copy.lang === 'nl' ? 'Kosten' : 'Fees') : item.label;
+          return <div key={item.label} aria-label={label}
+            title={unallocated ? (copy.lang === 'nl'
+              ? 'Totale bijdrage die niet aan individuele posities is toegerekend.'
+              : 'Total contribution without matched position attribution.') : undefined}
+            className="flex items-center gap-2 pt-1 text-[11px]">
             <span className="text-fg-faint">{label}</span>
             <span className={`ml-auto font-mono tabular-nums ${retTone(item.contribution_pct)}`}>{ppt(item.contribution_pct)}</span>
           </div>;
@@ -2111,12 +2128,21 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
   };
 }
 
-function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
+type ToppenbergSleeveHolding = {
+  name: string;
+  bucket: string;
+  source: 'airs' | 'leonteq';
+  weight_pct: number;
+  return_pct: number | null;
+  contribution_pct: number | null;
+};
+
+function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised, toppenberg,
   lookThrough, onLookThroughChange, onSectorOverride,
   onSectorAllocation, onSummary, onRiskColumnsChange, onRefreshSoldPrice }: {
   onRefreshSoldPrice: (isin: string, name: string) => Promise<string | null>;
   onRiskColumnsChange: (enabled: boolean) => void;
-  holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+  holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null; toppenberg?: boolean;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
   lookThrough: boolean;
   onLookThroughChange?: (value: boolean) => void;
@@ -2150,7 +2176,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    *  behind a certificate, and this is the only thing that tells the two apart. */
   bookName?: string | null;
 }) {
-  const instrumentReturnLabel = useHoldingReturnLabel();
+  const sourceReturnLabel = useHoldingReturnLabel();
   const portfolioSource = useContext(HoldingsColumnSource);
   const bookSource: SourceKey = portfolioSource === 'Leonteq' ? 'leonteq' : 'airs_volk';
   const [sortKey, setSortKey] = useState<HoldingSortKey>('weight');
@@ -2162,6 +2188,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    * switch on look-through to inspect the underlying positions of held certificates.
    */
   const copy = useAnalyseCopy();
+  const instrumentReturnLabel = toppenberg ? (copy.lang === 'nl' ? 'Rendement' : 'Return') : sourceReturnLabel;
   const facts = useInfoFacts();
   /** Number of certificates with available underlying routes. Count routes rather than the net
    *  row reduction: a certificate with one underlying is still a meaningful look-through. */
@@ -2202,9 +2229,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   const groups = [...new Set([...order, ...shownHoldings.map((h) => h.bucket)])]
     .map((bucket) => {
       const rows = shownHoldings.filter((h) => h.bucket === bucket);
+      const slice = slices?.find((s) => s.bucket === bucket);
+      const ret = classWeightedReturn(rows, rows.length > 0 && bucket === CASH_BUCKET, toppenberg);
+      const totals = sumResults(rows);
       return {
         bucket,
-        slice: (slices ?? []).find((s) => s.bucket === bucket),
+        slice,
         rows,
         // The heading describes the rows immediately below it.  The allocation slice always
         // uses the looked-through book, while a folded certificate can hide a small cash leg
@@ -2219,11 +2249,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
         // shown. `zeroWhenNoOpening` exists to print cash's certain 0% instead of a dash — but on
         // an EMPTY cash class that becomes 0.00% stated about nothing held, which is a different
         // claim from "the cash we hold earned nothing". No rows, no rate.
-        ret: classWeightedReturn(rows, rows.length > 0 && bucket === CASH_BUCKET),
+        ret,
         //  Plain sums, and they are allowed to be plain BECAUSE they are euros. A euro column
         // adds; that is the whole reason the result breakdown is in euros and the weight-based
         // arguments elsewhere in this file do not apply to it.
-        sum: sumResults(rows),
+        sum: totals,
       };
     })
     //  An empty class is kept when it is one of the four the modal always shows — otherwise the
@@ -2261,7 +2291,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   heldSum.unrealised = add2(heldSum.unrealised, sum(certificateAdjustments.map((a) => a.unrealised_eur)));
   heldSum.realised = add2(heldSum.realised, sum(certificateAdjustments.map((a) => a.realised_result_eur)));
   heldSum.result = add2(heldSum.result, sum(certificateAdjustments.map((a) => a.result_eur)));
-  heldSum.contribution = add2(heldSum.contribution, sum(certificateAdjustments.map((a) => a.contribution_pct)));
+  heldSum.contribution = add2(toppenberg ? realised?.held_pct ?? heldSum.contribution : heldSum.contribution,
+    sum(certificateAdjustments.map((a) => a.contribution_pct)));
   const heldCap = holdings.reduce((s, h) => s + (h.avg_capital_eur ?? 0), 0);
   const grand = {
     //  The held side only, and not `add2(…, soldSum.…)` LIKE ITS NEIGHBOURS. AIRS's split lives
@@ -2574,7 +2605,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {instrumentReturnLabel}{caret('return')}
               </th>
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
-                {copy.holdings.contribution}{realised?.estimated ? ' ≈' : ''}{caret('contribution')}
+                {copy.holdings.contribution}{caret('contribution')}
               </th>
             </tr>
           </thead>
@@ -2666,7 +2697,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     <p>{facts.dated(portfolioSource, asOf)}</p>
                     {g.ret.pct != null && g.ret.coveredPct < 99.5 && <p>{copy.classRow.coverageTitle(
                       num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.missing)}</p>}
-                  </>}>{g.ret.pct == null
+                  </>}>{toppenberg
+                    ? (copy.lang === 'nl' ? 'Leonteq-rendementen gewogen met het begingewicht van de gemeten posities in deze groep.'
+                      : 'Leonteq returns weighted by the opening weights of measured positions in this group.')
+                    : g.ret.pct == null
                     ? copy.classRow.noReturn(copy.bucket(bucketLabel(g.bucket)))
                     : g.bucket === CASH_BUCKET && g.ret.startEur == null ? copy.classRow.cashReturnExplanation
                       : portfolioSource === 'Leonteq'
@@ -2678,7 +2712,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {ppt(g.sum.contribution)}
                   {/* Contribution deliberately remains the accounting Result over book opening
                       capital. It is independent of the AIRS-return subtotal beside it. */}
-                  <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution"
+                  <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution" toppenberg={toppenberg}
                       amount={g.sum.result} total={realised?.basis_eur} value={g.sum.contribution} asOf={asOf} />} />
                 </td>
               </tr>
@@ -2740,7 +2774,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   ? stockSectorParts(part.rows)
                   : [{ key: 'all', label: '', rows: part.rows }]).map((sector) => {
                   const sectorSum = sumResults(sector.rows);
-                  const sectorReturn = classWeightedReturn(sector.rows);
+                  const sectorReturn = classWeightedReturn(sector.rows, false, toppenberg);
                   const groupedBySector = Boolean(sector.label);
                   // Company parts close each named sector. The ETF part has no inner sector
                   // header—the part header already says Stock ETFs—but still closes with the
@@ -2905,7 +2939,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   </td>}
                   <td className="py-1.5 text-right font-mono text-fg tabular-nums whitespace-nowrap">
                     {num2(h.weight_now_pct ?? 0)}%
-                    <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="weight"
+                    <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="weight" toppenberg={toppenberg}
                       amount={h.current_value_eur} total={grand.valuenow} value={h.weight_now_pct} asOf={asOf} />} />
                   </td>
                   {/*  EVERY ONE A DASH WHERE THERE IS NOTHING, NEVER A €0. "Nothing was sold" and
@@ -3017,9 +3051,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         here would be a second, vaguer telling of something already on screen — and
                         the ⓘ carries the arithmetic. The ƒ above stays, because "no AIRS book
                         values this at all" is NOT visible anywhere else on the row. */}
-                    {h.own_return_estimated && (
-                      <span className="ml-1 text-warn-400" title={copy.row.interpolated}>≈</span>
-                    )}
                     {/*  THE CARD'S *SOURCE* CHANGES PER ROW, WHICH IS THE WHOLE REASON IT IS ON
                         THE CELL. Most rows are AIRS's own valuation; a row inside a certificate
                         (or bought mid-window) has no AIRS return of its own and is priced off our
@@ -3029,8 +3060,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   </td>
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
                     {ppt(h.contribution_pct)}
-                    <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution"
-                      amount={h.result_eur} total={realised?.basis_eur} value={h.contribution_pct} asOf={asOf} />} />
+                    <InfoTip className="ml-1" content={toppenberg && lookThrough
+                      ? <SimpleExplanation details={h.own_return_from && h.own_return_as_of
+                        ? <p>{facts.window(h.own_return_from, h.own_return_as_of)}</p> : undefined}>
+                        {h.own_return_source === 'airs' || h.own_return_source === 'airs_sleeve'
+                          ? (copy.lang === 'nl' ? 'AIRS-bijdrage gemeten op TopSelectie-niveau.' : 'AIRS contribution is measured at the TopSelectie level.')
+                          : h.contribution_pct == null
+                          ? (copy.lang === 'nl' ? 'Geen opgeslagen Leonteq-bijdrage voor deze positie.' : 'No saved Leonteq contribution for this position.')
+                          : (copy.lang === 'nl' ? 'Leonteq-positiebijdrage maal het genormaliseerde AIRS-gewicht van de TopSelectie.' : 'Leonteq position contribution times the TopSelectie’s normalized AIRS weight.')}
+                      </SimpleExplanation>
+                      : <HoldingsColumnExplanation kind="contribution" toppenberg={toppenberg}
+                        amount={h.result_eur} total={realised?.basis_eur} value={h.contribution_pct} asOf={asOf} />} />
                   </td>
                 </tr>
                 ); })}
@@ -3349,7 +3389,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       </>}>{copy.lang === 'nl'
                         ? 'Som van de berekende bijdragen; het verschil met het gerapporteerde rendement telt niet mee.'
                         : 'Sum of calculated contributions; the difference to the reported return is excluded.'}</SimpleExplanation>
-                    : <HoldingsColumnExplanation kind="contribution" amount={grand.result}
+                    : <HoldingsColumnExplanation kind="contribution" toppenberg={toppenberg} amount={grand.result}
                         total={realised?.basis_eur} value={grand.contribution} asOf={asOf} />} />
                 </td>
               </tr>
@@ -3395,12 +3435,14 @@ function SleeveTile({ bucket, slices, asOf }: {
  * an accounting contribution and cannot reconcile to the allocation legend. */
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
-function SleeveBreakdown({ holdings, bucket, groupCash, asOf, onRefresh }: {
-  holdings: BookHolding[]; bucket: string; groupCash: boolean; asOf?: string | null;
+function SleeveBreakdown({ holdings, bucket, groupCash, asOf, onRefresh, airs }: {
+  holdings: BookHolding[]; bucket: string; groupCash: boolean; asOf?: string | null; airs?: boolean;
   onRefresh?: () => Promise<string | null>;
 }) {
-  const instrumentReturnLabel = useHoldingReturnLabel();
+  const sourceReturnLabel = useHoldingReturnLabel();
+  const leonteq = useContext(HoldingsColumnSource) === 'Leonteq' && !airs;
   const copy = useAnalyseCopy();
+  const instrumentReturnLabel = airs ? (copy.lang === 'nl' ? 'AIRS-rendement' : 'AIRS return') : sourceReturnLabel;
   // Sortable table — click a header to toggle direction. Default: weight, largest first.
   const [sortKey, setSortKey] = useState<SleeveSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
@@ -3475,8 +3517,11 @@ function SleeveBreakdown({ holdings, bucket, groupCash, asOf, onRefresh }: {
                 <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.holdings.weightNow}{caret('weight')}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{instrumentReturnLabel}{caret('return')}</th>
                 <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}
-                  <Provenance source="airs_volk" kind="formula" asOf={asOf} onRefresh={onRefresh}
-                    what={copy.lang === 'nl' ? 'Bijdrage aan het gehele portefeuillerendement, in procentpunten.' : 'Contribution to the whole portfolio return, in percentage points.'} />
+                  <Provenance source={leonteq ? 'leonteq' : 'airs_volk'} kind="formula" asOf={asOf} onRefresh={onRefresh}
+                    what={copy.lang === 'nl' ? 'Bijdrage aan het gehele portefeuillerendement, in procentpunten.' : 'Contribution to the whole portfolio return, in percentage points.'}
+                    note={leonteq ? (copy.lang === 'nl'
+                      ? 'Een streepje betekent dat er geen passende Leonteq-positiebijdrage is opgeslagen voor deze meetperiode.'
+                      : 'A dash means no matching Leonteq position contribution is saved for this measurement period.') : undefined} />
                 </th>
               </tr>
             </thead>
@@ -3568,12 +3613,13 @@ const HEADER_CTL_BASE = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border bg
 const HEADER_CTL = `${HEADER_CTL_BASE} border-neutral-700 text-fg-soft `
   + 'hover:text-accent-300 hover:border-accent-500/50';
 export default function PortfolioAnalysisModal({
-  id, name, basket, leonteqPortfolio, reportAccount, onRefresh, onRefreshContribution, refreshing = false, refreshTick = null,
+  id, name, basket, leonteqPortfolio, toppenbergAccount, reportAccount, onRefresh, onRefreshContribution, refreshing = false, refreshTick = null,
   refreshSeq = 0, onClose,
 }: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
   /** Authoritative Leonteq portfolio, with source-valued holdings and reported returns. */
   leonteqPortfolio?: string;
+  toppenbergAccount?: string;
   /** Exact dashboard account, including accounts without a linked model. */
   reportAccount?: string;
   /**
@@ -3628,7 +3674,7 @@ export default function PortfolioAnalysisModal({
    */
   // Toppenberg is normally analysed through the companies inside its linked certificates. This
   // only seeds the modal; the visible checkbox remains the reader's choice afterwards.
-  const canLookThrough = !leonteqPortfolio && defaultLookThroughCertificates(name, reportAccount);
+  const canLookThrough = Boolean(toppenbergAccount) || (!leonteqPortfolio && defaultLookThroughCertificates(name, reportAccount));
   const [lookThroughSelected, setLookThrough] = useState(canLookThrough);
   const lookThrough = canLookThrough && lookThroughSelected;
   // Which allocation class the reader picked, to break down. Null = NOTHING selected — the whole
@@ -3646,7 +3692,11 @@ export default function PortfolioAnalysisModal({
     allocation?: EtfSectorAllocationResponse;
   } | null>(null);
   const initialAnalysisKey = analysisRequestKey(reqKey, benchmark, source, '', lookThrough, refreshSeq);
-  const [data, setData] = useState<(ModelPortfolioAnalysis & { stock_etfs?: StockEtfAllocations }) | null>(() =>
+  const [data, setData] = useState<(ModelPortfolioAnalysis & {
+    stock_etfs?: StockEtfAllocations;
+    sleeve_holdings?: ToppenbergSleeveHolding[];
+    monthly_performance?: LeonteqPerformanceSource;
+  }) | null>(() =>
     readPrefetchedAnalysis<ModelPortfolioAnalysis>(initialAnalysisKey) ?? null);
   // Paint prepared holdings first. Holdings requests optional history after mounting if the
   // reader has risk columns enabled; saved preferences must not block the opening screen.
@@ -3800,7 +3850,9 @@ export default function PortfolioAnalysisModal({
       try {
         const analysis = cachedDetails ? Promise.resolve(cachedDetails) : loadPrefetchedAnalysis(requestKey, async () => {
           const r = leonteqPortfolio
-            ? await apiFetch(`${API_URL}/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}/analysis?benchmark=${benchmark}&include_holding_risk=${includeHoldingRisk}`,
+            ? await apiFetch(`${API_URL}${toppenbergAccount
+              ? `/api/airs/dashboard/toppenberg/${encodeURIComponent(toppenbergAccount)}`
+              : `/api/leonteq/management/topselecties/${encodeURIComponent(leonteqPortfolio)}`}/analysis?benchmark=${benchmark}&include_holding_risk=${includeHoldingRisk}`,
               { cache: 'no-store', noReadCache: true })
             : isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
@@ -3872,7 +3924,7 @@ export default function PortfolioAnalysisModal({
     // rebuilds the composition, prices and FX this payload is derived from, so without it the
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk, leonteqPortfolio]);
+  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk, leonteqPortfolio, toppenbergAccount]);
 
   // Receiving the payload and displaying it are different moments. Keep the sector job running
   // through the commit and the next paint, so its completed state cannot precede the changed row.
@@ -4014,6 +4066,17 @@ export default function PortfolioAnalysisModal({
   // 'Equity' (Stocks) keeps the sector / benchmark composition view.
   const sleeve = selected && selected !== 'Equity' ? selected : null;
 
+  const toppenbergHoldings = toppenbergAccount ? data?.sleeve_holdings?.map((row): BookHolding => ({
+    name: row.name,
+    bucket: row.bucket ?? (row.name === 'Cash' ? CASH_BUCKET : EQUITY_BUCKET),
+    weight_now_pct: row.weight_pct,
+    weight_start_pct: row.return_pct == null ? null : row.weight_pct,
+    own_return_pct: row.return_pct,
+    own_return_source: 'leonteq_sleeve',
+    own_return_from: data.returns?.ytd_from,
+    own_return_as_of: data.returns?.portfolio_as_of,
+    contribution_pct: row.contribution_pct,
+  })) : undefined;
   const riskWeightContext = airsRiskWeightContext(data?.book_holdings ?? [], lookThrough);
   return (
     /*  THE BOOK'S FETCH TIME, FOR EVERY ⓘ IN HERE — this is what makes the modal and the row
@@ -4126,6 +4189,7 @@ export default function PortfolioAnalysisModal({
             <div className="mb-4 grid min-w-0 grid-cols-[minmax(0,1fr)] items-start justify-items-center gap-8 @[79rem]/analyse:grid-cols-[41rem_minmax(0,1fr)]">
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
+                  holdings={toppenbergAccount ? data.book_holdings : undefined}
                   variant={data.variant} bands={data.bands}
                   certificateAdjustments={data.realised?.certificate_adjustments}
                   reportedReturn={data.realised?.book_ytd_pct}
@@ -4174,7 +4238,7 @@ export default function PortfolioAnalysisModal({
                       onReload={() => setReloadSeq((n) => n + 1)} fillWidth />
                         <nav aria-label={copy.lang === 'nl' ? 'Verdieping' : 'Further analysis'}
                           className="col-start-1 row-start-2 flex w-max max-w-full min-h-11 items-stretch justify-self-end self-stretch gap-2 sm:col-span-5 @[44rem]/overview:col-span-1 @[44rem]/overview:col-start-6 @[44rem]/overview:row-start-1">
-                          {(leonteqPortfolio || reportAccount || (!isBasket && id != null)) && (
+                          {(toppenbergAccount || leonteqPortfolio || reportAccount || (!isBasket && id != null)) && (
                             <button type="button" onClick={() => { setRisk(false); setReportOpen(true); }}
                               title={copy.score.attributionTitle}
                               className="flex w-auto flex-none items-center justify-center whitespace-nowrap rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
@@ -4265,7 +4329,8 @@ export default function PortfolioAnalysisModal({
                     ? (copy.lang === 'nl' ? 'Posities laden mislukt.' : 'Could not load holdings.')
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
-              ) : <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+              ) : <PortfolioHoldings holdings={(lookThrough ? data.book_holdings : toppenbergHoldings ?? data.book_holdings) ?? []}
+                slices={data.allocation} toppenberg={toppenbergHoldings != null}
                 onRefreshSoldPrice={async (isin, companyName) => {
                   const { done } = await startJob(
                     `${API_URL}/api/airs/sold-holdings/${encodeURIComponent(isin)}/refresh-price/job`,
@@ -4294,7 +4359,7 @@ export default function PortfolioAnalysisModal({
                   });
                 }}
                 onSectorOverride={setSectorFor}
-                note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
+                note={data.book_note} bookName={data.book_portefeuille} realised={toppenbergAccount && !lookThrough ? undefined : data.realised}
                 benchmark={data.benchmark ?? benchmark}
                 /*  THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
                    effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
@@ -4480,8 +4545,10 @@ export default function PortfolioAnalysisModal({
           <div className="min-h-0 flex-1 overflow-auto">
           <MonthlyReportPanel portefeuille={leonteqPortfolio ? undefined : reportAccount ?? data.book_portefeuille}
             leonteqPortfolio={leonteqPortfolio} leonteqReturns={leonteqPortfolio ? data.returns ?? undefined : undefined}
+            toppenbergPerformance={toppenbergAccount ? data.monthly_performance ?? {} : undefined}
             benchmarkName={data.benchmark ?? benchmark} name={name} variant={data.variant}
-            refreshSeq={leonteqPortfolio ? refreshSeq : undefined} />
+            refreshSeq={leonteqPortfolio ? refreshSeq : undefined}
+            onRefreshLeonteq={leonteqPortfolio ? onRefresh : undefined} refreshingLeonteq={refreshing} />
           </div>
         </div>
       )}

@@ -24,6 +24,8 @@ class _FakeSched:
 
 
 def _setup(monkeypatch, *, stale: bool, max_per_day: int = 3) -> _FakeSched:
+    monkeypatch.setenv('APP_ENV', 'production')
+    monkeypatch.delenv('DISABLE_SCHEDULER', raising=False)
     fake = _FakeSched()
     monkeypatch.setattr(scheduler, "_scheduler", fake)
     # `maybe_schedule_price_retry` lazy-imports this from ingest.phases.prices,
